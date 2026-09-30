@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f5f4ef" />
+  <title>Mitra — Economic Control Plane</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <a class="brand" href="#overview" aria-label="Mitra home">mitra<span class="brand-mark">.</span></a>
+        <span class="env-pill">DEVNET</span>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <a class="nav-item" data-route="overview" href="#overview"><span class="nav-glyph">◫</span>Overview</a>
+        <a class="nav-item" data-route="runs" href="#runs"><span class="nav-glyph">↳</span>Runs<span class="nav-count">8</span></a>
+        <a class="nav-item" data-route="vaults" href="#vaults"><span class="nav-glyph">▣</span>Vaults</a>
+        <a class="nav-item" data-route="agents" href="#agents"><span class="nav-glyph">◌</span>Agents</a>
+        <a class="nav-item" data-route="policies" href="#policies"><span class="nav-glyph">⌁</span>Policies</a>
+        <div class="nav-separator"></div>
+        <a class="nav-item" data-route="obligations" href="#obligations"><span class="nav-glyph">⇄</span>Obligations</a>
+        <a class="nav-item" data-route="clearing" href="#clearing"><span class="nav-glyph">≋</span>Clearing</a>
+        <a class="nav-item" data-route="settlements" href="#settlements"><span class="nav-glyph">✓</span>Settlements</a>
+        <div class="nav-separator"></div>
+        <a class="nav-item" data-route="integrations" href="#integrations"><span class="nav-glyph">◇</span>Integrations</a>
+        <a class="nav-item" data-route="evidence" href="#evidence"><span class="nav-glyph">⌗</span>Evidence</a>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="network-health">
+          <span class="health-dot"></span>
+          <div><strong>All systems nominal</strong><small>Solana devnet · 438ms</small></div>
+        </div>
+        <button class="workspace-switcher" type="button">
+          <span class="workspace-avatar">M</span>
+          <span><strong>Mitra Labs</strong><small>Protocol workspace</small></span>
+          <span class="chevron">⌄</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb" id="breadcrumb">Console / Overview</div>
+        <div class="top-actions">
+          <button class="search-button" type="button" id="searchButton"><span>⌕</span><span>Search</span><kbd>⌘K</kbd></button>
+          <button class="icon-button" aria-label="Notifications">◌</button>
+          <button class="primary-button" id="newRunButton" type="button">New run</button>
+        </div>
+      </header>
+
+      <section id="view" class="view" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div class="command-palette" id="commandPalette" hidden>
+    <button class="palette-backdrop" id="paletteBackdrop" aria-label="Close search"></button>
+    <div class="palette-card" role="dialog" aria-modal="true" aria-label="Search Mitra">
+      <div class="palette-input-row"><span>⌕</span><input id="paletteInput" autocomplete="off" placeholder="Search runs, vaults, agents, receipts…" /><kbd>ESC</kbd></div>
+      <div class="palette-results" id="paletteResults"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

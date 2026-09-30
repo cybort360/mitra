@@ -1,0 +1,6 @@
+import Link from "next/link";
+import { NewRunForm } from "@/components/new-run-form";
+import { Badge, PageHeader, Panel } from "@/components/ui";
+import { runs } from "@/lib/store/seed";
+import { money } from "@/lib/domain/format";
+export default function Runs(){return <><PageHeader eyebrow="Autonomous economic interactions" title="Runs" subtitle="A Run is the human-readable envelope around one complete Mitra lifecycle: intent, authority, reservation, execution, recovery, obligations, clearing and settlement." actions={<NewRunForm/>}/><Panel title="All runs" meta={`${runs.length} canonical interactions`}><div className="tableWrap"><table className="table"><thead><tr><th>Run</th><th>Network</th><th>Budget</th><th>Reserved</th><th>Spent</th><th>Provider</th><th>Stage</th><th>Status</th></tr></thead><tbody>{runs.map(r=><tr key={r.runId}><td><Link href={`/runs/${r.runId}`} className="entity"><span className="entityIcon">R</span><span className="entityMeta"><strong>{r.title}</strong><small className="mono">{r.runId}</small></span></Link></td><td>{r.network}</td><td className="mono">{money(r.budget.amount)}</td><td className="mono">{money(r.reserved)}</td><td className="mono">{money(r.spent)}</td><td className="mono">{r.provider??"—"}</td><td>{r.currentStage}</td><td><Badge value={r.status}/></td></tr>)}</tbody></table></div></Panel></>}
