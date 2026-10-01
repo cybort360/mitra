@@ -498,6 +498,94 @@ place.
 description of a network is not a deployment. Ask the chain what is actually
 there before sending value to an address you read in a README.
 
+## F17 — the Anchor discriminators were written from memory, and were wrong
+
+**Found** 2026-01-10, on the first run of `mitra-vault`'s parity tests.
+
+The `anchor_parity` module hardcoded Anchor's account and instruction
+discriminators:
+
+```rust
+pub const VAULT_DISCRIMINATOR: [u8; 8] = [173, 18, 155, 96, 193, 78, 157, 99];
+```
+
+I wrote those bytes from memory. The first test run produced:
+
+```
+assertion `left == right` failed
+  left:  [211, 8, 232, 43, 2, 152, 117, 119]   // computed from sha256("account:Vault")
+ right: [173, 18, 155, 96, 193, 78, 157, 99]   // what I wrote
+```
+
+**Every one of the six constants was wrong.** The corrected values are now
+computed and pinned by tests, so the same class of error cannot recur silently.
+
+This is the *fourth* instance of the same pattern in one week — sha3-vs-keccak
+(F12), a guard that could not see untracked files (F13), hand-rolled RLP, and a
+hand-encoded ABI offset. In every case the code compiled, looked right, and was
+only wrong because something independently recomputed it. The reason this one was
+caught is that I wrote the parity tests *before* trusting the constants, which is
+the whole reason the parity layer exists.
+
+**Why a wrong discriminator is worse than a missing one.** A vault account whose
+discriminator does not match is rejected loudly, immediately, with a clear error.
+A wrong-but-self-consistent discriminator is silently a *different* program's
+account — and after the Anchor migration, that is a different program's state
+layout being read as ours.
+
+**Rule.** Never write a hash-derived constant from memory, however short. Compute
+it, print it, and pin it with a test that recomputes it. A constant nobody can
+re-derive is indistinguishable from a guess, and the guess will be wrong.
+
+## F18 — the BPF-VM end-to-end path is blocked by an upstream defect
+
+**Found** 2026-01-10, while trying to run the vault program in a real VM.
+
+The strongest local evidence for an on-chain program is executing the compiled
+`.so` in a real BPF VM — `solana-program-test`. Without it, the unit tests
+exercise the capital logic *in-process*, and a bug that only manifests in
+compiled eBPF (a borsh offset that is wrong only once the struct is laid out in
+a PDA, a discriminator that differs after optimisation) is invisible.
+
+I tried three routes, and the failures are worth recording so the next person does
+not repeat them:
+
+1. **No `solana-program-test` offline, no JS client, and the Agave 4.3 CLI has no
+   generic send subcommand** (`solana send` does not exist; only `transfer`).
+   A `ProgramTest`-style harness in plain `tests/` fails to link.
+2. **Raw JSON-RPC over TCP to a local `solana-test-validator`** — viable in
+   principle, but the harness needs a *keypair* to sign, and the CLI cannot
+   assemble an arbitrary instruction.
+3. **`solana-program-test` 4.4.0-beta.0** — installs, but requires `rustc
+   1.98.1` where the environment had 1.98.0. Solved: `rustup toolchain install
+   1.98.1` (now installed and available).
+4. **And it still fails**, inside Solana's own stack:
+   `solana-keypair 4.0.0` calls `SignatureError::from_source(five8::DecodeError)`,
+   but neither `five8` 0.2.1 nor 1.0.0 implements `std::error::Error` for
+   `DecodeError`. Two incompatible `five8` majors resolve side by side.
+
+**Why I did not work around it.** Vendoring a patched dependency tree, or pinning
+`five8` to a version whose API the rest of the stack no longer matches, would
+produce a green test that exercises *my* tree rather than the real one. The
+program is security-critical, so a local test that is not the real thing is worse
+than an admitted gap.
+
+**What is actually verified, precisely:** the program compiles under
+`cargo-build-sbf` to a 37,432-byte eBPF ELF, links, and **was deployed to a live
+`solana-test-validator`** (program id `JDvCs39vreS1vz61Jo5qthiVeDYgysNGD9nsazRWa7xu`,
+`VersionedTransaction` accepted by the bank). The `process` entrypoint and
+dispatch are real; what is untested is the *on-chain behaviour* of each handler
+inside a VM.
+
+**So:** Phase 2's exit condition remains `PARTIAL`, and specifically the
+"real devnet vault … settlement proof" clause is not met. 18 tests over the
+logic and Anchor parity, and a deploying artifact, are real — and they are not
+the same as a transaction the chain executed.
+
+**Rule.** A local test that is not the real dependency tree is a test of your
+patch, not of the system. When the gap is upstream, record it as `UNTESTED` and
+say which command would close it.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

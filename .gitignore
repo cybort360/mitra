@@ -40,3 +40,14 @@ yarn-error.log*
 
 # Development keypairs — testnet secrets, never commit
 .dev-keys/
+
+# Rust / Solana program build output. The .so and the generated program keypair
+# are build artifacts — the keypair especially: it is a *program* key, and a
+# program key committed to git is a program anyone can upgrade.
+programs/*/target/
+programs/*/Cargo.lock
+
+# `solana-test-validator` writes its ledger here, including a *faucet keypair*.
+# A testnet faucet key is not high value, but it is exactly the habit this repo's
+# secrets tests exist to prevent, and the directory is 32MB of RocksDB besides.
+test-ledger/
