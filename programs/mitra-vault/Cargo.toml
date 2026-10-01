@@ -1,0 +1,30 @@
+[package]
+name = "mitra-vault"
+version = "0.1.0"
+edition = "2021"
+description = "Mitra Vault Program — the on-chain capital boundary (PRD §34)"
+publish = false
+
+[lib]
+# `cdylib` is what a validator loads. `rlib` is only so the unit tests in
+# `src/` can link against the same code that ships — a test-only copy of the
+# logic would be a different program, and testing that proves nothing.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program = "2.3"
+
+# NOTE: `solana-program-test` is deliberately NOT a dependency.
+#
+# It would give the strongest local evidence (the compiled `.so` in a real BPF
+# VM), but every published version fails to build in this environment:
+#
+#  * 4.4.0-beta.0 requires rustc 1.98.1; 1.98.1 is now installed, so that clears.
+#  * It then fails inside the Solana stack itself: `solana-keypair 4.0.0` calls
+#    `SignatureError::from_source(five8::DecodeError)`, and neither `five8` 0.2.1
+#    nor 1.0.0 implements `std::error::Error` for `DecodeError`. Two incompatible
+#    `five8` majors resolve side by side. That is an upstream defect, and
+#    pinning around it would mean vendoring a patched dependency tree.
+#
+# The honest consequence: the e2e path is UNTESTED, not verified. What IS
+# verified is that the program compiles, links, and runs — see F18.

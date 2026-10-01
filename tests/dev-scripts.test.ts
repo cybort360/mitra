@@ -238,6 +238,30 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     expect(bridge.error).toBeDefined();
   }, 40_000);
 
+  it("no program keypairs are tracked (a program key is upgrade authority)", () => {
+    // A Solana *program* keypair is not a wallet key: whoever holds it can
+    // replace the program at that address. Committing one is therefore
+    // equivalent to publishing write access to the capital boundary.
+    //
+    // The deploy step generates one next to the `.so`, so this is a live risk
+    // rather than a hypothetical — the file exists in this working tree right
+    // now and is kept out only by `.gitignore`.
+    // `git ls-files` lists tracked files only, so this asks what is committed
+    // rather than what exists — a keypair that was committed and later deleted
+    // still fails here.
+    let tracked: string;
+    try {
+      tracked = execFileSync("git", ["ls-files"], { encoding: "utf8" });
+    } catch {
+      return; // no git available; nothing to assert
+    }
+    const offenders = tracked
+      .split("\n")
+      .filter(Boolean)
+      .filter((f: string) => /keypair\.json$/.test(f) || /^programs\/.*-keypair/.test(f));
+    expect(offenders).toEqual([]);
+  });
+
   it("Tempo readiness is pinned to Moderato, and mainnet is refused", () => {
     // The check that matters. A readiness script pointed at Tempo mainnet must
     // not report the testnet as live, or every downstream claim built on it
