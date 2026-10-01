@@ -2,12 +2,16 @@
 
 Everything you need to work on Mitra with the team — humans and agents alike.
 
+> The shared context server described below is **development instrumentation**,
+> not part of the Mitra product. Steps 1–2 get it running for collaboration; the
+> product itself builds and tests with `npm install && npm test` at the repo
+> root, without any of it.
+
 ## 1. Get the code
 
 ```bash
 git clone https://github.com/cybort360/mitra
 cd mitra
-git checkout feat/shared-context-mcp
 ```
 
 > The repository is **private**. Ask in the team channel for access if the clone
