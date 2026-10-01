@@ -19,7 +19,12 @@ PKG="$ROOT/shared-context-mcp"
 DB="$ROOT/.shared-context/context.db"
 SYNC="$ROOT/shared-context/sync"
 
-command -v node >/dev/null || { echo "node is required (v22+)" >&2; exit 1; }
+command -v node >/dev/null || { echo "node is required (>=22.5.0, for the built-in node:sqlite)" >&2; exit 1; }
+# Fail early with a clear message rather than a cryptic module error.
+node -e 'require("node:sqlite")' 2>/dev/null || {
+  echo "node $(node --version) is too old: node:sqlite requires >=22.5.0" >&2
+  exit 1
+}
 
 echo "==> building shared-context-mcp"
 cd "$PKG"

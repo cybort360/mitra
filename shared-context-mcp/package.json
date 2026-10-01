@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Shared, auditable context memory for human + agent collaboration on a codebase.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "bin": { "shared-context": "./dist/cli.js" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
