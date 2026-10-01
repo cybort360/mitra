@@ -351,6 +351,48 @@ protects funds.
 not a defence against an irreversible action, and a script that silently
 overwrites a secret has the same failure mode as a script that leaks one.
 
+## F15 — `api.tempo.xyz` indexes mainnet, and reports testnet accounts as empty
+
+**Found** 2026-01-10, while confirming Tempo funding.
+
+ADR-0006 directs Tempo balance reads to the Tempo API, on the strength of an
+earlier probe: `GET /v1/addresses/{address}/balances` returned a well-formed
+response for a busy address. That was true and misleading. The host indexes
+**Tempo mainnet**.
+
+Measured, not inferred: the API's newest block was `42141436` while
+`rpc.tempo.xyz` (mainnet) was at `42141428` and `rpc.moderato.tempo.xyz` was at
+`37738544`. The API tracks mainnet.
+
+**The failure mode is the bad kind.** A funded Moderato address queried through
+this host returns `{"data":[],"nextCursor":null}` — byte-identical to the
+response for an address that has never been touched. So the API reports "no
+funds" for an account holding 1M units of five stablecoins, and a funding check
+built on it would either block a funded vault or, worse, be "fixed" by trusting
+it after a future top-up appeared. There is no testnet host:
+`api.testnet.tempo.xyz` and `api.moderato.tempo.xyz` do not resolve.
+
+**Resolution.** Tempo testnet balances are read from Moderato `eth_getLogs`
+Transfer topics, summing amounts per token. `scripts/fund-tempo.mjs` does this
+and never contacts the API for balances.
+
+**A second trap, in my own verification.** The first log query filtered
+`topics[1]` (the sender) for our address and returned nothing — I briefly
+concluded the account was unfunded. The faucet delivers by **mint**, so
+`topics[1]` is the zero address and the recipient is in `topics[2]`. Filtering on
+the wrong index made a funded account look empty, the same false negative as the
+API, reached by a different route. Both are now stated in the script.
+
+**Guard.** `tests/dev-scripts.test.ts` measures the API's block height against
+both nodes and asserts it tracks exactly one — currently mainnet. If Tempo ever
+indexes Moderato, the assertion fails and the ADR can be revisited. It is
+written to fail rather than pass silently on "neither", because a third state
+would mean the reasoning behind the whole workaround no longer holds.
+
+**Rule.** A query that returns empty is not evidence of absence until the
+query's subject has been identified. Confirm which chain an endpoint serves
+before believing anything it says — especially "nothing here".
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
