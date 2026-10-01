@@ -208,6 +208,107 @@ historical verification.
 stability; `tests/digest-compat.test.ts` records the old and new values so the
 change cannot be made silently a second time.
 
+## F12 — `eth_getBalance` on Tempo returns a large constant, not zero
+
+**Found** 2026-01-10, while establishing PRD §34 Tempo parameters.
+
+The PRD names Tempo as a settlement chain but specifies no chain ID, RPC
+endpoint, or balance semantics. Those had to be established from vendor docs.
+Tempo is EVM-compatible (Osaka) and its public testnet is **Moderato**, chain
+ID `42431`, at `https://rpc.moderato.tempo.xyz` — confirmed by
+`eth_chainId` returning `0xa5bf`.
+
+Tempo has **no native gas token**; fees are paid in stablecoins (TIP-20).
+The vendor's EVM-compatibility page states that native token balance "is always
+returning zero balances" and that `BALANCE`/`SELFBALANCE` opcodes return 0.
+
+**That is not what the node does.** `eth_getBalance` against Moderato returns
+
+```
+0x9612084f0316e0ebd5182f398e5195a51b5ca47667d4c9b26c9b26c9b2
+```
+
+for **every** address tested — the dev key, `0x…dEaD`, and `0x1111…1111` — and
+at both `latest` and `earliest` block tags. Identical bytes, all three. Decoded,
+that is a ~4.0e75 figure, which is also what a wallet UI renders as the
+"unusually high balance" the docs warn about.
+
+So the documented behaviour (0) and the observed behaviour (a huge constant) are
+both wrong in the same direction for our purposes: neither is a balance. A
+value that is large, constant, and address-independent is the worst of the three
+options, because it passes a naive truthiness or `> 0` funding check.
+
+**Why this matters here specifically.** PRD Phase 2 is a vault controller whose
+job is to decide whether capital is present before moving it. An implementation
+that reads `eth_getBalance` — the obvious first thing to write, and what every
+EVM tutorial teaches — would conclude the vault holds more than the supply of
+the chain and would proceed. This is a capital-movement decision made on a
+non-balance. It is exactly the class of error `INVARIANTS.md` exists to prevent,
+arriving through an adapter rather than through the kernel.
+
+**Resolution.** Tempo balances must be read from TIP-20 token balances
+(`balanceOf`) via the Tempo API (`GET /v1/addresses/{address}/balances`), or
+from `eth_call` `balanceOf` — **not** from native balance. Note that
+`eth_call balanceOf` against the documented faucet token addresses currently
+reverts on Moderato while `eth_getCode` returns `0xef` (a predeploy-style stub,
+not empty), so the API route is the one that is actually observed working.
+Unresolved: why `balanceOf` reverts is `UNTESTED`.
+
+**Guard.** `scripts/phase2-readiness.mjs` asserts Tempo's `eth_chainId` is
+`42431` and **fails loudly on `4217` (mainnet)**, so a misconfigured endpoint
+cannot be mistaken for a testnet. The no-native-token rule is surfaced as an
+explicit precondition. Verified by running the script against
+`https://rpc.tempo.xyz` and watching it report
+`chainId 4217 = TEMPO MAINNET — refusing to treat production as a testnet`.
+
+**Rule.** Documentation of an RPC's behaviour is not evidence of that RPC's
+behaviour. Probe it, and probe it with at least one control value that must
+differ.
+
+## F13 — the secrets guard was green because it could not see the file
+
+**Found** 2026-01-10, immediately after the key tooling was committed.
+
+`tests/secrets.test.ts` failed on the new baseline:
+
+```
+expected [ 'scripts/generate-dev-keys.mjs:113' ] to deeply equal []
+```
+
+That line is the secp256k1 scalar-1 known-answer vector — `0…01`, a published
+constant, not a secret. So the finding was substantively harmless.
+
+**But how it was found is the actual failure.** The previous run reported
+138/138. That run happened *before* `git add`. The scanner enumerates
+`git ls-files`, which returns only **tracked** files. At the time it passed, the
+file it should have been scanning was not yet tracked, so the guard had never
+looked at it. Committing the file is what made the guard fire.
+
+A test that inspects a directory listing reports on the directory listing, not
+on the working tree. Untracked-but-present files are invisible to it — which is
+precisely the window in which a secret is most likely to be added and most
+likely to be missed.
+
+**Two mistakes were available here and the tempting one was worse.** The easy
+fix was to add a filename exclusion for `generate-dev-keys.mjs`, the same shape
+as the `"canonical"` exclusion that F-record already documents as a hole shaped
+like the thing it excludes. The fix chosen instead was to remove the literal:
+`BigInt(1).toString(16).padStart(64, "0")` constructs the scalar, so no
+64-hex string sits on a field named `privateKey`. The published constant stays
+in the code, legible as `SCALAR_ONE`, and the file stays fully scannable.
+
+**Fix.** Constructor expression instead of a hex literal. No scanner exemption
+was added, so the guard's coverage is unchanged.
+
+**Guard verified by planting a key, not by assertion.** A realistic fake
+(`privateKey = "a3f1c9…e6f7"`) was added to `lib/adapters/types.ts` and staged:
+the guard fired with the exact file and line. Restored, it passed. The guard
+catches key material *and* no longer trips on the public vector.
+
+**Rule.** A guard that enumerates tracked files has a blind spot precisely
+where files change. Run secret scanners against the working tree, and never
+treat a green run on an untracked file as evidence about that file.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

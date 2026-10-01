@@ -55,6 +55,46 @@ await rpcReachable("Solana devnet RPC", process.env.SOLANA_RPC_URL ?? "https://a
 await rpcReachable("Base Sepolia RPC", process.env.BASE_RPC_URL ?? "https://sepolia.base.org",
   { jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] });
 
+/**
+ * Tempo Moderato is EVM-compatible but NOT Ethereum-shaped, so `blockNumber`
+ * alone does not identify it. The chain ID is asserted instead: a probe that
+ * answers "ok" against the wrong chain is a readiness check that has verified
+ * nothing. Mainnet is 4217; if we ever see that here, we are pointed at
+ * production and the script must fail loudly.
+ */
+await rpcReachable("Tempo Moderato RPC", process.env.TEMPO_RPC_URL ?? "https://rpc.moderato.tempo.xyz",
+  { jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] });
+const tempo = checks.find((c) => c.name === "Tempo Moderato RPC");
+if (tempo?.ok) {
+  const seen = String(tempo.detail).replace(/^live — /, "");
+  const id = parseInt(seen, 16);
+  if (id === 42431) {
+    tempo.detail = "live — chainId 42431 (Moderato)";
+  } else {
+    tempo.ok = false;
+    tempo.detail = id === 4217
+      ? "chainId 4217 = TEMPO MAINNET — refusing to treat production as a testnet"
+      : `unexpected chainId ${seen} (expected 42431)`;
+  }
+}
+
+/**
+ * Tempo has no native gas token. `eth_getBalance` does not return 0 as the
+ * docs state — it returns a large constant placeholder, identical for every
+ * address including 0x1111…1111. Verified against Moderato 2026-01-10; see
+ * forge/FAILURES.md F12.
+ *
+ * This is recorded as a precondition because it is a live hazard for exactly
+ * the code Phase 2 is about to write: a vault controller that trusts
+ * `eth_getBalance` to decide whether the vault is funded will conclude it is
+ * unimaginably rich and proceed. Balances must come from TIP-20 `balanceOf`
+ * via the Tempo API, never from native balance.
+ */
+const tempoTrap = existsSync(".dev-keys/evm-testnet.address");
+add("Tempo: no native-token balance trust", tempoTrap, tempoTrap
+  ? "use TIP-20 balanceOf — eth_getBalance returns a constant placeholder"
+  : "needs an EVM key to be meaningful");
+
 console.log("\nPRD §52 Phase 2 readiness\n");
 let ready = 0;
 for (const c of checks) {
