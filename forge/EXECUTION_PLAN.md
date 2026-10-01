@@ -42,7 +42,17 @@ What exists is a *local* economic kernel that is correct and well tested:
 - a state machine for reservations, enforced on write
 - deterministic netting with conservation proofs
 
-That is genuine progress toward the PRD's Phase 1 and a *prerequisite* for
+That is genuine progress toward the PRD's ### Phase 0 — Ground truth — `PARTIAL`
+
+Done: the P0 object registry is data (`lib/domain/p0-registry.ts`) and
+`tests/phase0-registry.test.ts` asserts the exit condition against the real types
+and transition table, so it can fail. Five ADRs recorded. Evidence levels
+defined, including `FAILED` and `REGRESSED`, which were in use but undefined.
+
+Not done: canonical *serialization* — required by PRD §4.7 for receipt content
+hashes — does not exist yet. Recorded in Phase 1.
+
+## Phase 1 and a *prerequisite* for
 Phase 2, but **it is not Phase 2**. Counting it as Phase 2 progress would be
 exactly the "implemented ≠ verified" failure the Foundry exists to prevent.
 
