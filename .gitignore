@@ -24,9 +24,16 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Shared context: the local sqlite log is machine-specific and must NOT be
+# committed. The sync/ folder below is separate and IS committed — that is how
+# context reaches collaborators on other machines.
+.shared-context/
+
 # Editor/IDE
 .vscode
 .idea
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# Shared context memory (local sqlite log; share via sync bundles, not git)

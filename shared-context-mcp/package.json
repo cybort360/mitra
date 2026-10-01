@@ -1,0 +1,27 @@
+{
+  "name": "shared-context-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared, auditable context memory for human + agent collaboration on a codebase.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "bin": { "shared-context": "./dist/cli.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js",
+    "cli": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
