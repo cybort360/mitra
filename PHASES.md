@@ -12,9 +12,9 @@ done.
 | Phase | Status | Conclusion |
 |---|---|---|
 | 0. Kernel hardening | ✅ **Done** (PR #2) | 4 holes closed, 23 tests, independently reviewed |
-| 1. Wire the kernel | ⬜ Next | A DENY is reachable over HTTP |
-| 2. State machines | ⬜ | Illegal transitions are impossible |
-| 3. Persistence | ⬜ | No seed array; durable event log |
+| 1. Wire the kernel | ✅ **Done** | A DENY is reachable over HTTP |
+| 2. State machines | ⬜ Next | Illegal transitions are impossible |
+| 3. Persistence | ⬜ Blocked by 1 ✅ now unblocked | No seed array; durable event log |
 | 4. Console | ⬜ | Pages are components driven by real state |
 | 5. Integration | ⬜ | One external system, honestly labelled |
 
@@ -47,6 +47,43 @@ reachable. The product displays economic state it does not compute. `POST
 6. Tests **fail** if you break a guard (prove they're real)
 
 **Explicitly out of scope:** state machines, Postgres, UI.
+
+---
+
+## Phase 1 — Wire the kernel into the API
+
+**Owner: cline.** ✅ Complete.
+
+**What shipped**
+
+- `POST /api/v1/authorizations` — calls `evaluateProposal`; DENY returns 403 with reason codes
+- `POST /api/v1/reservations` — `GET` list, `POST` create; calls `reserve` after policy
+- `POST /api/v1/reservations/execute` — the execution guard
+- `lib/store/ledger.ts` — process-local capital and nonce state, so nonce replay is
+  enforced by the server rather than asserted by the caller
+
+**Demonstrated over HTTP**
+
+| Case | Result |
+|---|---|
+| Unapproved counterparty | `DENY [COUNTERPARTY_NOT_ALLOWED]` |
+| Prohibited capability | `DENY [CAPABILITY_NOT_ALLOWED,CAPABILITY_PROHIBITED]` |
+| Valid proposal | `ALLOW` + action digest |
+| Reservation | capital moves available → reserved |
+| Expired reservation | `RESERVATION_EXPIRED` |
+| Tampered digest | `ACTION_DIGEST_MISMATCH` |
+| Wrong chain | `CHAIN_MISMATCH` |
+| Replayed instruction | `NONCE_ALREADY_CONSUMED` |
+
+**Notes for the next owner**
+
+- The ledger is **in-process**. Restarting loses consumed nonces. That is the
+  Phase 3 problem, and it is a real limitation, not a detail.
+- `recentSpend` is derived server-side from held reservations, never from the
+  request, so a caller cannot under-report it to slip the velocity limit.
+- **Bug found during this phase and fixed:** nonces were hardcoded to `1`, so once
+  one reservation was spent every later execution on that vault was refused as a
+  replay. The ledger now allocates them, with two regression tests.
 
 ---
 
