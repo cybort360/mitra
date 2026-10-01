@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { PostgresRepository } from "./postgres.js";
+import { PostgresRepository } from "./postgres";
 
 /**
  * Database connection.

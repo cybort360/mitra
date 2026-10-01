@@ -4,6 +4,13 @@ import { PostgresRepository } from "@/lib/store/postgres.js";
 import { MIGRATIONS } from "@/lib/store/schema.js";
 import { createPool } from "@/lib/store/db.js";
 import { reconcileVault } from "@/lib/kernel/vault.js";
+import { getStore, __resetStoreForTests } from "@/lib/store/provider";
+import { __resetLedgerForTests } from "@/lib/store/ledger";
+import { NOW } from "./fixtures";
+import { POST as postReservationsRoute, GET as getReservationsRoute } from "@/app/api/v1/reservations/route";
+import { POST as postAuthorizationsRoute } from "@/app/api/v1/authorizations/route";
+import { vaults, mandates } from "@/lib/store/seed";
+import { POST as postExecuteRoute } from "@/app/api/v1/reservations/execute/route";
 
 /**
  * Phase 3 verification against a real PostgreSQL instance.
@@ -206,3 +213,138 @@ describeDb("postgres repository (SECURITY.md invariants 11, 12, 13)", () => {
     await expect(repo.setReservationStatus("res-m", "RESERVED")).rejects.toThrow(/TERMINAL_STATE|ILLEGAL_TRANSITION/);
   });
 });
+
+/**
+ * The gap this file previously could not test.
+ *
+ * `tests/persistence.test.ts` proved the *repository* was durable. Nothing proved
+ * the *routes* used it — and they did not: all three imported `getLedger()`, so a
+ * restart lost consumed nonces and reserved capital while the API still returned
+ * 200. A durable store that nothing calls is not a durable store.
+ *
+ * These tests drive the real route handlers with `DATABASE_URL` set, then read
+ * the row back through a *separate* connection. A separate connection is the
+ * point: it fails if the route only ever mutated process memory, which an
+ * in-process assertion could not distinguish.
+ */
+describeDb("routes served by postgres (the repository is actually used)", () => {
+  let pool: Pool;
+  let repo: PostgresRepository;
+
+  beforeAll(async () => {
+    pool = createPool(url);
+    for (const sql of MIGRATIONS) await pool.query(sql);
+    repo = new PostgresRepository(pool);
+  });
+
+  afterAll(async () => { await pool?.end(); });
+
+  beforeEach(async () => {
+    __resetStoreForTests();
+    process.env.DATABASE_URL = url;
+    await pool.query("TRUNCATE mitra.reservations, mitra.consumed_nonces, mitra.authorizations, mitra.event_log, mitra.mandates, mitra.vaults CASCADE");
+    await repo.seedReferenceData();
+  });
+
+  it("reports the postgres backend rather than silently falling back", async () => {
+    const { backend } = await getStore();
+    expect(backend).toBe("postgres");
+  });
+
+  it("populates a durable store from the reference fixtures", async () => {
+    // Without this, every route 404s in the only configuration that matters.
+    const found = await repo.listReservations();
+    expect(Array.isArray(found)).toBe(true);
+    const vaults = await pool.query("SELECT count(*)::int AS n FROM mitra.vaults");
+    expect(vaults.rows[0].n).toBeGreaterThan(0);
+  });
+
+  it("writes a reservation that is still there from another connection", async () => {
+    const res = await postReservations({
+      mandateId: MANDATE_ID, vaultId: VAULT_ID, amount: 10, asset: "USDC", chain: "solana",
+      counterparty: "virtuals:allowed", capability: "market_research",
+      intentId: "int_1", runId: "run_1",
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.backend).toBe("postgres");
+
+    // A different connection than the one the route used.
+    const other = createPool(url);
+    try {
+      const rows = await other.query(
+        "SELECT reservation_id, amount, status FROM mitra.reservations WHERE reservation_id = $1",
+        [body.data.reservationId],
+      );
+      expect(rows.rowCount).toBe(1);
+      expect(Number(rows.rows[0].amount)).toBe(10);
+    } finally {
+      await other.end();
+    }
+  });
+
+  it("every economic response names the store that served it", async () => {
+    // Guards a real regression: the authorizations route destructured `backend`
+    // from the store and then never returned it, so a caller had no way to tell
+    // a durable answer from a process-local one. Asserted rather than trusted,
+    // because the failure mode is invisible.
+    const created = await postReservations({
+      mandateId: MANDATE_ID, vaultId: VAULT_ID, amount: 10, asset: "USDC", chain: "solana",
+      counterparty: "virtuals:allowed", capability: "market_research",
+      intentId: "int_1", runId: "run_1",
+    });
+    expect((await created.json()).backend).toBe("postgres");
+
+    const listed = await getReservations(`?vaultId=${VAULT_ID}`);
+    expect((await listed.json()).backend).toBe("postgres");
+
+    const authed = await postAuthorizations({
+      mandateId: MANDATE_ID, vaultId: VAULT_ID, amount: 10, asset: "USDC", chain: "solana",
+      counterparty: "virtuals:allowed", capability: "market_research",
+      intentId: "int_2", runId: "run_1", now: NOW,
+    });
+    expect((await authed.json()).backend).toBe("postgres");
+  });
+
+  it("keeps a consumed nonce spent after the process state is discarded", async () => {
+    const created = await postReservations({
+      mandateId: MANDATE_ID, vaultId: VAULT_ID, amount: 10, asset: "USDC", chain: "solana",
+      counterparty: "virtuals:allowed", capability: "market_research",
+      intentId: "int_1", runId: "run_1",
+    });
+    const reservation = (await created.json()).data;
+
+    const exec = () => postExecute({
+      reservationId: reservation.reservationId, amount: reservation.amount,
+      asset: reservation.asset, chain: reservation.chain,
+      actionDigest: reservation.actionDigest,
+    });
+    expect((await exec()).status).toBe(200);
+
+    // Throw away every scrap of process state, exactly as a restart would.
+    __resetLedgerForTests();
+    __resetStoreForTests();
+
+    // The replay must still be refused. Under the old process-local ledger this
+    // returned 200, because the nonce history died with the process.
+    const replay = await exec();
+    expect(replay.status).toBe(409);
+    expect((await replay.json()).error).toBe("EXECUTION_REJECTED");
+  });
+});
+
+// Read from the fixtures rather than hardcoding: guessing an id here would make
+// this test 404 for a reason unrelated to what it is testing.
+const VAULT_ID = vaults[0].vaultId;
+const MANDATE_ID = mandates[0].mandateId;
+
+const postReservations = (body: unknown) => postReservationsRoute(new Request("http://x/api", {
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+}));
+const postExecute = (body: unknown) => postExecuteRoute(new Request("http://x/api", {
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+}));
+const getReservations = (q: string) => getReservationsRoute(new Request(`http://x/api${q}`));
+const postAuthorizations = (body: unknown) => postAuthorizationsRoute(new Request("http://x/api", {
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+}));

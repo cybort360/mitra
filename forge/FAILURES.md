@@ -155,11 +155,31 @@ belong in this file.
 
 ---
 
+## F10 — A docstring asserted an interface compatibility that did not exist
+
+`lib/store/repository.ts` claimed the in-memory `CapitalLedger` "satisfies this
+interface, which is what allows the two to be swapped without touching a route".
+It did not. Verified false by asserting the compatibility and reading the
+compiler: the ledger was missing `getMandate`, `appendEvent` and `listEvents`,
+and every method was synchronous against an async signature.
+
+The claim mattered because it was the stated justification for the whole
+Phase 3 design. A reader would reasonably conclude the swap was free, and would
+not check — which is exactly how "the repository is wired" becomes true in the
+docstring and false in the routes, which still called `getLedger()`.
+
+**Fix.** The docstring now states the incompatibility and why. The
+incompatibility is pinned by a test rather than a comment, so it cannot silently
+become false again.
+
+**Guard.** `tests/repository-contract.test.ts` asserts that the ledger does *not*
+satisfy the interface, and that both real backends do.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
 |---|---|---|
-| No on-chain enforcement | Capital is a database row, not an enforced account | Stated `PARTIAL` in `INVARIANTS.md`; not counted as PRD Phase 2 progress |
-| No withdrawal path exists | `FR-VAULT-006` holds by absence, not enforcement | Recorded `UNTESTED`, not `VERIFIED` |
-| Six of seven state machines unwritten | Definitions exist but nothing writes through them | Stated in `INVARIANTS.md` and `EXECUTION_PLAN.md` |
-| Ledger is process-local on the kernel path | Postgres is durable, but routes still use the in-memory ledger | `PROOF_LEDGER.md` records what is and is not wired |
+| No on-chain enforcement | Capital is a database row, not an enforced account | Stated `PARTIAL` in `INVARIANTS.md`; not counted as PRD Phase 2 progress. **Still open** — this is PRD Phase 2 work. |
+| No withdrawal path exists | `FR-VAULT-006` holds by absence, not enforcement | Recorded `UNTESTED`, not `VERIFIED`. **Still open.** |
+| Six of seven state machines unwritten | Definitions exist but nothing writes through them | Stated in `INVARIANTS.md` and `EXECUTION_PLAN.md`. **Still open** — only `reservation` has a write path. |
+| ~~Ledger is process-local on the kernel path~~ **RESOLVED** | Routes now go through `getStore()`; `InMemoryRepository` / `PostgresRepository` behind one interface | `tests/persistence.test.ts` — "routes served by postgres", incl. nonce surviving a simulated restart |

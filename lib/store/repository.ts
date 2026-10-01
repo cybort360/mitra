@@ -5,9 +5,24 @@
  * point of Phase 3: the seed array is a fixture, and a production route that
  * imports one cannot be told apart from a demo.
  *
- * The in-memory `CapitalLedger` from Phase 1 satisfies this interface, which
- * is what allows the two to be swapped without touching a route — and lets the
- * same test suite run against both.
+ * ## The in-memory ledger does NOT implement this interface
+ *
+ * An earlier version of this file claimed `CapitalLedger` "satisfies this
+ * interface, which is what allows the two to be swapped without touching a
+ * route". That was false, and load-bearing enough to be worth stating plainly.
+ * It is pinned as false by `tests/repository-contract.test.ts`, which asserts
+ * the incompatibility rather than the compatibility.
+ *
+ * Two concrete reasons it cannot:
+ *
+ * 1. **Shape.** The ledger is missing `getMandate`, `appendEvent` and
+ *    `listEvents` entirely.
+ * 2. **Timing.** Every ledger method is synchronous; every method here returns a
+ *    `Promise`. A sync method cannot satisfy an async signature.
+ *
+ * So the swap is not free, and `lib/store/provider.ts` does the adapting — with
+ * the in-memory ledger reachable only when no `DATABASE_URL` is configured, and
+ * reporting which backend served the request so state is never ambiguous.
  */
 import type {
   Authorization, Mandate, Obligation, Reservation, RunEvent, Vault,
@@ -33,6 +48,22 @@ export interface ReserveCapitalInput {
   reservationId: string;
   runId: string;
   intentId: string;
+  /**
+   * The evaluated terms, written with the reservation.
+   *
+   * Deliberately required rather than defaulted. An earlier version reserved
+   * capital first and let the route patch the row afterwards, which meant the
+   * store briefly held a reservation with an empty `mandateId` and `actionDigest`
+   * — a row the schema rejects outright on Postgres, and on any store that
+   * tolerated it, a reservation that could never be executed. One atomic write
+   * with complete terms removes the intermediate state entirely.
+   */
+  mandateId: string;
+  mandateVersion: number;
+  asset: Reservation["asset"];
+  chain: Reservation["chain"];
+  actionDigest: string;
+  expiresAt: string;
 }
 
 /**
@@ -50,6 +81,15 @@ export type CapitalResult =
 export interface EconomicRepository {
   getVault(vaultId: string): Promise<Vault | null>;
   getMandate(mandateId: string): Promise<Mandate | null>;
+
+  /**
+   * Load the reference fixtures into this store.
+   *
+   * Explicit and never called on boot: a process that silently inserted fixtures
+   * would be indistinguishable from one holding real data. Production rows come
+   * from the PRD Phase 2 vault controller, which does not exist yet.
+   */
+  seedReferenceData(): Promise<{ vaults: number; mandates: number; reservations: number }>;
   listReservations(vaultId?: string): Promise<Reservation[]>;
   getReservation(reservationId: string): Promise<Reservation | null>;
 
@@ -73,6 +113,16 @@ export interface EconomicRepository {
   consumeNonce(vaultId: string, nonce: number, reservationId: string): Promise<boolean>;
 
   setReservationStatus(reservationId: string, status: Reservation["status"]): Promise<Reservation | null>;
+
+  /**
+   * Insert or replace a whole reservation row.
+   *
+   * Exists because a reservation is created from two sources at once: the store
+   * allocates the nonce and the capital position, while the route holds the terms
+   * that were actually evaluated. Neither half is complete alone, so the row is
+   * written whole rather than patched.
+   */
+  putReservation(reservation: Reservation): Promise<Reservation>;
 
   recordAuthorization(auth: Authorization): Promise<void>;
   recentSpend(vaultId: string, mandateId: string, now: Date, windowMinutes: number): Promise<{ at: string; amount: number }[]>;

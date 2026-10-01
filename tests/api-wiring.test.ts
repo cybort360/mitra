@@ -3,9 +3,9 @@ import { POST as authorize } from "@/app/api/v1/authorizations/route";
 import { POST as createReservation, GET as listReservations } from "@/app/api/v1/reservations/route";
 import { __resetLedgerForTests } from "@/lib/store/ledger";
 
-import { NOW, goodProposal, json, req } from "./fixtures";
+import { NOW, goodProposal, json, prepareStore, req } from "./fixtures";
 
-beforeEach(() => { __resetLedgerForTests(); });
+beforeEach(async () => { await prepareStore(); });
 
 describe("POST /api/v1/authorizations", () => {
   it("returns ALLOW with a digest for a well-formed proposal", async () => {
