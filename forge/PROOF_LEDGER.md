@@ -159,6 +159,7 @@ npx vitest run tests/kernel.test.ts
 ```bash
 node scripts/verify-dev-keys.mjs    # re-derives every address from the secret (writes nothing)
 node scripts/fund-vibenet.mjs       # claim test ETH; verifies the claim on-chain
+node scripts/fund-tempo.mjs         # mint TIP-20 stablecoins; verifies Transfer logs
 node scripts/phase2-readiness.mjs   # preconditions as commands
 ```
 
@@ -172,9 +173,10 @@ node scripts/phase2-readiness.mjs   # preconditions as commands
 | Tempo Moderato reachable **and identified as testnet** | `VERIFIED` | `eth_chainId` → `0xa5bf` (42431). Negative case: against mainnet the script reports `chainId 4217 = TEMPO MAINNET — refusing to treat production as a testnet` |
 | **EVM key funded on Base Vibenet** | `VERIFIED` | `node scripts/fund-vibenet.mjs` — 0.2 ETH. Faucet returns a tx hash; the script then checks `eth_getTransactionReceipt` status `0x1` and confirms the balance actually rose. Reproducible, not a one-off |
 | Solana devnet funded | `PARTIAL` | Browser faucet only (`faucet.solana.com`); needs a human |
-| Tempo Moderato funded | `PARTIAL` | Browser faucet only; `POST /v1/faucet` → `not_found` |
+| **Tempo Moderato funded** | `VERIFIED` | `node scripts/fund-tempo.mjs` — **1M each of 5 TIP-20 stablecoins** (OUSD, pathUSD, AlphaUSD, BetaUSD, ThetaUSD). Confirmed from Moderato `eth_getLogs` Transfer topics, not from the faucet response: `tempo_fundAddress` returns 5 txs, all `status 0x1`, each emitting a Transfer to our address for `0xe8d4a51000` = 1e12 = 1M units at 6dp |
 | Base Sepolia funded | `PARTIAL` | Browser faucet only (`portal.cdp.finance/faucets/base-sepolia`); needs a human |
-| Vault can read a Tempo balance | `UNTESTED` | `eth_call balanceOf` reverted on both faucet tokens while `eth_getCode` returned `0xef`. The Tempo API balances route is the only one observed working. Unresolved — see F12 |
+| A Tempo balance is readable | `VERIFIED` | **Not** via `eth_call balanceOf` (reverts; token `eth_getCode` is `0xef`) and **not** via `api.tempo.xyz` (indexes mainnet — see F15). Readable via Transfer logs on Moderato with the recipient in **topic2**: filtering on topic1 misses every faucet mint, whose sender is the zero address |
+| Tempo tokens held | 2M units per token | Two `tempo_fundAddress` calls, each minting 1M of all five faucet stablecoins |
 
 Addresses are public and safe to print; the private keys are in a gitignored
 directory at mode 600 and are **not** in this repository.

@@ -50,10 +50,19 @@ zero-balance check fails safe, whereas a large constant passes a naive
 2. **A funding check on Tempo is `false` until it has read a specific token's
    `balanceOf` for the specific address.** Absence of a balance read is not an
    absence of funds, and must never be treated as one.
+2a. **On Moderato, balances come from `eth_getLogs` Transfer topics, not from
+   the Tempo API.** `api.tempo.xyz` indexes *mainnet* and returns
+   `{"data":[]}` for a funded testnet address — indistinguishable from an
+   unfunded one. There is no testnet API host. See F15.
+2b. **Filter Transfer logs on `topics[2]` (the recipient), never `topics[1]`.**
+   The faucet delivers by mint, so the sender is the zero address; filtering on
+   the sender index makes a funded account look empty.
 3. **Every Tempo adapter asserts `eth_chainId === 42431`** before performing any
    operation. Mainnet (`4217`) must cause a hard failure, not a warning.
-4. Faucet funding is browser-only; there is no programmatic faucet endpoint.
-   `POST /v1/faucet` returns `not_found`.
+4. **Funding is programmatic**, via the `tempo_fundAddress` JSON-RPC method on
+   Moderato. The browser faucet is real but not the only route. This supersedes
+   the earlier belief that funding was browser-only, which the first draft of
+   this ADR recorded.
 
 ## Consequences
 

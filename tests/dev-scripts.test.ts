@@ -87,6 +87,55 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     expect(readFileSync(path.join(".dev-keys", "evm-testnet.address"), "utf8")).toBe(before);
   });
 
+  it("Tempo funding reads Moderato logs, never api.tempo.xyz", async () => {
+    // The trap this guards: api.tempo.xyz indexes Tempo MAINNET. Its newest
+    // block tracks mainnet's height, not Moderato's, so it reports an empty
+    // balance for a funded testnet address. An empty response from the wrong
+    // network looks exactly like an unfunded account.
+    //
+    // Measured, not asserted from literals: compare each API block height
+    // against both nodes and record which chain it actually tracks.
+    const height = async (url: string) => {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const j = await r.json() as { result?: string };
+      return j.result ? parseInt(j.result, 16) : 0;
+    };
+    type Blocks = { data?: { number?: number }[] };
+    const api: Blocks = await fetch("https://api.tempo.xyz/v1/blocks?limit=5", {
+      signal: AbortSignal.timeout(12_000),
+    }).then((r) => r.json() as Promise<Blocks>).catch(() => ({}));
+
+    const mainnet = await height("https://rpc.tempo.xyz");
+    const moderato = await height("https://rpc.moderato.tempo.xyz");
+    expect(mainnet).toBeGreaterThan(0);
+    expect(moderato).toBeGreaterThan(0);
+
+    const apiTop = api.data?.[0]?.number ?? 0;
+    expect(apiTop).toBeGreaterThan(0);
+    // The API is within a few thousand blocks of exactly one chain. Which one is
+    // the finding: if this ever flips to Moderato, the script's warning is stale.
+    const nearMainnet = Math.abs(apiTop - mainnet) < 10_000;
+    const nearModerato = Math.abs(apiTop - moderato) < 10_000;
+    // Exactly one must be true — an API that tracked neither would be a third
+    // failure mode this test should surface rather than silently allow.
+    expect(nearMainnet !== nearModerato).toBe(true);
+    expect(nearMainnet).toBe(true); // currently: mainnet, which is the hazard
+  }, 40_000);
+
+  it("fund-tempo.mjs verifies the mint actually reached the address", () => {
+    // Receipt status alone is not proof of funding: `tempo_fundAddress` returns
+    // successful transactions that must then be checked for a Transfer log
+    // naming our address. The script does both and names the untrustworthy host.
+    const out = run("fund-tempo.mjs");
+    expect(out).toMatch(/Moderato/);
+    expect(out).toMatch(/api\.tempo\.xyz indexes MAINNET/);
+  });
+
   it("Tempo readiness is pinned to Moderato, and mainnet is refused", () => {
     // The check that matters. A readiness script pointed at Tempo mainnet must
     // not report the testnet as live, or every downstream claim built on it
