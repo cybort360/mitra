@@ -9,6 +9,8 @@
  *   shared-context say     --db ./ctx.db --kind decision --title "..." --body "..." --author agent:x --scope kernel
  *   shared-context sync    --db ./ctx.db --sync-dir ./shared
  */
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { ContextStore } from "./store.js";
 import { SyncAgent } from "./sync.js";
 import { digest } from "./digest.js";
@@ -24,7 +26,24 @@ function flag(name: string, fallback?: string): string | undefined {
 const has = (name: string) => argv.includes(`--${name}`);
 
 const dbPath = flag("db", process.env.SHARED_CONTEXT_DB ?? ".shared-context/context.db")!;
-const syncDir = flag("sync-dir", process.env.SHARED_CONTEXT_SYNC_DIR);
+// Default to the repo's committed `shared-context/sync` folder. Walking up from
+// the database handles both layouts: <repo>/.shared-context/context.db (the
+// usual one) and a database kept elsewhere. In the git-shared setup this means a
+// bare `say` is enough to share an entry — the easiest thing to get wrong.
+const syncDir = flag("sync-dir", process.env.SHARED_CONTEXT_SYNC_DIR ?? defaultSyncDir(dbPath));
+
+/** Locate `shared-context/sync` by walking up from the database file. */
+function defaultSyncDir(db: string): string {
+  let dir = resolve(dirname(resolve(db)));
+  for (let i = 0; i < 5; i += 1) {
+    const candidate = join(dir, "shared-context", "sync");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return resolve(dirname(resolve(db)), "..", "sync");
+}
 const nodeId = flag("node", process.env.SHARED_CONTEXT_NODE_ID);
 
 function open(): ContextStore {
@@ -44,7 +63,7 @@ Commands:
 
 Options:
   --db <path>          sqlite file (default $SHARED_CONTEXT_DB or .shared-context/context.db)
-  --sync-dir <path>    shared folder for auto-sync (or $SHARED_CONTEXT_SYNC_DIR)
+  --sync-dir <path>    shared folder (default: ../sync beside the db, or $SHARED_CONTEXT_SYNC_DIR)
   --kind, --title, --body, --author, --scope, --tags (comma-separated), --supersedes
   --limit <n>          for list
 `;
@@ -115,13 +134,15 @@ switch (command) {
       tags: flag("tags")?.split(",").map((t) => t.trim()).filter(Boolean),
       supersedesId: flag("supersedes"),
     });
+    // Publish so collaborators see the entry without a second command. Falls
+    // back to a `sync/` folder beside the database, which is the committed
+    // location in a git-shared setup.
     if (syncDir) new SyncAgent({ store, dir: syncDir }).publish();
     console.log(`${entry.entryId}  seq=${entry.seq}  hash=${entry.hash.slice(0, 12)}`);
     store.close();
     break;
   }
   case "sync": {
-    if (!syncDir) { console.error("--sync-dir or $SHARED_CONTEXT_SYNC_DIR is required"); process.exit(1); }
     const store = open();
     const agent = new SyncAgent({ store, dir: syncDir! });
     agent.publish();
@@ -139,7 +160,6 @@ switch (command) {
     break;
   }
   case "watch": {
-    if (!syncDir) { console.error("--sync-dir or $SHARED_CONTEXT_SYNC_DIR is required"); process.exit(1); }
     const store = open();
     const agent = new SyncAgent({ store, dir: syncDir!, intervalMs: Number(flag("interval", "3000")) });
     agent.start();
