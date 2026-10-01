@@ -29,7 +29,7 @@
  * compared, so the printed addresses are proven rather than asserted.
  */
 import { createECDH, generateKeyPairSync, randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { keccak256 } from "js-sha3";
 import bs58 from "bs58";
 import nacl from "tweetnacl";
@@ -144,6 +144,37 @@ verifyKnownVectors();
 console.log("  derivation OK\n");
 
 console.log("Generating development keypairs for PRD §34 chains.\n");
+
+/**
+ * Refuse to destroy existing keys. F14.
+ *
+ * This script originally called `write` unconditionally, so running it twice
+ * silently replaced both keypairs. That is not a theoretical risk: a routine
+ * "let me just check the script still works" invocation rotated the keys, and
+ * test funds already sent to the previous addresses became unrecoverable. The
+ * only trace was a changed address in the output — which is easy to miss
+ * precisely because the run otherwise looks completely successful.
+ *
+ * Rotating a key is legitimate, and occasionally necessary. Doing it *by
+ * accident* while believing you are re-running a generator is not. So the
+ * default is to refuse, and rotation must be asked for explicitly.
+ */
+const FORCE = process.argv.includes("--force");
+if (!FORCE && existsSync(`${OUT_DIR}/evm-testnet.key`)) {
+  const previous = readFileSync(`${OUT_DIR}/evm-testnet.address`, "utf8").trim();
+  console.error(
+    `Refusing to overwrite existing keys in ${OUT_DIR}/.\n\n` +
+    `  existing evm address: ${previous}\n\n` +
+    `Any funds sent to that address become unrecoverable if the key is replaced.\n` +
+    `If you are deliberately rotating, re-run with --force.\n` +
+    `If you are only checking that generation still works, use:\n` +
+    `  node scripts/verify-dev-keys.mjs   (reads and re-derives, writes nothing)\n`,
+  );
+  process.exit(1);
+}
+if (FORCE && existsSync(`${OUT_DIR}/evm-testnet.key`)) {
+  console.warn("  --force: replacing existing keys. The old addresses are now dead.\n");
+}
 
 const solana = generateSolanaKeypair();
 verifySolana(solana.secret, solana.address);

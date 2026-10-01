@@ -309,6 +309,48 @@ catches key material *and* no longer trips on the public vector.
 where files change. Run secret scanners against the working tree, and never
 treat a green run on an untracked file as evidence about that file.
 
+## F14 — the key generator silently destroyed funded keys
+
+**Found** 2026-01-10, immediately after funding the EVM key on Base Vibenet.
+
+`scripts/generate-dev-keys.mjs` called `writeFileSync` unconditionally. Running
+it a second time replaced **both** keypairs with fresh ones, with no prompt, no
+warning, and no non-zero exit. The only evidence was a changed address in
+otherwise-successful output.
+
+This was not hypothetical. The sequence was:
+
+1. Generated keys, verified the known-answer vector after the F13 fix — by
+   running `generate-dev-keys.mjs`, which **rotated both keypairs**.
+2. Discovered the rotation when `phase2-readiness.mjs` reported the *old*
+   address as unfunded while Vibenet showed the funds at a *different* address.
+3. 0.1 ETH sent to the original address is now unrecoverable.
+
+The step-1 intent was "confirm the script still runs." That is exactly the
+operation `verify-dev-keys.mjs` exists for, and it writes nothing. Two scripts
+with overlapping purpose, one of which is destructive, is the actual defect.
+
+**Why this class of bug is worth a failure record.** A key tool that destroys
+keys on a casual re-run is worse than one that refuses, because the damage is
+invisible at the moment it happens and permanent afterwards. The AGENTS.md rule
+about not introducing fake success paths is the same shape: a tool reporting
+success while having done something irreversible.
+
+**Fix.** The generator now refuses to overwrite when `.dev-keys/evm-testnet.key`
+exists, prints the existing address so the operator can see what is at risk, and
+exits non-zero. Rotation requires an explicit `--force`, which warns that the old
+addresses are dead. `verify-dev-keys.mjs` is named in the refusal message as the
+non-destructive alternative.
+
+**Guard.** Verified by planting: keys backed up, `--force` run (address changes,
+as intended), then a default run (refused, exit non-zero, address unchanged).
+The test asserts the *default* path refuses, because that is the path that
+protects funds.
+
+**Rule.** A destructive tool must require intent. "It was only a test run" is
+not a defence against an irreversible action, and a script that silently
+overwrites a secret has the same failure mode as a script that leaks one.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

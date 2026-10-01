@@ -79,6 +79,55 @@ if (tempo?.ok) {
 }
 
 /**
+ * Base Vibenet is a *preview* network: 200ms blocks and B20 tokens, but the docs
+ * state its "state may be reset without notice." That makes it excellent for
+ * proving the vault controller works, and useless as durable evidence — a
+ * balance verified today may be gone tomorrow, so a VERIFIED claim must not rest
+ * on it. Base Sepolia is the durable testnet; Vibenet is the fast one.
+ *
+ * So this check reports funding *and* the caveat, rather than a single green.
+ */
+async function vibenet() {
+  const url = process.env.VIBENET_RPC_URL ?? "https://rpc.vibes.base.org";
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 8000);
+    const call = async (method, params = []) => {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: c.signal,
+      });
+      return r.json().catch(() => ({}));
+    };
+    const chain = await call("eth_chainId");
+    clearTimeout(t);
+    if (chain.error !== undefined || chain.result === undefined) {
+      return add("Base Vibenet (preview)", false, `unreachable: ${JSON.stringify(chain.error ?? chain).slice(0, 70)}`);
+    }
+    const id = parseInt(chain.result, 16);
+    if (id !== 84538453) {
+      return add("Base Vibenet (preview)", false, `unexpected chainId ${chain.result} (expected 84538453)`);
+    }
+    if (!evm) return add("Base Vibenet (preview)", false, "chainId 84538453 confirmed; no EVM key to fund");
+
+    const bal = await call("eth_getBalance", [
+      readFileSync(".dev-keys/evm-testnet.address", "utf8").trim(), "latest",
+    ]);
+    const wei = bal.result ? BigInt(bal.result) : 0n;
+    const eth = Number(wei) / 1e18;
+    add("Base Vibenet (preview)", wei > 0n,
+      wei > 0n
+        ? `chainId 84538453, ${eth.toFixed(4)} ETH — RESETTABLE, not durable evidence`
+        : "chainId 84538453 confirmed; unfunded (POST api.vibes.base.org/api/vibenet/faucet/drip)");
+  } catch (e) {
+    add("Base Vibenet (preview)", false, `unreachable: ${e.name}`);
+  }
+}
+await vibenet();
+
+/**
  * Tempo has no native gas token. `eth_getBalance` does not return 0 as the
  * docs state — it returns a large constant placeholder, identical for every
  * address including 0x1111…1111. Verified against Moderato 2026-01-10; see

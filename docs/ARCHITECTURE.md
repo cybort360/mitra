@@ -31,11 +31,19 @@ Confirmed live 2026-01-10.
 |---|---|---|---|
 | Solana | devnet | — | `https://api.devnet.solana.com` |
 | Base | Sepolia | 84532 | `https://sepolia.base.org` |
+| Base | **Vibenet** (preview) | `84538453` | `https://rpc.vibes.base.org` |
 | Tempo | **Moderato** (testnet) | `42431` | `https://rpc.moderato.tempo.xyz` |
 
 Tempo mainnet is chain ID `4217` at `https://rpc.tempo.xyz`. It is **not** a
 test target; `scripts/phase2-readiness.mjs` hard-fails if `TEMPO_RPC_URL` points
 there, so a misconfigured endpoint cannot be mistaken for a testnet.
+
+**Vibenet** is Base's experimental preview network: 200 ms blocks (measured
+206 ms) and a *programmatic* faucet, so it is the only one of the three chains
+fundable without a human. Its docs state its "state may be reset without notice",
+which makes it ideal for proving the vault controller works and unsuitable as
+durable evidence — a balance verified today may be gone tomorrow. Base Sepolia
+is the durable testnet; Vibenet is the fast one.
 
 Tempo is EVM-compatible (Osaka) with **no native gas token** — fees are paid in
 TIP-20 stablecoins. A consequence for adapters: `eth_getBalance` returns a
