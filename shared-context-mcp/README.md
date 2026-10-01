@@ -106,17 +106,53 @@ node dist/cli.js sync   --db ./ctx.db --sync-dir ./shared
 node dist/cli.js watch  --db ./ctx.db --sync-dir ./shared
 ```
 
-## How auto-sync works
-
-Each node writes its whole log to one file in the shared folder named
-`ctxbundle-<nodeId>.json`, written atomically (temp file plus rename) so a peer
-polling at the wrong instant never reads a half-written document. Every node
-polls the folder, merges bundles whose contents it has not seen, and republishes
-if its own view changed — which is what propagates context transitively, so a
-node that never meets another node directly still converges through a shared
-peer.
-
 Cost is one small JSON file per node, rewritten only when something changed.
+
+Each node writes its whole log to `ctxbundle-<nodeId>.json` in the shared folder,
+written atomically (temp file plus rename) so a peer polling at the wrong instant
+never reads a half-written document. Every node polls the folder, merges bundles
+whose contents it has not seen, and republishes if its own view changed — which
+is what propagates context transitively, so a node that never meets another node
+directly still converges through a shared peer.
+
+## Sharing across machines (git)
+
+The sync folder is committed to the repository at `shared-context/sync/`. A
+fresh clone therefore arrives with the team's existing context already in it —
+no setup step to import anything.
+
+Each participant sets a **stable node id** so they own exactly one bundle:
+
+```json
+"env": {
+  "SHARED_CONTEXT_DB": "/path/to/repo/.shared-context/context.db",
+  "SHARED_CONTEXT_SYNC_DIR": "/path/to/repo/shared-context/sync",
+  "SHARED_CONTEXT_NODE_ID": "your-name"
+}
+```
+
+Without `SHARED_CONTEXT_NODE_ID` every clone mints a new random id and slowly
+fills the folder with bundles from nodes that no longer exist.
+
+The git workflow is deliberately plain:
+
+```bash
+# after recording context
+node shared-context-mcp/dist/cli.js sync --db .shared-context/context.db
+git add shared-context/sync && git commit -m "ctx: <what changed>"
+git push
+
+# before relying on a collaborator's context
+git pull
+node shared-context-mcp/dist/cli.js sync --db .shared-context/context.db
+```
+
+The CLI auto-detects `shared-context/sync` by walking up from the database, so
+`sync` and `say` work with no `--sync-dir` flag in a normal clone.
+
+Two things to know: the local sqlite log is gitignored (it is machine-specific),
+and merge conflicts between bundles are surfaced rather than auto-resolved — run
+`context_audit` and write a superseding entry if you see any.
 
 ## Working agreement
 

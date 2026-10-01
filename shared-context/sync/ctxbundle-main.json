@@ -1,6 +1,6 @@
 {
   "fromNodeId": "main",
-  "highSeq": 17,
+  "highSeq": 18,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -333,6 +333,22 @@
         "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
       ],
       "hash": "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+    },
+    {
+      "entryId": "ctx_7314de9d331ec1b4",
+      "seq": 18,
+      "kind": "finding",
+      "title": "Partner verified sync round-trip on a fresh clone",
+      "body": "Auto-detected sync dir publishes correctly.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [],
+      "authorId": "human:partner",
+      "createdAt": "2026-10-01T13:54:15.017Z",
+      "parents": [
+        "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+      ],
+      "hash": "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
     }
   ],
   "actors": [
@@ -351,5 +367,5 @@
       "createdAt": "2026-10-01T13:50:14.645Z"
     }
   ],
-  "tipHash": "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+  "tipHash": "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
 }
