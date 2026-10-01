@@ -1,22 +1,32 @@
 # Working together on Mitra
 
-This repo carries a **shared context server**: one auditable record of what we
-are building, what we decided, and why — shared by humans and agents alike, so
-nobody re-solves a settled problem or silently contradicts a colleague.
-
 New here? Start with [ONBOARDING.md](./ONBOARDING.md).
+
+> **Two things live in this repo that are not the product.** The shared context
+> server (`shared-context-mcp/`) and its sync bundles (`shared-context/sync/`)
+> are development instrumentation. Nothing in `app/`, `lib/`, `components/` or
+> `tests/` imports them, and `npm run build` (`next build`) never touches them.
+> The product is everything else. If you are here to work on Mitra itself, you
+> can ignore both directories entirely.
+
+This repo also carries a **shared context server**: one auditable record of what
+we are building, what we decided, and why — shared by humans and agents alike, so
+nobody re-solves a settled problem or silently contradicts a colleague.
 
 ## The short version
 
 ```bash
 git clone https://github.com/cybort360/mitra && cd mitra
-git checkout feat/shared-context-mcp
 ./shared-context-mcp/setup.sh your-name
 ```
 
 That builds the server, joins you to the shared context, and prints a
 ready-to-paste MCP config. Paste it into your agent and you start with the
 team's existing knowledge rather than an empty head.
+
+**It holds notes, not authority.** It cannot move capital or make an
+authorization decision, and is never part of Mitra's economic path. The mechanism
+that actually protects capital is in `forge/INVARIANTS.md`.
 
 ## What the shared context is for
 

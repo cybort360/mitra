@@ -1,5 +1,21 @@
 # Shared Context MCP Server
 
+> **Development instrumentation — not part of the Mitra product.**
+>
+> This directory holds a collaboration tool for building Mitra. It is not
+> referenced by the PRD, nothing in `app/`, `lib/`, `components/` or `tests/`
+> imports it, and the root `build` script (`next build`) never touches it. It is
+> a self-contained package with its own dependencies and its own test suite.
+>
+> **It holds notes, not authority.** It cannot move capital, cannot make an
+> authorization decision, and is never part of Mitra's economic path. The
+> mechanism that actually protects capital is in
+> [`forge/INVARIANTS.md`](../forge/INVARIANTS.md).
+>
+> It lives here rather than in a separate repository because it serves Mitra
+> alone. If it ever serves multiple projects, splitting it out is the right move
+> — not before.
+
 Shared, auditable memory for humans, agents and partners working on the same
 codebase. One local MCP server gives every collaborator a common, verifiable
 record of what we are building and why.
