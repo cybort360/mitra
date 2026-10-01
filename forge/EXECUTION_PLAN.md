@@ -42,19 +42,22 @@ What exists is a *local* economic kernel that is correct and well tested:
 - a state machine for reservations, enforced on write
 - deterministic netting with conservation proofs
 
-That is genuine progress toward the PRD's ### Phase 0 — Ground truth — `PARTIAL`
+That is genuine progress toward the PRD's Phase 1, and a *prerequisite* for
+Phase 2, but **it is not Phase 2**. Counting it as Phase 2 progress would be
+exactly the "implemented ≠ verified" failure the Foundry exists to prevent.
 
-Done: the P0 object registry is data (`lib/domain/p0-registry.ts`) and
+## Phase 0 — Ground truth — `PARTIAL`
+
+Done: the P0 object registry is data (`lib/domain/p0-registry.ts`), and
 `tests/phase0-registry.test.ts` asserts the exit condition against the real types
 and transition table, so it can fail. Five ADRs recorded. Evidence levels
 defined, including `FAILED` and `REGRESSED`, which were in use but undefined.
 
-Not done: canonical *serialization* — required by PRD §4.7 for receipt content
-hashes — does not exist yet. Recorded in Phase 1.
+The audit found two real gaps a prose checklist would have passed: `clearingEpoch`
+had a machine nobody had claimed, and two evidence statuses were undefined.
 
-## Phase 1 and a *prerequisite* for
-Phase 2, but **it is not Phase 2**. Counting it as Phase 2 progress would be
-exactly the "implemented ≠ verified" failure the Foundry exists to prevent.
+Not done: canonical *serialization* — required by PRD §4.7 for receipt content
+hashes — does not exist yet. That is Phase 1 work, recorded there.
 
 The Postgres repository (previously "Phase 3") falls in the same category. It was
 not in the PRD roadmap. It is retained because it makes concurrency and
