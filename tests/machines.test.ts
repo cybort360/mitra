@@ -5,14 +5,15 @@ import {
 import { POST as createReservation } from "@/app/api/v1/reservations/route";
 import { POST as execute } from "@/app/api/v1/reservations/execute/route";
 import { __resetLedgerForTests, getLedger } from "@/lib/store/ledger";
-import { NOW, goodProposal, json, req } from "./fixtures";
+import { getStore, __resetStoreForTests } from "@/lib/store/provider";
+import { NOW, goodProposal, json, prepareStore, req } from "./fixtures";
 
 const hold = async () => {
   const created = await createReservation(req({ ...goodProposal, ttlMinutes: 60 }));
   return (await json(created)).data;
 };
 
-beforeEach(() => { __resetLedgerForTests(); });
+beforeEach(async () => { await prepareStore(); });
 
 /** The documented happy path for each machine, from STATE_MACHINES.md. */
 const HAPPY_PATHS: Record<string, string[]> = {
@@ -160,38 +161,40 @@ describe("state machine enforcement through the API", () => {
       reservationId: r.reservationId, amount: r.amount, asset: r.asset,
       chain: r.chain, actionDigest: r.actionDigest, now: NOW,
     }));
-    const ledger = getLedger();
-    expect(() => ledger.setReservationStatus(r.reservationId, "RESERVED")).toThrow(/TERMINAL_STATE|ILLEGAL_TRANSITION/);
-    // And the record is unchanged.
-    expect(ledger.getReservation(r.reservationId)?.status).toBe("COMMITTED");
+    // Asserted through the store the routes actually used. With DATABASE_URL
+    // set that is Postgres, so reaching into the in-memory ledger would be
+    // asserting against a record nothing wrote.
+    const { repo } = await getStore();
+    await expect(repo.setReservationStatus(r.reservationId, "RESERVED")).rejects.toThrow(/TERMINAL_STATE|ILLEGAL_TRANSITION/);
+    expect((await repo.getReservation(r.reservationId))?.status).toBe("COMMITTED");
   });
 
   it("refuses to skip COMMITTED entirely", async () => {
     const r = await hold();
-    const ledger = getLedger();
-    expect(() => ledger.setReservationStatus(r.reservationId, "SETTLED")).toThrow(/ILLEGAL_TRANSITION/);
-    expect(ledger.getReservation(r.reservationId)?.status).toBe("RESERVED");
+    const { repo } = await getStore();
+    await expect(repo.setReservationStatus(r.reservationId, "SETTLED")).rejects.toThrow(/ILLEGAL_TRANSITION/);
+    expect((await repo.getReservation(r.reservationId))?.status).toBe("RESERVED");
   });
 
   it("refuses a re-commit of an already committed reservation", async () => {
     const r = await hold();
-    const ledger = getLedger();
-    ledger.setReservationStatus(r.reservationId, "COMMITTED");
-    expect(() => ledger.setReservationStatus(r.reservationId, "COMMITTED")).toThrow(/NO_OP_TRANSITION/);
+    const { repo } = await getStore();
+    await repo.setReservationStatus(r.reservationId, "COMMITTED");
+    await expect(repo.setReservationStatus(r.reservationId, "COMMITTED")).rejects.toThrow(/NO_OP_TRANSITION/);
   });
 
   it("allows the legal release branch from RESERVED", async () => {
     const r = await hold();
-    const ledger = getLedger();
-    const released = ledger.setReservationStatus(r.reservationId, "RELEASED");
+    const { repo } = await getStore();
+    const released = await repo.setReservationStatus(r.reservationId, "RELEASED");
     expect(released?.status).toBe("RELEASED");
     expect(isTerminal("reservation", "RELEASED")).toBe(true);
   });
 
   it("bumps the version on a legal transition", async () => {
     const r = await hold();
-    const ledger = getLedger();
-    expect(ledger.setReservationStatus(r.reservationId, "COMMITTED")?.version).toBe(r.version + 1);
+    const { repo } = await getStore();
+    expect((await repo.setReservationStatus(r.reservationId, "COMMITTED"))?.version).toBe(r.version + 1);
   });
 });
 

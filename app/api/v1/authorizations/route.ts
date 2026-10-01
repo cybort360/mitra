@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { evaluateProposal, type ActionProposal } from "@/lib/kernel/authorization";
-import { mandates } from "@/lib/store/seed";
-import { actionDigestFor, getLedger, newId } from "@/lib/store/ledger";
+import { getStore } from "@/lib/store/provider";
+import { actionDigestFor, newId } from "@/lib/store/ids";
 import type { Authorization } from "@/lib/domain/types";
 
 /**
@@ -34,10 +34,12 @@ export async function POST(req: Request) {
   }
   const body = parsed.data;
 
-  const mandate = mandates.find((m) => m.mandateId === body.mandateId);
+  const { repo, backend } = await getStore();
+
+  const mandate = await repo.getMandate(body.mandateId);
   if (!mandate) return NextResponse.json({ error: "MANDATE_NOT_FOUND", mandateId: body.mandateId }, { status: 404 });
 
-  const vault = getLedger().getVault(body.vaultId);
+  const vault = await repo.getVault(body.vaultId);
   if (!vault) return NextResponse.json({ error: "VAULT_NOT_FOUND", vaultId: body.vaultId }, { status: 404 });
 
   // A proposal for a vault the mandate does not cover must not be evaluated as
@@ -63,7 +65,7 @@ export async function POST(req: Request) {
 
   // Spend history is derived server-side from settled reservations, never taken
   // from the request, so a caller cannot under-report it to slip the limit.
-  const recentSpend = getLedger().recentSpend(
+  const recentSpend = await repo.recentSpend(
     vault.vaultId, mandate.mandateId, now, mandate.velocityLimit?.windowMinutes ?? 60,
   );
 
@@ -86,10 +88,10 @@ export async function POST(req: Request) {
     signer: "policy-engine:local",
     version: 1,
   };
-  getLedger().recordAuthorization(auth);
+  await repo.recordAuthorization(auth);
 
   return NextResponse.json(
-    { data: auth, evidenceLevel: "LOCAL_PASS", note: "An ALLOW is not permission to move capital. Execution is gated separately by the reservation binding guard." },
+    { data: auth, backend, evidenceLevel: "LOCAL_PASS", note: "An ALLOW is not permission to move capital. Execution is gated separately by the reservation binding guard." },
     { status: result.decision === "ALLOW" ? 201 : 403 },
   );
 }
