@@ -37,3 +37,6 @@ yarn-error.log*
 *.tsbuildinfo
 
 # Shared context memory (local sqlite log; share via sync bundles, not git)
+
+# Development keypairs — testnet secrets, never commit
+.dev-keys/
