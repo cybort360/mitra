@@ -393,6 +393,61 @@ would mean the reasoning behind the whole workaround no longer holds.
 query's subject has been identified. Confirm which chain an endpoint serves
 before believing anything it says — especially "nothing here".
 
+## F16 — the official Base bridge guide is archived and Goerli-pinned
+
+**Found** 2026-01-10, when bridging Sepolia → Base Sepolia.
+
+`docs.base.org` links to `base/guides/tree/main/bridge/native` as the reference
+for programmatic bridging. It cannot be used as written, for three independent
+reasons:
+
+1. **The repository is archived.** GitHub reports `archived: true`, last push
+   2024-06-23. Nobody is fixing it.
+2. **Its config is pinned to Goerli, not Sepolia.** `hardhat.config.js`
+   hardcodes `base-goerli.blockscout.com`, WETH on goerli, and
+   `L1StandardBridge = 0xfA6D8Ee5BE770F84FC001D098C4bD604Fe01284a`. The README
+   *prose* says "sepolia" throughout, so a careful reader following the words
+   sends value to a Goerli address. **That address has no code on Sepolia L1** —
+   measured with `eth_getCode`, not assumed.
+3. **It requires a wallet mnemonic in a checked-in `secrets.json`**, which is
+   precisely the habit F13/F14 exist to prevent.
+
+The correct Base Sepolia `L1StandardBridge` is
+`0xfd0Bf71F60660E2f608ed56e1659C450eB113120`, taken from Base's own
+contract-addresses page and then verified from two independent directions: it
+has 2,472 bytes of code on Sepolia L1, and `messenger()` returns
+`0xC34855F4De64F1840e5686e64278da901e261f20`, the documented
+`L1CrossDomainMessenger`. `scripts/bridge-sepolia.mjs` asserts both before it
+will move a wei.
+
+**Still blocked, and honestly so.** The transaction reverts:
+
+```
+ContractFunctionExecutionError: The contract function "depositETH" reverted.
+  address: 0xfd0Bf71F60660E2f608ed56e1659C450eB113120
+  args: (0xAeA8bc34…26D, 200000, 0x)
+```
+
+Cause: on the OP Stack, `depositETH` requires the sender to be a **proven actor**
+in the L2 dispute game. A plain EOA is not one, and `eth_call` to `proven()`
+against our address returns `0x`. This is protocol behaviour, not a bug, and it
+cannot be worked around from an EOA — it needs a permissioned system tx. So
+Base Sepolia funding stays `PARTIAL`, and the reason is a protocol constraint
+rather than a missing key.
+
+**A misleading environment variable, worth its own note.** The first run failed
+with `Must be authenticated!` on every call. The cause was not the code: this
+environment has `SEPOLIA_RPC_URL` pointing at an Alchemy endpoint whose key has
+expired, and it silently overrode the script's public default. Worth recording
+because the error names a *method* (`eth_getCode`) and so reads like a
+permissions problem in the script rather than a dead credential in the
+environment. The same class of thing as F13: the failure appears in the wrong
+place.
+
+**Rule.** An archived reference is not a working reference, and a prose
+description of a network is not a deployment. Ask the chain what is actually
+there before sending value to an address you read in a README.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

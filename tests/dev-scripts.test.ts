@@ -149,6 +149,42 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     expect(out).toMatch(/cargo-build-sbf.*(present|absent)/);
   }, 30_000);
 
+  it("bridge-sepolia refuses the archived guide's Goerli address", async () => {
+    // F16. The guide the Base docs link to is archived and hardcoded to Goerli.
+    // Its L1StandardBridge has no code on Sepolia, so a script that trusted the
+    // README would send value to nothing. The verification is a live check: the
+    // documented Sepolia bridge must have code AND report the documented
+    // messenger. A wrong-but-plausible address fails both.
+    const GOOD = "0xfd0Bf71F60660E2f608ed56e1659C450eB113120";
+    const GOERLI = "0xfA6D8Ee5BE770F84FC001D098C4bD604Fe01284a";
+
+    const rpc = async (url: string, method: string, params: unknown[]) => {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      return (await r.json()) as { result?: string; error?: { message?: string } };
+    };
+    const url = "https://ethereum-sepolia-rpc.publicnode.com";
+
+    const good = await rpc(url, "eth_getCode", [GOOD, "latest"]);
+    const bad = await rpc(url, "eth_getCode", [GOERLI, "latest"]);
+
+    // The property that makes this a real guard: the archived guide's address
+    // resolves to nothing, so a script that merely *had* an address would not
+    // notice. Only asking the chain distinguishes them.
+    expect(good.result && good.result.length).toBeGreaterThan(2);
+    expect(bad.result).toBe("0x");
+
+    // And the good one identifies itself: messenger() must be the documented
+    // L1CrossDomainMessenger, not merely "some contract".
+    const m = await rpc(url, "eth_call", [{ to: GOOD, data: "0x3cb747bf" }, "latest"]);
+    expect("0x" + (m.result ?? "").slice(-40).toLowerCase())
+      .toBe("0xc34855f4de64f1840e5686e64278da901e261f20");
+  }, 40_000);
+
   it("Tempo readiness is pinned to Moderato, and mainnet is refused", () => {
     // The check that matters. A readiness script pointed at Tempo mainnet must
     // not report the testnet as live, or every downstream claim built on it

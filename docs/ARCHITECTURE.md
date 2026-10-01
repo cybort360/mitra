@@ -45,6 +45,13 @@ which makes it ideal for proving the vault controller works and unsuitable as
 durable evidence — a balance verified today may be gone tomorrow. Base Sepolia
 is the durable testnet; Vibenet is the fast one.
 
+**Base Sepolia deposits are gated.** The OP Stack requires the sender to be a
+*proven actor* in the dispute game; a plain EOA is not one, so `depositETH`
+reverts even from a funded L1 account. Bridging in requires a permissioned
+system transaction. See `forge/FAILURES.md` F16 — and note the archived
+`base/guides` reference the Base docs link to is pinned to Goerli, so its
+addresses are wrong for Sepolia.
+
 Tempo is EVM-compatible (Osaka) with **no native gas token** — fees are paid in
 TIP-20 stablecoins. A consequence for adapters: `eth_getBalance` returns a
 large constant identical for every address, not a balance, so it must never gate
