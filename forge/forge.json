@@ -1,0 +1,66 @@
+{
+  "control_plane": "FORGE",
+  "version": "1.4",
+  "product": "Mitra",
+  "release": "0.1",
+  "tagline": "Coordination, netting, clearing, saga and vault system for agentic commerce",
+  "normative_sources": {
+    "prd": {
+      "path": "docs/product/MITRA_PRD.md",
+      "sha256": "eafada5adb75fb9bb93be13db6948fb34e46cb5f9e320fab80907ed219482ff5",
+      "role": "normative"
+    },
+    "full_product_spec": {
+      "path": "docs/product/MITRA_0_1_FULL_PRODUCT_SPEC.md",
+      "sha256": "6a60862f1ed5faf8fd75a35bfb0a8afcf9c67108b11a35c8f0a3142f3c2435f1",
+      "role": "supporting"
+    }
+  },
+  "load_bearing_mechanism": "An ALLOW decision is never itself permission to move value.",
+  "evidence": {
+    "current_level": "LOCAL_PASS",
+    "levels": [
+      "DESIGN_ONLY",
+      "LOCAL_PASS",
+      "TESTNET_PASS",
+      "LIVE_PUBLIC_PASS",
+      "PRODUCTION_PASS"
+    ],
+    "claim_statuses": ["UNTESTED", "PARTIAL", "FAILED", "VERIFIED", "REGRESSED"],
+    "onchain_program_exists": false,
+    "testnet_execution_evidence": false
+  },
+  "prd_phases": {
+    "0_ground_truth": "complete",
+    "1_core": "complete",
+    "2_solana_kernel_and_vault": "in_progress_kernel_only_exit_condition_not_met",
+    "3_authority_and_confidential_policy": "not_started",
+    "4_commerce": "not_started",
+    "5_agent_ecosystem": "not_started",
+    "6_recovery": "not_started",
+    "7_clearing": "in_progress_local_netting_only",
+    "8_base": "not_started",
+    "9_tempo": "not_started",
+    "10_production_tooling": "in_progress_console_is_a_mockup"
+  },
+  "control_plane_files": {
+    "PRODUCT": "forge/PRODUCT.md",
+    "INVARIANTS": "forge/INVARIANTS.md",
+    "EXECUTION_PLAN": "forge/EXECUTION_PLAN.md",
+    "PROOF_LEDGER": "forge/PROOF_LEDGER.md",
+    "FAILURES": "forge/FAILURES.md",
+    "STANDARDS": "forge/standards/"
+  },
+  "verification_commands": {
+    "typecheck": "npx tsc --noEmit",
+    "tests": "npx vitest run",
+    "build": "npm run build",
+    "persistence": "DATABASE_URL=... npx vitest run tests/persistence.test.ts",
+    "context_audit": "node shared-context-mcp/dist/cli.js audit --db .shared-context/context.db"
+  },
+  "hard_requirements": {
+    "node": ">=22.5.0",
+    "database": "PostgreSQL (DATABASE_URL required for persistence; no default by design)",
+    "reason_for_no_default": "A silent fallback would let a run report success against developer state that does not exist in production."
+  }
+}
