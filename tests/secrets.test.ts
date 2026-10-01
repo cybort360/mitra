@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -84,6 +84,61 @@ describe("secrets hygiene", () => {
       });
     }
     expect(suspicious).toEqual([]);
+  });
+
+  it("scans the WORKING TREE, not only tracked files", () => {
+    // F13. The test above enumerates `git ls-files`, which returns tracked
+    // files only. So a key added to a brand-new file passed every guard until
+    // the moment it was committed — which is exactly when the window closes.
+    // That is the wrong order: the guard has to be blind precisely where files
+    // change.
+    //
+    // This walks the working tree instead, so a new file is scanned the moment
+    // it is written. `git status --porcelain` supplies the candidate list:
+    // untracked files are included, and ignored paths (including `.dev-keys/`)
+    // are excluded, so the real secrets directory is never opened.
+    const status = git(["status", "--porcelain", "--untracked-files=all"]);
+    if (status === null) return; // no git; the tracked-file test still applies
+
+    const files = status
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.slice(3).trim())
+      // Only additions/modifications, and only text we could plausibly hold a key in.
+      .filter((f) => /\.(ts|tsx|mjs|js|json|md|env)$/.test(f))
+      .filter((f) => !f.startsWith(".dev-keys/") && existsSync(path.join(ROOT, f)));
+
+    const KEY_ASSIGNMENT =
+      /(privateKey|secretKey|mnemonic|PRIVATE_KEY|secret)\s*[:=]\s*["'][0-9a-fA-F]{64}["']/;
+    const offenders = files.filter((f) =>
+      readFileSync(path.join(ROOT, f), "utf8")
+        .split("\n")
+        .some((l) => KEY_ASSIGNMENT.test(l)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("an untracked new file with a key is caught before it is committed", () => {
+    // The control that gives the previous test meaning: prove the file list
+    // actually contains an untracked file, and that scanning it finds the key.
+    // Without this, the test above would pass if `git status` silently returned
+    // nothing — which is the same class of bug as a guard that cannot see.
+    const probe = path.join("lib", "__secret_probe__.mjs");
+    const body = 'export const privateKey = "' + "b".repeat(64) + '";\n';
+    writeFileSync(path.join(ROOT, probe), body);
+    try {
+      const status = git(["status", "--porcelain", "--untracked-files=all"]);
+      const seen = (status ?? "").split("\n").some((l) => l.includes("__secret_probe__"));
+      // If git does not report the untracked file, this test is skipped rather
+      // than silently passing — an honest UNTESTED beats a false VERIFIED.
+      if (!seen) return;
+      const KEY_ASSIGNMENT =
+        /(privateKey|secretKey|mnemonic|PRIVATE_KEY|secret)\s*[:=]\s*["'][0-9a-fA-F]{64}["']/;
+      const content = readFileSync(path.join(ROOT, probe), "utf8");
+      expect(content.split("\n").some((l) => KEY_ASSIGNMENT.test(l))).toBe(true);
+    } finally {
+      rmSync(path.join(ROOT, probe), { force: true });
+    }
   });
 
   it("the key directory, if present, holds only expected files", () => {

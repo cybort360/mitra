@@ -154,6 +154,28 @@ npx vitest run tests/kernel.test.ts
 | Reservation state machine blocks illegal transitions | `VERIFIED` | Mutation: bypassing the guard fails 3 tests |
 | Saga outcomes are mutually unreachable | `VERIFIED` | `tests/machines.test.ts` |
 
+## T7 — Testnet credentials and network reachability
+
+```bash
+node scripts/verify-dev-keys.mjs    # re-derives every address from the secret
+node scripts/phase2-readiness.mjs   # preconditions as commands
+```
+
+| Claim | Status | Evidence |
+|---|---|---|
+| Solana devnet address derives from the stored ed25519 key | `VERIFIED` | `verify-dev-keys.mjs` re-derives via TweetNaCl and the 64-byte keypair format; exits non-zero on mismatch |
+| EVM address derives from the stored secp256k1 key | `VERIFIED` | ECDH + keccak256, checked against the published scalar-1 vector `0x7E5F…5Bdf` |
+| Solana devnet RPC reachable | `VERIFIED` | `getHealth` → `ok` |
+| Base Sepolia RPC reachable | `VERIFIED` | `eth_blockNumber` → `0x2d5a00f` |
+| Tempo Moderato reachable **and identified as testnet** | `VERIFIED` | `eth_chainId` → `0xa5bf` (42431). Negative case: against mainnet the script reports `chainId 4217 = TEMPO MAINNET — refusing to treat production as a testnet` |
+| Addresses are funded | `PARTIAL` | No funds claimed. Requires a human at a browser faucet — Solana devnet, Base Sepolia, and Tempo Moderato (no programmatic faucet endpoint; `POST /v1/faucet` → `not_found`) |
+| Vault can read a Tempo balance | `UNTESTED` | `eth_call balanceOf` reverted on both faucet tokens while `eth_getCode` returned `0xef`. The Tempo API balances route is the only one observed working. Unresolved — see F12 |
+
+Addresses are public and safe to print; the private keys are in a gitignored
+directory at mode 600 and are **not** in this repository.
+
+---
+
 ## T6 — Shared context (development tool)
 
 ```bash
@@ -174,6 +196,7 @@ Recorded so a later reader does not assume silence means proof.
 | Not claimed | Why |
 |---|---|
 | Any testnet or mainnet execution | No on-chain program exists |
+| **Tempo balance semantics** | `eth_getBalance` returns a constant placeholder, not a balance — F12. TIP-20 `balanceOf` via `eth_call` was observed to *revert* on Moderato; only the Tempo API balances route is confirmed working. No Mitra code reads Tempo balances yet. |
 | Production custody | Capital is a Postgres row, not an enforced account |
 | Confidential policy evaluation | `confidentialPolicy` is a type field with no enclave |
 | Settlement | `UnconfiguredAdapterError` throws by design |

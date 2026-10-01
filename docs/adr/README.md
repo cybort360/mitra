@@ -14,6 +14,7 @@ part that was hard to recover.
 | [0003](0003-store-abstraction-and-fallback.md) | One repository interface, explicit in-memory fallback | Accepted |
 | [0004](0004-phase-exit-conditions-require-live-networks.md) | Phase exit conditions need live networks; abstractions alone cannot satisfy them | Accepted |
 | [0005](0005-evidence-levels-untested-through-verified.md) | Five evidence levels; `PARTIAL` is not `VERIFIED` | Accepted |
+| [0006](0006-tempo-balances-require-tip20.md) | Tempo balances come from TIP-20 `balanceOf`, never `eth_getBalance`; assert chain ID 42431 | Accepted |
 
 ## Format
 
