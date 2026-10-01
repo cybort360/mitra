@@ -1,0 +1,371 @@
+{
+  "fromNodeId": "partner2",
+  "highSeq": 18,
+  "entries": [
+    {
+      "entryId": "ctx_9114ecb85dd5d8ca",
+      "seq": 1,
+      "kind": "decision",
+      "title": "Sequence: harden the kernel before any chain integration",
+      "body": "The README's 10-step path put Solana programs at step 3. We reordered: the authorization kernel decides what is ever allowed to move value, so it must be trustworthy before anything anchors to it. Live-chain evidence is worthless if the thing emitting commitments has holes.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "kernel",
+        "sequencing"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.389Z",
+      "parents": [],
+      "hash": "8ca224b3e8528016786e2754e2a434116d5dd1a0e9862304286551db1a188f7a"
+    },
+    {
+      "entryId": "ctx_0e68e0dedf4f0e40",
+      "seq": 2,
+      "kind": "finding",
+      "title": "Reservation expiry was never enforced in the execution guard",
+      "body": "validateExecutionBinding read no expiresAt, so stale RESERVED/COMMITTED reservations returned ok:true. Confirmed against seed data res_run496. Fixed by requiring an explicit `now` and adding a RESERVATION_EXPIRED check.",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "expiry",
+        "security"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.392Z",
+      "parents": [
+        "8ca224b3e8528016786e2754e2a434116d5dd1a0e9862304286551db1a188f7a"
+      ],
+      "hash": "cc306b00c227146af68996f81d3b803bc5af9eae30c35fde6f34f8b9afa415c0"
+    },
+    {
+      "entryId": "ctx_71d2840f6c293276",
+      "seq": 3,
+      "kind": "finding",
+      "title": "velocityLimit was declared but never evaluated",
+      "body": "The field existed on the Mandate type and was set on seed data, but evaluateProposal never read it. Now enforced over a caller-supplied window of recent spend.",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "policy"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.394Z",
+      "parents": [
+        "cc306b00c227146af68996f81d3b803bc5af9eae30c35fde6f34f8b9afa415c0"
+      ],
+      "hash": "a3455091bac68cffc15949817652707f4536f3db2126eb8f1e9b07ae8fe2546a"
+    },
+    {
+      "entryId": "ctx_a47b18a16b13eebd",
+      "seq": 4,
+      "kind": "finding",
+      "title": "Negative amounts returned ALLOW at the policy layer",
+      "body": "Every amount guard was one-sided (>), so -100 passed policy and was only caught downstream in reserve(). Added INVALID_AMOUNT lower-bound guards in both the policy and execution layers, plus a NaN guard in reserve().",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "validation"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.396Z",
+      "parents": [
+        "a3455091bac68cffc15949817652707f4536f3db2126eb8f1e9b07ae8fe2546a"
+      ],
+      "hash": "9d392b377400015f4064d45cccb908e1696fe7d0e44501e2bd7bb0e001b8474a"
+    },
+    {
+      "entryId": "ctx_89ce3e9f71bf4b34",
+      "seq": 5,
+      "kind": "convention",
+      "title": "Kernel functions take explicit time; they never call new Date()",
+      "body": "A hidden wall-clock read is what allowed the expiry bug to sit undetected. Time is now an injected parameter so the kernel stays pure and testable.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "purity",
+        "testing"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.398Z",
+      "parents": [
+        "9d392b377400015f4064d45cccb908e1696fe7d0e44501e2bd7bb0e001b8474a"
+      ],
+      "hash": "7ada9d8291bdbb4efc5833e69b644f00d985f5afbe651dae165a93fb47d886ff",
+      "data": {
+        "files": [
+          "lib/kernel/authorization.ts",
+          "lib/kernel/vault.ts",
+          "lib/kernel/clearing.ts"
+        ]
+      }
+    },
+    {
+      "entryId": "ctx_850848858ab43f8a",
+      "seq": 6,
+      "kind": "invariant",
+      "title": "An ALLOW decision is never itself permission to move value",
+      "body": "The exact instruction must still match the evaluated action digest, amount, asset, chain, expiry, nonce and reservation. This is the thesis of the product and the reason the execution guard exists as a separate gate from policy evaluation.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "security",
+        "thesis"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.401Z",
+      "parents": [
+        "7ada9d8291bdbb4efc5833e69b644f00d985f5afbe651dae165a93fb47d886ff"
+      ],
+      "hash": "a2dfb8ea1626741c5061116c31146b6b22e3e3ac9b38558f15cadc65598ae4dd"
+    },
+    {
+      "entryId": "ctx_38bb7a12d9f84d8e",
+      "seq": 7,
+      "kind": "invariant",
+      "title": "Available vault capital reflects every encumbrance",
+      "body": "total = available + reserved + escrowed + encumbered + settling + frozen. reconcileVault must report zero difference or the log is not trustworthy.",
+      "status": "active",
+      "scope": "kernel/vault",
+      "tags": [
+        "conservation"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.404Z",
+      "parents": [
+        "a2dfb8ea1626741c5061116c31146b6b22e3e3ac9b38558f15cadc65598ae4dd"
+      ],
+      "hash": "788d732e69f2c355508be6fd74d4195bc83af2fcdcfda85d96bb2873fece33f9",
+      "data": {
+        "files": [
+          "lib/kernel/vault.ts"
+        ]
+      }
+    },
+    {
+      "entryId": "ctx_737589f6a838c2fe",
+      "seq": 8,
+      "kind": "blocker",
+      "title": "Economic kernel is not yet reachable from any API route or page",
+      "body": "evaluateProposal and validateExecutionBinding are never called in production paths. Only reconcileVault, netObligations and failureScenarios are wired. The authorization engine is effectively dead code until Phase 1 adds /reservations and /authorizations routes.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "phase1",
+        "wiring"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.407Z",
+      "parents": [
+        "788d732e69f2c355508be6fd74d4195bc83af2fcdcfda85d96bb2873fece33f9"
+      ],
+      "hash": "bcc0b20cc34f8fefb6f2f56e98e3b73bc21cb847c8b44f859a6ed691327bf372"
+    },
+    {
+      "entryId": "ctx_db21ae062806c5ce",
+      "seq": 9,
+      "kind": "finding",
+      "title": "Console UI is template-literal HTML, not components",
+      "body": "15 pages totalling 89 lines, built from giant inline HTML strings (app/policies/page.tsx has a 2496-char single line). It demonstrates information architecture but is a mockup, not a product.",
+      "status": "active",
+      "scope": "ui",
+      "tags": [
+        "phase1",
+        "ui"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.409Z",
+      "parents": [
+        "bcc0b20cc34f8fefb6f2f56e98e3b73bc21cb847c8b44f859a6ed691327bf372"
+      ],
+      "hash": "42a1d03efb8d0acad6cd69ba7cc5de051f716cc41792312b8676f4d9c1f79aef"
+    },
+    {
+      "entryId": "ctx_280ae778d07adcbb",
+      "seq": 10,
+      "kind": "decision",
+      "title": "Store is a static seed array; data.ts only re-exports it",
+      "body": "lib/store/data.ts is `export * from './seed'`. There is no persistence and no event log. Replacing this with Postgres plus an append-only event log is the first item of Phase 1.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "phase1",
+        "storage"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.411Z",
+      "parents": [
+        "42a1d03efb8d0acad6cd69ba7cc5de051f716cc41792312b8676f4d9c1f79aef"
+      ],
+      "hash": "98f8a82a9ee6d8a33a07637f908ac62fe4b4e38d6ad2ca214f82a3f283daf405"
+    },
+    {
+      "entryId": "ctx_9ee0723be8e15371",
+      "seq": 11,
+      "kind": "question",
+      "title": "Should the shared context server live inside the app or beside it?",
+      "body": "Currently a standalone package with its own build. Integrating into Next.js would couple memory availability to the app's lifecycle, which is undesirable for a tool that must run even when the app is down.",
+      "status": "active",
+      "scope": "tooling",
+      "tags": [
+        "architecture"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.412Z",
+      "parents": [
+        "98f8a82a9ee6d8a33a07637f908ac62fe4b4e38d6ad2ca214f82a3f283daf405"
+      ],
+      "hash": "213d588eed8e3321e50b4bb77848e5434774e8228a92fbbe41a77808b23eaa54"
+    },
+    {
+      "entryId": "ctx_7e6e4a22e3abd61d",
+      "seq": 12,
+      "kind": "convention",
+      "title": "Agents announce intent in shared context before non-obvious work",
+      "body": "Record a decision entry BEFORE making the change, not a summary after. The reasoning is the only part a future reader cannot reconstruct from the diff. If you stop mid-task, leave a handoff entry stating what is done, what is next, and the risk.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.711Z",
+      "parents": [
+        "213d588eed8e3321e50b4bb77848e5434774e8228a92fbbe41a77808b23eaa54"
+      ],
+      "hash": "9761cccee4ec1ca0590a3ba9fcebdf9cbd6d4f6cbfdb80a4353fe670caa7d0ad"
+    },
+    {
+      "entryId": "ctx_7037dc563528b28e",
+      "seq": 13,
+      "kind": "convention",
+      "title": "Search shared context before editing code you did not write",
+      "body": "Code that looks wrong is usually a decision you cannot see from the code itself. Run context_recall on the area first, and again whenever something surprises you. This is the cheapest way to avoid re-solving a settled problem.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.718Z",
+      "parents": [
+        "9761cccee4ec1ca0590a3ba9fcebdf9cbd6d4f6cbfdb80a4353fe670caa7d0ad"
+      ],
+      "hash": "274b956240a031b6819cb0f3d14bba848a8483be1b0aafd0883f71f8d9fac888"
+    },
+    {
+      "entryId": "ctx_fd66a511da42b4e6",
+      "seq": 14,
+      "kind": "convention",
+      "title": "A wrong context entry is worse than a missing one",
+      "body": "Record only what you verified, never speculation. Every entry is read as fact by someone who was not there. If you were wrong, supersede it loudly and say what changed — never quietly contradict an entry you did not write.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "protocol",
+        "quality"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.720Z",
+      "parents": [
+        "274b956240a031b6819cb0f3d14bba848a8483be1b0aafd0883f71f8d9fac888"
+      ],
+      "hash": "50992cc017c4f7f5738720617d55e1337da3d42a95baece2cf4f8c67b787300f"
+    },
+    {
+      "entryId": "ctx_60612d38c3c3742f",
+      "seq": 15,
+      "kind": "convention",
+      "title": "Actor ids are stable and prefixed by kind",
+      "body": "Use agent:<name>, human:<name> or service:<name> and reuse the same id across all sessions and machines. A fresh id per session makes context look like it came from a crowd of one-off strangers and breaks attribution.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "identity",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.722Z",
+      "parents": [
+        "50992cc017c4f7f5738720617d55e1337da3d42a95baece2cf4f8c67b787300f"
+      ],
+      "hash": "51f338316b3b28f829f14657f1d879c7b174311c99f386f3307e35eb9f6fa049"
+    },
+    {
+      "entryId": "ctx_df3de9f840b82444",
+      "seq": 16,
+      "kind": "invariant",
+      "title": "A stopped agent must leave a handoff or the work is lost",
+      "body": "An agent that stops mid-task without a handoff entry is the most expensive failure mode: worse than one that never started, because a human or another agent must re-derive all the reasoning. Done / next / risk, always.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "handoff",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.725Z",
+      "parents": [
+        "51f338316b3b28f829f14657f1d879c7b174311c99f386f3307e35eb9f6fa049"
+      ],
+      "hash": "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
+    },
+    {
+      "entryId": "ctx_eb0700bdd778580c",
+      "seq": 17,
+      "kind": "convention",
+      "title": "Disagreements are resolved by superseding, not by picking silently",
+      "body": "When context_digest reports a topic as contested, two people recorded the same decision differently. Write a new decision that supersedes both and states the tradeoff, so the reasoning survives. If it truly needs a human, record a question naming the exact choice.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "conflict",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.727Z",
+      "parents": [
+        "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
+      ],
+      "hash": "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+    },
+    {
+      "entryId": "ctx_7314de9d331ec1b4",
+      "seq": 18,
+      "kind": "finding",
+      "title": "Partner verified sync round-trip on a fresh clone",
+      "body": "Auto-detected sync dir publishes correctly.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [],
+      "authorId": "human:partner",
+      "createdAt": "2026-10-01T13:54:15.017Z",
+      "parents": [
+        "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+      ],
+      "hash": "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
+    }
+  ],
+  "actors": [
+    {
+      "actorId": "agent:cline",
+      "kind": "agent",
+      "displayName": "Cline",
+      "role": "kernel + tooling",
+      "createdAt": "2026-10-01T13:38:04.384Z"
+    },
+    {
+      "actorId": "agent:newbie",
+      "kind": "agent",
+      "displayName": "New Partner Agent",
+      "role": "backend",
+      "createdAt": "2026-10-01T13:50:14.645Z"
+    }
+  ],
+  "tipHash": "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
+}
