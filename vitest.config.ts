@@ -6,8 +6,13 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   test: {
     // shared-context-mcp is a separate package with its own suite; keep it out
-    // of the app's kernel run so `npm test` reports the kernel honestly.
+    // of the app's runs so `npm test` reports the product honestly.
     exclude: ["node_modules/**", "shared-context-mcp/**", ".next/**"],
+    // Phase 3 persistence tests talk to a real database. They self-skip when
+    // DATABASE_URL is absent, which keeps `npm test` usable on a machine with
+    // no Postgres while never reporting evidence that was not gathered.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
   resolve: {
     alias: {
