@@ -6,10 +6,16 @@ export function reconcileVault(vault: Vault) {
 }
 
 export function reserve(vault: Vault, amount: number) {
-  if (amount <= 0) throw new Error("INVALID_RESERVATION_AMOUNT");
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("INVALID_RESERVATION_AMOUNT");
   if (vault.emergencyFreeze) throw new Error("VAULT_FROZEN");
   if (amount > vault.available) throw new Error("INSUFFICIENT_AVAILABLE_CAPITAL");
   return { ...vault, available: vault.available - amount, reserved: vault.reserved + amount, version: vault.version + 1 };
+}
+
+export function releaseReservation(vault: Vault, reservation: Reservation) {
+  if (reservation.status !== "RESERVED") throw new Error("RESERVATION_NOT_RELEASABLE");
+  if (reservation.amount > vault.reserved) throw new Error("RESERVATION_EXCEEDS_RESERVED_CAPITAL");
+  return { ...vault, available: vault.available + reservation.amount, reserved: vault.reserved - reservation.amount, version: vault.version + 1 };
 }
 
 export function consumeReservation(vault: Vault, reservation: Reservation) {
