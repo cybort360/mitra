@@ -420,7 +420,8 @@ has 2,472 bytes of code on Sepolia L1, and `messenger()` returns
 `L1CrossDomainMessenger`. `scripts/bridge-sepolia.mjs` asserts both before it
 will move a wei.
 
-**Still blocked, and honestly so.** The transaction reverts:
+**The bridge entry point is blocked, but the portal is not.** Calling
+`depositETH` on `L1StandardBridge` reverts:
 
 ```
 ContractFunctionExecutionError: The contract function "depositETH" reverted.
@@ -428,12 +429,61 @@ ContractFunctionExecutionError: The contract function "depositETH" reverted.
   args: (0xAeA8bc34…26D, 200000, 0x)
 ```
 
-Cause: on the OP Stack, `depositETH` requires the sender to be a **proven actor**
-in the L2 dispute game. A plain EOA is not one, and `eth_call` to `proven()`
-against our address returns `0x`. This is protocol behaviour, not a bug, and it
-cannot be worked around from an EOA — it needs a permissioned system tx. So
-Base Sepolia funding stays `PARTIAL`, and the reason is a protocol constraint
-rather than a missing key.
+Cause: `L1StandardBridge` forwards to the portal but enforces its own
+access control, and a plain EOA does not satisfy it. `eth_call` confirms the
+revert is real while the portal's own equivalent succeeds — see below.
+
+### Correction: I reported this as impossible, and that was wrong
+
+The first version of this entry concluded the bridge could not be done from an
+EOA. That was an over-generalisation from one entry point. The human pointed out
+that the **OptimismPortal** exposes
+`depositTransaction(address,uint256,uint64,bool,bytes)`, which is a different
+function on a different contract with different access control. Simulated
+before spending gas:
+
+```
+depositTransaction(...)  via eth_call  -> 0x            (succeeds)
+depositETH(...)          via eth_call  -> execution reverted
+```
+
+**Correction: I reported this as impossible, and that was wrong.** A bridge from
+an EOA was available the whole time; I had tested one function and generalised
+from it. That is the same error as F12 and F13 — treating one observation as a
+property of the system.
+
+The L1 transaction then succeeded (`status 0x1`,
+`0xb681280536f994aef11736e6592de70a363ea00b5dfd1e6a3f1ecd03839c9b4c`, block
+11823822), emitting the canonical `TransactionDeposited(address,address,uint256,bytes)`
+event, and the L1 balance fell from 0.05 to 0.0398 ETH — so the value really did
+leave L1.
+
+**The L2 arrival took longer than expected, and that is the point.** Two deposits
+were accepted on L1 and the balance fell both times (0.05 → 0.0398 → 0.0345 ETH),
+with canonical `TransactionDeposited` events. For a while the Base Sepolia
+balance was still `0x0`, and the temptation was to write "bridged" on the
+strength of the L1 receipt.
+
+Instead the claim waited on the L2 balance, which is the only thing that counts.
+**0.01 ETH then appeared on `sepolia.base.org`.** The L1 receipt was true
+throughout; it was simply not sufficient. A second 0.005 deposit was still
+deriving when last checked, which is the same evidence discipline applied
+without exception: L1 accepted, L2 not yet observed, so L2 stays `PARTIAL`.
+
+**An ABI bug I introduced while testing this.** The first version of the
+regression test hand-encoded the calldata and put the dynamic `bytes` offset at
+`0x20` instead of `0xa0` (5 head words, not 3). It produced well-formed-looking
+calldata that reverted, and the test then "proved" the working call was broken.
+The correct encoding was taken from `cast calldata` rather than from my
+arithmetic. Bespoke encoding is F12 again: it fails silently and looks right.
+
+**Rule.** "This function is gated" is not "this is impossible". Test the other
+entry point before reporting a wall — especially when the system has more than
+one door.
+
+**Rule.** "This function is gated" is not "this is impossible". Test the other
+entry point before reporting a wall — especially when the system has more than
+one door.
 
 **A misleading environment variable, worth its own note.** The first run failed
 with `Must be authenticated!` on every call. The cause was not the code: this

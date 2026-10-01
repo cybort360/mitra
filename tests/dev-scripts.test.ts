@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { keccak256 } from "js-sha3";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -183,6 +184,58 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     const m = await rpc(url, "eth_call", [{ to: GOOD, data: "0x3cb747bf" }, "latest"]);
     expect("0x" + (m.result ?? "").slice(-40).toLowerCase())
       .toBe("0xc34855f4de64f1840e5686e64278da901e261f20");
+  }, 40_000);
+
+  it("the Portal's depositTransaction works where the bridge's depositETH reverts", async () => {
+    // The correction in F16. `depositETH` on L1StandardBridge reverts for an
+    // EOA, but `depositTransaction` on the OptimismPortal is a different
+    // function on a different contract with different access control — and it
+    // works. Both are simulated with eth_call, so no gas is spent and the
+    // difference is measured rather than assumed.
+    const PORTAL = "0x49f53e41452C74589E85cA1677426Ba426459e85";
+    const BRIDGE = "0xfd0Bf71F60660E2f608ed56e1659C450eB113120";
+    const ME = "0xaea8bc34df7745e35510214147a2f6a5e15eb26d";
+    const url = "https://ethereum-sepolia-rpc.publicnode.com";
+
+    const call = async (to: string, data: string, value: string) => {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "eth_call",
+          params: [{ to, data, value }, "latest"],
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      return (await r.json()) as { result?: string; error?: unknown };
+    };
+    const sel = (s: string) => "0x" + keccak256(s).slice(0, 8);
+    const pad = (a: string) => a.slice(2).padStart(64, "0");
+    const VALUE = "0x" + (10n ** 16n).toString(16);
+
+    // depositTransaction(address,uint256,uint64,bool,bytes)
+    //
+    // The head is 5 words, so the dynamic `bytes` tail begins at 0xa0, not
+    // 0x20. Getting that wrong ABI-encodes valid-looking calldata that reverts,
+    // which is how the first version of this test "disproved" a working call.
+    const words = (...v: bigint[]) => v.map((n) => n.toString(16).padStart(64, "0")).join("");
+    const portal = await call(PORTAL,
+      sel("depositTransaction(address,uint256,uint64,bool,bytes)") +
+      pad(ME) + words(10n ** 16n, 200000n, 0n, 160n, 0n),
+      VALUE);
+
+    // depositETH(address,uint32,bytes) — 3 head words, so the tail is at 0x60.
+    const bridge = await call(BRIDGE,
+      sel("depositETH(address,uint32,bytes)") + pad(ME) + words(200000n, 96n, 0n),
+      VALUE);
+
+    // The portal succeeds: a result and no error. `0x` is the empty success
+    // return, which is exactly what a void function returns.
+    expect(portal.error).toBeUndefined();
+    expect(portal.result).toBeDefined();
+    // The bridge reverts. Asserting the *difference* is the point: one entry
+    // point being gated says nothing about the other.
+    expect(bridge.error).toBeDefined();
   }, 40_000);
 
   it("Tempo readiness is pinned to Moderato, and mainnet is refused", () => {
