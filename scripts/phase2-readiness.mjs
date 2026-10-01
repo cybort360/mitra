@@ -78,6 +78,52 @@ if (tempo?.ok) {
   }
 }
 
+// --- Solana toolchain --------------------------------------------------------
+//
+// Phase 2 needs a real deployable program, so "is the CLI installed" is the
+// wrong question — a version banner proves nothing. `cargo-build-sbf` is the one
+// that matters, because that is what turns Rust into the eBPF ELF a validator
+// will actually run. Installed via the official Anza installer.
+
+const SOLANA_BIN = `${process.env.HOME}/.local/share/solana/install/active_release/bin`;
+const solanaBin = existsSync(SOLANA_BIN) ? SOLANA_BIN : null;
+add("Solana CLI (Agave)", Boolean(solanaBin), solanaBin
+  ? "installed (official Anza installer)"
+  : "not installed — sh <(curl -sSfL https://release.anza.xyz/stable/install)");
+// A version check is a claim about a banner. Compiling a program is a claim
+// about a deployable artifact, so that is what gets asserted.
+const sbf = solanaBin && existsSync(`${SOLANA_BIN}/cargo-build-sbf`);
+add("cargo-build-sbf (Rust→eBPF)", Boolean(sbf), sbf
+  ? "present — Rust can be compiled to a deployable program"
+  : "absent — Rust cannot become an on-chain program without it");
+
+/** Reads a devnet SOL balance from the node, so funding is never taken on trust. */
+async function solanaBalance(address) {
+  const rpcUrl = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 8000);
+    const r = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] }),
+      signal: c.signal,
+    });
+    clearTimeout(t);
+    const lamports = (await r.json())?.result?.value;
+    return typeof lamports === "number" ? lamports / 1e9 : null;
+  } catch {
+    return null;
+  }
+}
+if (solana) {
+  const address = readFileSync(".dev-keys/solana-testnet.address", "utf8").trim();
+  const balance = await solanaBalance(address);
+  add("Solana devnet funded", balance !== null && balance > 0, balance === null
+    ? "could not read balance"
+    : balance > 0 ? `${balance} SOL` : "0 SOL — needs faucet.solana.com (browser)");
+}
+
 /**
  * Base Vibenet is a *preview* network: 200ms blocks and B20 tokens, but the docs
  * state its "state may be reset without notice." That makes it excellent for
