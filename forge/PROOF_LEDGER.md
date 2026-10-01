@@ -4,6 +4,23 @@ Every claim in this repository that matters, and the command that proves it. A
 claim with no executed evidence is `UNTESTED`, regardless of how plausible it
 sounds.
 
+## Evidence levels
+
+Every claim below carries exactly one. The set is deliberately small, and
+`PARTIAL` is never rounded up to `VERIFIED` — see [ADR-0005](../docs/adr/0005-evidence-levels-untested-through-verified.md).
+
+| Status | Means | Set when |
+|---|---|---|
+| `UNTESTED` | Asserted, with no executed evidence | A claim has no command yet. The default. |
+| `PARTIAL` | Some of it demonstrated, and the gap is named | A command ran but covers less than the claim — typically because it needs credentials or a live network. |
+| `FAILED` | Executed, and it did not hold | The command was run and disproved the claim. Recorded rather than deleted. |
+| `VERIFIED` | Executed, with the command recorded | The named command passes on the branch where the claim is made. |
+| `REGRESSED` | Was `VERIFIED`, no longer holds | A previously passing command now fails. Highest-priority status: the product is worse than when last checked. |
+
+`FAILED` and `REGRESSED` are defined here because the ledger uses them. An
+undefined status is a status nobody can act on, and the absence of a definition
+is indistinguishable from the absence of the finding.
+
 ## What this ledger describes
 
 **The ledger describes the product's target state, and each claim is only true on
