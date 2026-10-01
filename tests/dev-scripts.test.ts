@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -19,6 +19,16 @@ import path from "node:path";
  */
 const run = (script: string) =>
   execFileSync("node", [path.join("scripts", script)], { encoding: "utf8" });
+
+/** Runs a script expecting failure, returning the error. */
+const runExpectingFailure = (script: string, args: string[] = []) => {
+  try {
+    execFileSync("node", [path.join("scripts", script), ...args], { encoding: "utf8", stdio: "pipe" });
+    return null;
+  } catch (e) {
+    return e as { status: number; stdout: string; stderr: string };
+  }
+};
 
 const hasKeys = existsSync(path.join(".dev-keys", "evm-testnet.key"));
 
@@ -48,6 +58,33 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     const out = run("phase2-readiness.mjs");
     expect(out).toMatch(/READY|BLOCKED/);
     expect(out).toMatch(/preconditions met/);
+  });
+
+  it("generate-dev-keys REFUSES to overwrite existing keys (F14)", () => {
+    // The real funds-protection guard. The generator used to write
+    // unconditionally, so "just re-run it to check it works" silently rotated
+    // both keypairs and stranded the funds already sent to them. 0.1 ETH was
+    // lost to exactly this before the guard existed.
+    //
+    // This test only runs when keys are present, and it does NOT rotate them:
+    // it asserts the refusal, then confirms the address is untouched. If the
+    // guard ever regresses, this test fails loudly instead of quietly
+    // destroying whatever the operator has funded.
+    const keyFile = path.join(".dev-keys", "evm-testnet.key");
+    if (!existsSync(keyFile)) return;
+
+    const before = readFileSync(path.join(".dev-keys", "evm-testnet.address"), "utf8");
+    const err = runExpectingFailure("generate-dev-keys.mjs");
+
+    expect(err).not.toBeNull();
+    expect(err!.status).not.toBe(0);
+    // It must name the address at risk and the non-destructive alternative.
+    expect(err!.stderr).toMatch(/existing evm address/);
+    expect(err!.stderr).toMatch(/verify-dev-keys\.mjs/);
+    expect(err!.stderr).toMatch(/--force/);
+
+    // The critical assertion: the key is still the same one.
+    expect(readFileSync(path.join(".dev-keys", "evm-testnet.address"), "utf8")).toBe(before);
   });
 
   it("Tempo readiness is pinned to Moderato, and mainnet is refused", () => {

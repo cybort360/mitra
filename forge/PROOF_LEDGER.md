@@ -157,7 +157,8 @@ npx vitest run tests/kernel.test.ts
 ## T7 — Testnet credentials and network reachability
 
 ```bash
-node scripts/verify-dev-keys.mjs    # re-derives every address from the secret
+node scripts/verify-dev-keys.mjs    # re-derives every address from the secret (writes nothing)
+node scripts/fund-vibenet.mjs       # claim test ETH; verifies the claim on-chain
 node scripts/phase2-readiness.mjs   # preconditions as commands
 ```
 
@@ -167,8 +168,12 @@ node scripts/phase2-readiness.mjs   # preconditions as commands
 | EVM address derives from the stored secp256k1 key | `VERIFIED` | ECDH + keccak256, checked against the published scalar-1 vector `0x7E5F…5Bdf` |
 | Solana devnet RPC reachable | `VERIFIED` | `getHealth` → `ok` |
 | Base Sepolia RPC reachable | `VERIFIED` | `eth_blockNumber` → `0x2d5a00f` |
+| Base Vibenet reachable **and identified as testnet** | `VERIFIED` | `eth_chainId` → `0x509f455` (84538453). Negative case: pointed at Sepolia it reports `unexpected chainId 0x14a34 (expected 84538453)`. Block time measured at **206 ms/block** over 20 blocks — the documented 200 ms holds |
 | Tempo Moderato reachable **and identified as testnet** | `VERIFIED` | `eth_chainId` → `0xa5bf` (42431). Negative case: against mainnet the script reports `chainId 4217 = TEMPO MAINNET — refusing to treat production as a testnet` |
-| Addresses are funded | `PARTIAL` | No funds claimed. Requires a human at a browser faucet — Solana devnet, Base Sepolia, and Tempo Moderato (no programmatic faucet endpoint; `POST /v1/faucet` → `not_found`) |
+| **EVM key funded on Base Vibenet** | `VERIFIED` | `node scripts/fund-vibenet.mjs` — 0.2 ETH. Faucet returns a tx hash; the script then checks `eth_getTransactionReceipt` status `0x1` and confirms the balance actually rose. Reproducible, not a one-off |
+| Solana devnet funded | `PARTIAL` | Browser faucet only (`faucet.solana.com`); needs a human |
+| Tempo Moderato funded | `PARTIAL` | Browser faucet only; `POST /v1/faucet` → `not_found` |
+| Base Sepolia funded | `PARTIAL` | Browser faucet only (`portal.cdp.finance/faucets/base-sepolia`); needs a human |
 | Vault can read a Tempo balance | `UNTESTED` | `eth_call balanceOf` reverted on both faucet tokens while `eth_getCode` returned `0xef`. The Tempo API balances route is the only one observed working. Unresolved — see F12 |
 
 Addresses are public and safe to print; the private keys are in a gitignored
