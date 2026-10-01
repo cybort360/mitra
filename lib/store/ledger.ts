@@ -2,6 +2,7 @@ import type {
   Authorization, AuthorizationDecision, Reservation, ReservationStatus, Vault,
 } from "@/lib/domain/types";
 import { reservations, vaults } from "@/lib/store/seed";
+import { transition } from "@/lib/kernel/machines";
 import { createHash, randomUUID } from "node:crypto";
 
 /**
@@ -101,7 +102,9 @@ export class CapitalLedger {
   setReservationStatus(reservationId: string, status: ReservationStatus): Reservation | undefined {
     const r = this.reservations.get(reservationId);
     if (!r) return undefined;
-    const next = { ...r, status, version: r.version + 1 };
+    // Enforced, not trusted: the documented reservation state machine now
+    // governs writes. Previously any status could be set on any record.
+    const next = { ...transition("reservation", r, status), version: r.version + 1 };
     this.reservations.set(reservationId, next);
     return { ...next };
   }

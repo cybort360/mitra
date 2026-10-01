@@ -12,9 +12,9 @@ done.
 | Phase | Status | Conclusion |
 |---|---|---|
 | 0. Kernel hardening | ✅ **Done** (PR #2) | 4 holes closed, 23 tests, independently reviewed |
-| 1. Wire the kernel | ✅ **Done** | A DENY is reachable over HTTP |
-| 2. State machines | ⬜ Next | Illegal transitions are impossible |
-| 3. Persistence | ⬜ Blocked by 1 ✅ now unblocked | No seed array; durable event log |
+| 1. Wire the kernel | ✅ **Done** (PR #4) | A DENY is reachable over HTTP |
+| 2. State machines | ✅ **Done** | Illegal transitions are impossible |
+| 3. Persistence | ⬜ Next | No seed array; durable event log |
 | 4. Console | ⬜ | Pages are components driven by real state |
 | 5. Integration | ⬜ | One external system, honestly labelled |
 
@@ -89,25 +89,36 @@ reachable. The product displays economic state it does not compute. `POST
 
 ## Phase 2 — State machine enforcement
 
-**Owner: one agent.** `docs/STATE_MACHINES.md` defines 7 machines; none are
-enforced. `Run.status` is currently a free string.
+**Owner: cline.** ✅ Complete for the reservation machine.
 
-**Scope** — one new file, `lib/kernel/machines.ts`, with a transition guard per
-machine. Illegal transitions become impossible, not merely discouraged.
+**What shipped**
 
-| Machine | Terminal states that must stay distinct |
-|---|---|
-| Reservation | `RELEASED` / `EXPIRED` / `CANCELED` |
-| Saga | `RECOVERED` / `CONTAINED` / `ABORTED` |
-| Clearing epoch | finalized input set immutable; disputed excluded, not silently netted |
-| Agent, Authorization, Agreement, Obligation | per `docs/STATE_MACHINES.md` |
+- `lib/kernel/machines.ts` — transition tables for all seven documented
+  machines plus Mandate; `canTransition` returns a verdict, `transition` throws
+- Wired into `lib/store/ledger.ts`, so every reservation status write passes
+  through the guard
+- 21 tests covering both directions per machine, terminal states, and table
+  integrity
 
-**Definition of done**
+**Properties now enforced**
 
-1. Every legal transition passes; every illegal one throws with a reason code
-2. Phase 1's routes now reject an illegal transition end-to-end
-3. A test per machine covering both directions
-4. The three saga outcomes are demonstrably not interchangeable
+- Terminal states have no outgoing edges — nothing moves out of `SETTLED`
+- Self-transitions are rejected, so a settled reservation cannot be
+  "re-committed" by transitioning it to the state it is already in
+- Skipping a step is refused (`RESERVED → SETTLED`)
+- Moving backwards is refused (`COMMITTED → RESERVED`)
+- The three saga outcomes stay distinct: none is reachable from another
+
+**Verified by mutation** — bypassing the guard in the ledger fails 3 tests.
+
+### Not yet done
+
+Only the **reservation** machine is attached to a write path. The other six
+(agent, mandate, authorization, agreement, obligation, saga, clearing epoch) are
+defined and tested but nothing writes through them yet, because those writes do
+not exist. They come into force as Phase 3 introduces the store and Phase 4 the
+UI. This is stated rather than implied so the next owner does not assume seven
+machines are enforced when one is.
 
 ---
 
