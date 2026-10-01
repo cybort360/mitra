@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { evaluateProposal } from "@/lib/kernel/authorization";
-import { reserve as reserveCapital } from "@/lib/kernel/vault";
-import { mandates } from "@/lib/store/seed";
-import { actionDigestFor, getLedger, newId } from "@/lib/store/ledger";
+import { getStore } from "@/lib/store/provider";
+import { actionDigestFor, newId } from "@/lib/store/ids";
 import type { Reservation } from "@/lib/domain/types";
 
 /**
@@ -30,8 +29,9 @@ export const createReservationSchema = z.object({
 
 export async function GET(req: Request) {
   const vaultId = new URL(req.url).searchParams.get("vaultId") ?? undefined;
-  const data = getLedger().listReservations(vaultId);
-  return NextResponse.json({ data, count: data.length });
+  const { repo, backend } = await getStore();
+  const data = await repo.listReservations(vaultId);
+  return NextResponse.json({ data, count: data.length, backend });
 }
 
 export async function POST(req: Request) {
@@ -40,12 +40,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "INVALID_REQUEST", issues: parsed.error.issues }, { status: 400 });
   }
   const body = parsed.data;
-  const ledger = getLedger();
+  const { repo, backend } = await getStore();
 
-  const mandate = mandates.find((m) => m.mandateId === body.mandateId);
+  const mandate = await repo.getMandate(body.mandateId);
   if (!mandate) return NextResponse.json({ error: "MANDATE_NOT_FOUND", mandateId: body.mandateId }, { status: 404 });
 
-  const vault = ledger.getVault(body.vaultId);
+  const vault = await repo.getVault(body.vaultId);
   if (!vault) return NextResponse.json({ error: "VAULT_NOT_FOUND", vaultId: body.vaultId }, { status: 404 });
   if (mandate.vaultId !== vault.vaultId) {
     return NextResponse.json({ error: "MANDATE_VAULT_MISMATCH", mandateVaultId: mandate.vaultId }, { status: 409 });
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   const policy = evaluateProposal(mandate, vault, {
     amount: body.amount, asset: body.asset, chain: body.chain,
     counterparty: body.counterparty, capability: body.capability, actionDigest, now,
-  }, { recentSpend: ledger.recentSpend(vault.vaultId, mandate.mandateId, now, mandate.velocityLimit?.windowMinutes ?? 60) });
+  }, { recentSpend: await repo.recentSpend(vault.vaultId, mandate.mandateId, now, mandate.velocityLimit?.windowMinutes ?? 60) });
 
   if (policy.decision !== "ALLOW") {
     return NextResponse.json(
@@ -71,32 +71,31 @@ export async function POST(req: Request) {
     );
   }
 
-  let updated: ReturnType<typeof ledger.reserveCapital>;
-  try {
-    updated = ledger.reserveCapital(vault.vaultId, body.amount, reserveCapital);
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "RESERVATION_FAILED" }, { status: 409 });
-  }
-
-  const reservation: Reservation = {
+  // The evaluated terms go in with the reservation, in one atomic write. The
+  // store allocates the nonce and moves the capital; the route holds the terms
+  // that were actually checked. Splitting those into a reserve-then-patch left
+  // the store briefly holding a reservation with no `mandateId` and no digest,
+  // which Postgres rejects outright — and which, on any store that tolerated it,
+  // is a reservation that can never be executed.
+  const reserved = await repo.reserveCapital({
+    vaultId: vault.vaultId,
+    amount: body.amount,
     reservationId: newId("res"),
-    runId: body.runId, vaultId: vault.vaultId, intentId: body.intentId,
-    mandateId: mandate.mandateId, mandateVersion: mandate.version,
-    asset: body.asset as Reservation["asset"], amount: body.amount,
+    runId: body.runId,
+    intentId: body.intentId,
+    mandateId: mandate.mandateId,
+    mandateVersion: mandate.version,
+    asset: body.asset as Reservation["asset"],
     chain: body.chain as Reservation["chain"],
     actionDigest,
     expiresAt: new Date(now.getTime() + body.ttlMinutes * 60_000).toISOString(),
-    // Allocated by the ledger, never invented here: a fixed nonce would collide
-    // with an already-spent one and cause valid later instructions to be
-    // refused as replays.
-    nonce: ledger.allocateNonce(vault.vaultId),
-    status: "RESERVED",
-    version: 1,
-  };
-  ledger.putReservation(reservation);
+  });
+  if (!reserved.ok) {
+    return NextResponse.json({ error: reserved.reason, backend }, { status: 409 });
+  }
 
   return NextResponse.json(
-    { data: reservation, vault: updated, evidenceLevel: "LOCAL_PASS", note: "Capital is reserved, not moved. Execution requires the exact action digest." },
+    { data: reserved.reservation, vault: reserved.vault, backend, evidenceLevel: "LOCAL_PASS", note: "Capital is reserved, not moved. Execution requires the exact action digest." },
     { status: 201 },
   );
 }

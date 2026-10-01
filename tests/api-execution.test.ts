@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { POST as createReservation } from "@/app/api/v1/reservations/route";
 import { POST as execute } from "@/app/api/v1/reservations/execute/route";
 import { __resetLedgerForTests, getLedger } from "@/lib/store/ledger";
-import { NOW, goodProposal, json, req } from "./fixtures";
+import { NOW, goodProposal, json, prepareStore, req } from "./fixtures";
 
 /**
  * The execution guard is the phase's real subject: an ALLOW is not permission,
  * and these tests are what make that demonstrable rather than aspirational.
  */
-beforeEach(() => { __resetLedgerForTests(); });
+beforeEach(async () => { await prepareStore(); });
 
 const hold = async () => {
   const created = await createReservation(req({ ...goodProposal, ttlMinutes: 60 }));

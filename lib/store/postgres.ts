@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type { Authorization, Mandate, Reservation, RunEvent, Vault } from "@/lib/domain/types";
-import type { CapitalResult, EconomicRepository, ReserveCapitalInput } from "./repository.js";
+import type { CapitalResult, EconomicRepository, ReserveCapitalInput } from "./repository";
 
 const num = (v: unknown): number => Number(v);
 
@@ -25,7 +25,7 @@ export class PostgresRepository implements EconomicRepository {
   constructor(private readonly pool: Pool) {}
 
   async migrate(): Promise<void> {
-    const { MIGRATIONS } = await import("./schema.js");
+    const { MIGRATIONS } = await import("./schema");
     for (const sql of MIGRATIONS) await this.pool.query(sql);
   }
 
@@ -144,6 +144,42 @@ export class PostgresRepository implements EconomicRepository {
       [next.status, next.version, reservationId],
     );
     return next;
+  }
+
+  /**
+   * Insert or replace a whole reservation row.
+   *
+   * A reservation is assembled from two sources: `reserveCapital` allocated the
+   * nonce and moved the capital, while the route holds the terms that were
+   * actually evaluated. The row is therefore written whole. An upsert rather
+   * than a plain INSERT, because the in-memory adapter creates a placeholder row
+   * before the route has the digest, and both backends must converge to the
+   * same shape.
+   */
+  async putReservation(reservation: Reservation): Promise<Reservation> {
+    await this.pool.query(
+      `INSERT INTO mitra.reservations
+         (reservation_id, run_id, vault_id, intent_id, mandate_id, mandate_version,
+          asset, amount, chain, action_digest, expires_at, nonce, status, version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (reservation_id) DO UPDATE SET
+         run_id = EXCLUDED.run_id, vault_id = EXCLUDED.vault_id,
+         intent_id = EXCLUDED.intent_id, mandate_id = EXCLUDED.mandate_id,
+         mandate_version = EXCLUDED.mandate_version, asset = EXCLUDED.asset,
+         amount = EXCLUDED.amount, chain = EXCLUDED.chain,
+         action_digest = EXCLUDED.action_digest, expires_at = EXCLUDED.expires_at,
+         nonce = EXCLUDED.nonce, status = EXCLUDED.status, version = EXCLUDED.version`,
+      [reservation.reservationId, reservation.runId, reservation.vaultId, reservation.intentId,
+        reservation.mandateId, reservation.mandateVersion, reservation.asset, reservation.amount,
+        reservation.chain, reservation.actionDigest, reservation.expiresAt, reservation.nonce,
+        reservation.status, reservation.version],
+    );
+    return reservation;
+  }
+
+  async seedReferenceData(): Promise<{ vaults: number; mandates: number; reservations: number }> {
+    const { seedReferenceData } = await import("@/lib/store/seed-reference");
+    return seedReferenceData(this.pool);
   }
 
   async recordAuthorization(auth: Authorization): Promise<void> {
