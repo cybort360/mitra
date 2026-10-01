@@ -42,6 +42,25 @@ What exists is a *local* economic kernel that is correct and well tested:
 - a state machine for reservations, enforced on write
 - deterministic netting with conservation proofs
 
+### Phase 1 — Core — `PARTIAL`
+
+Done: canonical serialization and content hashing (`lib/domain/canonical.ts`),
+pinned by 18 tests including the float and key-order cases. Receipt chaining per
+PRD §17.3. `actionDigestFor` now uses a domain-separated canonical hash instead
+of a positional `JSON.stringify`.
+
+**Finding.** Canonicalizing the action digest changed every digest it produces
+(F11). Harmless now — nothing durable depends on it yet — but it would have
+silently frozen every outstanding reservation at execution time. Recorded with
+the old and new values pinned in `tests/digest-compat.test.ts`, so a second
+silent change cannot happen.
+
+Not done: PRD §52 Phase 1 also requires a purely local end-to-end lifecycle
+across all eight objects. The kernel covers mandate → vault → reservation →
+authorization; Agent, Intent, Agreement, Deliverable, Obligation, Saga and
+Receipt have schemas and machines but no write path. That is the remaining
+Phase 1 work.
+
 That is genuine progress toward the PRD's Phase 1, and a *prerequisite* for
 Phase 2, but **it is not Phase 2**. Counting it as Phase 2 progress would be
 exactly the "implemented ≠ verified" failure the Foundry exists to prevent.
