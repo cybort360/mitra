@@ -175,6 +175,39 @@ become false again.
 **Guard.** `tests/repository-contract.test.ts` asserts that the ledger does *not*
 satisfy the interface, and that both real backends do.
 
+## F11 — Canonicalizing the action digest invalidated outstanding bindings
+
+**Found:** Phase 1, when replacing `JSON.stringify([...])` with a canonical hash.
+**Severity:** high, had it shipped later.
+
+`actionDigestFor` hashed a positional array via `JSON.stringify`, so it was
+stable only while every caller passed the fields in exactly that order, and it
+hashed raw floats — `0.1 + 0.2` and `0.3` are the same amount but produced
+different digests. Replacing it with a domain-separated canonical hash fixed
+both, and **changed the digest value**.
+
+The first draft of the fix asserted in a comment that the value was unchanged
+"because the field set and order are the same". That was not checked, and it was
+false. Verifying it directly showed `sha256:ff378e4f…` before and
+`sha256:c22d6a25…` after for identical input.
+
+Every reservation holding an old binding would have failed
+`ACTION_DIGEST_MISMATCH` at execution — a fund-looking freeze presented as a
+cleanup.
+
+**Why it matters more than the bug.** The false claim was in a comment
+explaining a safety property. It is the same failure as F10 and F9: something
+asserted because it was cheaper to assert than to check. The check took one
+command.
+
+**Fix.** Comment corrected to state the consequence. Before this ships with
+real data, either re-issue outstanding reservations or accept both digests for
+historical verification.
+
+**Guard.** `tests/canonical.test.ts` pins key-order independence and float
+stability; `tests/digest-compat.test.ts` records the old and new values so the
+change cannot be made silently a second time.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
