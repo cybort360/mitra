@@ -1,5 +1,21 @@
 # Build phases
 
+> **⚠️ SUPERSEDED — do not use this file to decide what to build next.**
+>
+> The authoritative roadmap is **[`forge/EXECUTION_PLAN.md`](./forge/EXECUTION_PLAN.md)**,
+> which is the PRD's own phase structure (§52). This file predates the PRD being
+> imported and invents a different numbering, so the two disagree: this file calls
+> Postgres persistence "Phase 3, next up", while the PRD makes local persistence a
+> *prerequisite* and reserves **Phase 2** for real Solana devnet proof — vault
+> controller, funded vault, guarded spend, release/refund, settlement. Persistence
+> is not Phase 2.
+>
+> It is kept only as a record of the plan that was in force at the time. Where
+> this file and `forge/EXECUTION_PLAN.md` disagree, the execution plan is right
+> and this file is wrong.
+>
+> Recorded as failure **F9** in [`forge/FAILURES.md`](./forge/FAILURES.md).
+
 Work is split so that **each phase has one owner and one verifiable conclusion**.
 Nobody starts the next phase until the current one is demonstrated working.
 
@@ -8,6 +24,8 @@ something someone describes.* If you cannot demonstrate it, the phase is not
 done.
 
 ## Where we are
+
+> Superseded status table, retained as history. See the note above.
 
 | Phase | Status | Conclusion |
 |---|---|---|
