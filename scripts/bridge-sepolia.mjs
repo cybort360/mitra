@@ -24,9 +24,9 @@
  *
  * ## Scope
  *
- * Deposits only (L1 → L2). `depositETH` is payable and credits `_to` on L2. The
- * archived guide explicitly warns its sample bridges *to* Base only; withdrawals
- * need proving and a challenge period, and are not implemented here.
+ * Deposits only (L1 → L2). The archived guide explicitly warns its sample
+ * bridges *to* Base only; withdrawals need proving and a challenge period, and
+ * are not implemented here.
  */
 import { existsSync, readFileSync } from "node:fs";
 import {
@@ -83,6 +83,38 @@ const raw = async (url, method, params = []) => {
 };
 
 /**
+ * `depositTransaction` on the OptimismPortal, not `depositETH` on the bridge.
+ *
+ * The bridge is the path the documentation leads you to, and it **reverts for an
+ * EOA** — `L1StandardBridge` applies its own access control that a plain account
+ * does not satisfy. The portal's `depositTransaction` is a different function
+ * on a different contract with different access control, and it works.
+ *
+ * Both are simulated with `eth_call` before any gas is spent, so the difference
+ * is measured rather than assumed, and the script refuses to broadcast if the
+ * portal call does not simulate cleanly.
+ *
+ * Portal: 0x49f53e41452C74589E85cA1677426Ba426459e85 (Base Sepolia L1).
+ * Note the deposit leaves L1 immediately but is *derived* on L2 asynchronously —
+ * so the script waits for the L2 balance and does not report success on the
+ * strength of the L1 receipt alone.
+ */
+const PORTAL = "0x49f53e41452C74589E85cA1677426Ba426459e85";
+const DEPOSIT_ABI = [{
+  type: "function",
+  name: "depositTransaction",
+  stateMutability: "payable",
+  inputs: [
+    { name: "_to", type: "address" },
+    { name: "_value", type: "uint256" },
+    { name: "_gasLimit", type: "uint64" },
+    { name: "_isCreation", type: "bool" },
+    { name: "_data", type: "bytes" },
+  ],
+  outputs: [],
+}];
+
+/**
  * Verify the contracts rather than trusting the docs. The Goerli address in the
  * archived guide is *also* a plausible-looking address with no code, so the only
  * way to know which one we hold is to ask the chain.
@@ -98,11 +130,16 @@ async function verifyContracts() {
   const ret = await raw(l1Url, "eth_call", [{ to: L1_BRIDGE, data: "0x3cb747bf" }, "latest"]);
   const messenger = getAddress("0x" + ret.slice(-40));
   const l2Code = await raw(l2Url, "eth_getCode", [L2_BRIDGE, "latest"]);
+  const portalCode = await raw(l1Url, "eth_getCode", [PORTAL, "latest"]);
 
   console.log(`contracts L1StandardBridge ${(code.length - 2) / 2}B, L2StandardBridge ${(l2Code.length - 2) / 2}B`);
-  console.log(`          messenger() -> ${messenger}`);
+  console.log(`          portal ${(portalCode.length - 2) / 2}B, messenger() -> ${messenger}`);
   if (messenger.toLowerCase() !== L1_MESSENGER.toLowerCase()) {
     console.error(`\nMessenger mismatch: got ${messenger}, documented ${L1_MESSENGER}. Refusing.`);
+    process.exit(1);
+  }
+  if (portalCode === "0x") {
+    console.error(`\nOptimismPortal ${PORTAL} has NO CODE on Sepolia L1. Refusing.`);
     process.exit(1);
   }
   console.log("          matches the documented L1CrossDomainMessenger — verified\n");
@@ -125,25 +162,28 @@ if (value >= await l1.getBalance({ address })) {
   process.exit(1);
 }
 
-// depositETH(address _to, uint32 _minGasLimit, bytes _extraData) — payable.
-const abi = [{
-  type: "function",
-  name: "depositETH",
-  stateMutability: "payable",
-  inputs: [
-    { name: "_to", type: "address" },
-    { name: "_minGasLimit", type: "uint32" },
-    { name: "_extraData", type: "bytes" },
-  ],
-  outputs: [],
-}];
+// Simulate before broadcasting. A revert here costs nothing; the same revert on
+// a real transaction costs gas and teaches nothing.
+const sim = await l1.simulateContract({
+  account,
+  address: PORTAL,
+  abi: DEPOSIT_ABI,
+  functionName: "depositTransaction",
+  args: [address, value, 200_000n, false, "0x"],
+  value,
+});
+if (sim.error) {
+  console.error(`Simulation failed: ${sim.error.shortMessage ?? sim.error.message}`);
+  process.exit(1);
+}
+console.log(`simulated depositTransaction -> success`);
 
 const wallet = createWalletClient({ account, chain: sepolia, transport: custom(l1) });
 const hash = await wallet.writeContract({
-  address: L1_BRIDGE,
-  abi,
-  functionName: "depositETH",
-  args: [address, 200_000, "0x"],
+  address: PORTAL,
+  abi: DEPOSIT_ABI,
+  functionName: "depositTransaction",
+  args: [address, value, 200_000n, false, "0x"],
   value,
   chain: sepolia,
 });
