@@ -34,6 +34,12 @@ This is the most important line in the file.
 is no Solana program, no vault controller, no testnet vault, no receipt
 anchoring, no settlement.
 
+**What changed on 2026-01-10:** the toolchain and the funds are now both
+`VERIFIED` — Solana CLI 4.3.0, `cargo-build-sbf` proven by compiling a real
+eBPF ELF, and **5 SOL** on devnet (`err=None` signature). [ADR-0007](../docs/adr/0007-phase2-builds-a-real-solana-program.md)
+records the decision to build a real program rather than a controller stub. The
+exit condition is still unmet; the gap is now a *build*, not a *blocker*.
+
 What exists is a *local* economic kernel that is correct and well tested:
 
 - policy evaluation and action-digest binding

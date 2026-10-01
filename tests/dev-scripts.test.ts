@@ -136,6 +136,19 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     expect(out).toMatch(/api\.tempo\.xyz indexes MAINNET/);
   });
 
+  it("readiness asserts a deployable artifact, not a version banner", () => {
+    // The Solana CLI being on PATH proves nothing about whether a program can be
+    // built. `cargo-build-sbf` is the binary that turns Rust into the eBPF ELF a
+    // validator runs, so that is what the readiness check requires. A check that
+    // accepted a version string would report READY for a machine that cannot
+    // deploy anything.
+    const out = run("phase2-readiness.mjs");
+    expect(out).toMatch(/cargo-build-sbf/);
+    // And it must be able to say "absent" — a check with no failure branch is
+    // not a check.
+    expect(out).toMatch(/cargo-build-sbf.*(present|absent)/);
+  }, 30_000);
+
   it("Tempo readiness is pinned to Moderato, and mainnet is refused", () => {
     // The check that matters. A readiness script pointed at Tempo mainnet must
     // not report the testnet as live, or every downstream claim built on it
