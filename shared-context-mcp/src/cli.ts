@@ -74,12 +74,18 @@ switch (command) {
     const a = store.verify();
     console.log(`store ready  node=${store.nodeId}  db=${dbPath}`);
     console.log(`audit        ok=${a.ok} entries=${a.checked}`);
-    if (syncDir) {
-      const agent = new SyncAgent({ store, dir: syncDir });
-      agent.publish();
-      console.log(`sync dir     ${syncDir}`);
-    } else {
-      console.log("sync dir     (none) pass --sync-dir to enable sharing");
+
+    // Onboarding should leave you informed, not empty: publish our (possibly
+    // empty) bundle, then import whatever the team already has.
+    const agent = new SyncAgent({ store, dir: syncDir! });
+    agent.publish();
+    const applied = agent.importPeers().reduce((n, r) => n + r.applied, 0);
+    const total = store.list({ limit: 100000 }).length;
+    console.log(`sync dir     ${syncDir}`);
+    console.log(`context      ${total} entries available${applied > 0 ? ` (${applied} from teammates)` : ""}`);
+    if (total > 0) {
+      const d = digest(store.list({ limit: 1000 }), store.listActors(), "all");
+      console.log(`start with   context_digest — ${d.mustRead.length} must-read, ${d.blockers.length} blockers`);
     }
     store.close();
     break;
