@@ -33,6 +33,7 @@ import type {
 export interface SeedCounts {
   vaults: number; mandates: number; reservations: number;
   spaces: number; agreements: number;
+  obligations: number; settlements: number; runs: number; deliverables: number;
 }
 
 export interface ReservationInput {

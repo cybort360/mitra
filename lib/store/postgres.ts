@@ -54,9 +54,39 @@ export class PostgresRepository implements EconomicRepository {
     return rows.map(rowToReservation);
   }
 
+  /**
+   * Vaults with their ACTIVE mandates and reservations attached.
+   *
+   * Two queries and a join in JS rather than a correlated subquery per row: the
+   * derived fields are the same for every reader, and doing it here means
+   * `rowToVault` stays a pure mapping with no hidden I/O.
+   */
   async listVaults(): Promise<Vault[]> {
     const { rows } = await this.pool.query("SELECT * FROM mitra.vaults ORDER BY vault_id");
-    return rows.map(rowToVault);
+    const mandates = await this.pool.query(
+      "SELECT vault_id, mandate_id FROM mitra.mandates WHERE status = 'ACTIVE'",
+    );
+    const reservations = await this.pool.query(
+      "SELECT vault_id, reservation_id FROM mitra.reservations WHERE status IN ('RESERVED','COMMITTED')",
+    );
+    const group = (rows2: Array<Record<string, unknown>>, id: string) => {
+      const m = new Map<string, string[]>();
+      for (const r of rows2) {
+        const k = String(r.vault_id);
+        m.set(k, [...(m.get(k) ?? []), String(r[id])]);
+      }
+      return m;
+    };
+    const byMandate = group(mandates.rows, "mandate_id");
+    const byReservation = group(reservations.rows, "reservation_id");
+    return rows.map((r) => {
+      const v = rowToVault(r);
+      return {
+        ...v,
+        activeMandates: byMandate.get(v.vaultId) ?? [],
+        activeReservations: byReservation.get(v.vaultId) ?? [],
+      };
+    });
   }
 
   /**
@@ -300,7 +330,17 @@ function rowToVault(r: Record<string, unknown>): Vault {
     asset: String(r.asset) as Vault["asset"], address: String(r.address),
     total: num(r.total), available: num(r.available), reserved: num(r.reserved),
     escrowed: num(r.escrowed), encumbered: num(r.encumbered), settling: num(r.settling),
-    frozen: num(r.frozen), activeMandates: [], activeReservations: [],
+    frozen: num(r.frozen),
+    // These are DERIVED, not stored: the active mandates and reservations for a
+    // vault come from the tables that reference it.
+    //
+    // They were hardcoded to empty arrays, which the in-memory ledger does not
+    // do — so a vault read from Postgres was missing two fields the domain type
+    // declares, and nothing noticed because every test that inspected a vault read
+    // it from whichever backend happened to be selected. Found by the backend
+    // parity test, which is the only thing that compares the two.
+    activeMandates: Array.isArray(r.active_mandates) ? (r.active_mandates as string[]).map(String) : [],
+    activeReservations: Array.isArray(r.active_reservations) ? (r.active_reservations as string[]).map(String) : [],
     emergencyFreeze: Boolean(r.emergency_freeze),
     custodyMode: String(r.custody_mode) as Vault["custodyMode"], version: num(r.version),
   };

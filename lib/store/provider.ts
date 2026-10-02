@@ -85,8 +85,18 @@ export class InMemoryRepository implements EconomicRepository {
    */
   async seedReferenceData(): Promise<SeedCounts> {
     return {
-      vaults: 0, mandates: 0, reservations: 0,
-      spaces: spaces.length, agreements: agreements.length,
+      // The ledger owns vaults, mandates and reservations, so those counts are
+      // read from it rather than reported as zero. A backend reporting 0 for
+      // data it demonstrably holds is the same lie as the one F36 caught.
+      vaults: this.ledger.listVaults().length,
+      mandates: mandates.length,
+      reservations: this.ledger.listReservations().length,
+      spaces: spaces.length,
+      agreements: agreements.length,
+      obligations: obligations.length,
+      settlements: settlements.length,
+      runs: runs.length,
+      deliverables: deliverables.length,
     };
   }
 

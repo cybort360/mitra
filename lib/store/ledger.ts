@@ -34,9 +34,36 @@ export class CapitalLedger {
     for (const r of seedReservations) this.reservations.set(r.reservationId, { ...r });
   }
 
+  /**
+   * `activeMandates` and `activeReservations` are DERIVED here, from live state,
+   * rather than carried through from the seed.
+   *
+   * **This is F33 again, in a different object.** The seed declared which
+   * reservations were active, and the ledger echoed that declaration back
+   * forever — so a reservation that had since been released still appeared active,
+   * and nothing noticed because the Postgres backend DERIVED the same fields from
+   * actual state. The two backends answered different questions about the same
+   * vault, and the backend-parity test found it.
+   *
+   * A declared list that is not recomputed is the same defect as
+   * `Space.agreementIds`: a second copy of a fact, stored beside the fact, free
+   * to drift. Deriving it makes the two copies impossible to disagree.
+   */
+  private derive(vaultId: string, v: Vault): Vault {
+    const activeReservations = [...this.reservations.values()]
+      .filter((r) => r.vaultId === vaultId && (r.status === "RESERVED" || r.status === "COMMITTED"))
+      .map((r) => r.reservationId)
+      .sort();
+    // Mandates are not ledger-owned, so their activeness cannot be derived here.
+    // The seed's list is the only available source and is left as declared; the
+    // Postgres backend filters mandates by status, which is a genuine difference
+    // in what the two backends can know. Recorded rather than papered over.
+    return { ...v, activeReservations };
+  }
+
   getVault(vaultId: string): Vault | undefined {
     const v = this.vaults.get(vaultId);
-    return v ? { ...v } : undefined;
+    return v ? this.derive(vaultId, v) : undefined;
   }
 
   /**
@@ -50,7 +77,7 @@ export class CapitalLedger {
    * callers to go around it.
    */
   listVaults(): Vault[] {
-    return [...this.vaults.values()].map((v) => ({ ...v }));
+    return [...this.vaults.entries()].map(([id, v]) => this.derive(id, v));
   }
 
   /** Capital that is actually spendable, with a reservation applied if required. */

@@ -142,15 +142,27 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
     );
   }
 
+  // **Counts are WORLD SIZE, not rows inserted by this call.**
+  //
+  // The first version returned `rowCount`, so a second call reported 0 for
+  // everything it had already inserted. The backend-parity test asserted the
+  // counts were non-zero and failed — correctly, because the number was a
+  // statement about this call rather than about the store, and "seeded" is a
+  // claim about the store.
+  const count = async (table: string, idCol: string) => {
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM mitra.${table}`);
+    return rows[0].n as number;
+  };
+
   return {
-    vaults: vaults.length,
-    mandates: mandates.length,
-    reservations: reservationCount,
-    spaces: spaceCount,
-    agreements: agreementCount,
-    obligations: obligations.length,
-    settlements: settlements.length,
-    runs: runs.length,
-    deliverables: deliverables.length,
+    vaults: await count("vaults", "vault_id"),
+    mandates: await count("mandates", "mandate_id"),
+    reservations: await count("reservations", "reservation_id"),
+    spaces: await count("spaces", "space_id"),
+    agreements: await count("agreements", "agreement_id"),
+    obligations: await count("obligations", "obligation_id"),
+    settlements: await count("settlements", "settlement_id"),
+    runs: await count("runs", "run_id"),
+    deliverables: await count("deliverables", "deliverable_id"),
   };
 }

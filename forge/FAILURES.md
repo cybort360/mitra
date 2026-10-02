@@ -1263,6 +1263,55 @@ on-chain claims was never applied to the storage layer.
 that the gate has been opened at least once. `15 skipped` in a passing suite is a
 claim that was never gathered, wearing the same green as the ones that were.
 
+## F37 — the backends-parity test found F36 was not actually fixed
+
+**Found** 2026-10-02, closing out the audits.
+
+F36 fixed four routes that served fixtures. But the mutation audit for that work
+immediately asked the obvious question — **would anything stop the two backends
+diverging again?** — and the answer was no. Making
+`InMemoryRepository.listObligations` return `[]` broke **zero** tests. The
+repository methods existed and both backends compiled; nothing asserted they
+agreed, so the F36 defect could return by editing one line in one file.
+
+`tests/backend-parity.test.ts` is that assertion, and it found four more defects
+on its first run:
+
+1. **`rowToVault` hardcoded `activeMandates: [], activeReservations: []`.** A
+   Vault read from Postgres was missing two fields the domain type declares, and
+   no test noticed because every vault assertion read from whichever backend was
+   selected. Fixed by deriving them.
+
+2. **`seedReferenceData` reported rows inserted by *that call*, not world size.**
+   A second call reported 0 for everything. "Seeded" is a claim about the store,
+   not about the call.
+
+3. **`InMemoryRepository` reported 0 for vaults, mandates and reservations it
+   demonstrably held.** The in-memory half of the F36 disagreement.
+
+4. **The ledger carried `activeReservations` from the SEED rather than deriving
+   them** — so a released reservation still read as active. **This is F33 again in
+   a different object**: a declared list stored beside the fact, free to drift,
+   while the Postgres backend derived the same field from live state. The two
+   backends were answering different questions about the same vault.
+
+### Two test bugs of my own, both of which had been reported as real divergence
+
+- **`JSON.stringify` is the wrong comparison.** JSONB does not preserve key
+  order, so identical data serialises to different strings and every parity check
+  failed on a divergence that did not exist. A false alarm is worse than no alarm:
+  it trains everyone to ignore it. Replaced with a canonical key-sorted form.
+- **Vaults cannot be compared field-for-field.** They are mutable state, and the
+  persistence tests move their balances, so the Postgres vault was compared
+  against a fresh in-memory ledger. Narrowed to identity — plus a targeted
+  assertion for the derived fields, so narrowing the comparison did not quietly
+  drop the coverage that had just found bug (1).
+
+**Rule.** Two implementations of one interface are not the same thing, and a
+contract that both satisfy is a contract about *shape*, not about *behaviour*.
+Nothing in the type system can assert that two backends return the same data, so
+something outside it must — otherwise "consistent" means "compiles".
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
