@@ -41,12 +41,12 @@
     "1_core": "e2e_verified",
     "2_solana_kernel_and_vault": "live_demonstrated_devnet",
     "3_authority_and_confidential_policy": "live_demonstrated_spend_leg__arcium_circuit_compiles_unexecuted",
-    "4_commerce": "tested__space_and_lifecycle_erc8183_absent",
-    "5_agent_ecosystem": "tested__mcp_surface_and_a2a_lifecycle_no_transport",
+    "4_commerce": "tested__erc8183_projection_space_partial_10_contents",
+    "5_agent_ecosystem": "tested__erc8004_projection_x402_mpp_no_transport_no_virtuals",
     "6_recovery": "tested__saga_kernel_built_from_prd15_talos_absent",
     "7_clearing": "tested__epoch_write_path_and_adversarial_suites_no_live_epoch",
-    "8_base": "tested__adapter_no_transport",
-    "9_tempo": "tested__adapter_no_transport",
+    "8_base": "tested__eip712_erc1271_erc4337_envelope_no_transport_no_bundler",
+    "9_tempo": "tested__mpp_payment_metadata_receipt_mapping_no_transport",
     "10_production_tooling": "tested_partial__accounting_only_console_is_a_mockup"
   },
   "control_plane_files": {
@@ -86,5 +86,16 @@
       "Tempo Moderato is funded with 5 TIP-20; mints in the adapter are constants, not read from chain (F12/F15)",
       "Solana devnet vault has been drained to near-rent by repeated harness runs"
     ]
+  },
+  "evm_standards": {
+    "EIP-712": "implemented__typed_data_domain_separator__Base adapter now signs over it",
+    "ERC-1271": "implemented__EOA_and_contract_wallet_paths",
+    "ERC-8183": "implemented__projection_from_Agreement_Deliverable_Reservation",
+    "ERC-8004": "implemented__outbound_projection_only_registry_never_authoritative",
+    "x402": "implemented__challenge_requires_a_reservation",
+    "MPP": "implemented__bounded_session_refuses_over_ceiling_charges",
+    "ERC-4337": "envelope_only__packing_hashing_validation_batching_by_sender__no_bundler",
+    "marketplace_virtuals": "NOT_IMPLEMENTED",
+    "note": "All TESTED. None LIVE_DEMONSTRATED. ERC-4337 deliberately ships without a bundler, EntryPoint or paymaster and says so in the module header."
   }
 }
