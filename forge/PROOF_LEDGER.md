@@ -230,7 +230,7 @@ from [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md).
 | 0 Ground truth | "Every P0 object has a schema and state transition definition." | `INTEGRATED` | `BLOCKED_INTERNAL` — 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
 | 1 Core | "Purely local end-to-end lifecycle passes." | `E2E_VERIFIED` | — |
 | 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | `LIVE_DEMONSTRATED` | — |
-| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `LIVE_DEMONSTRATED` | `DEFERRED` — mandate→authorization→consume-on-spend is live on devnet, replay is refused on-chain, and **amendment + terminal revocation are deployed and exercised** (the 96→97 realloc ran on a live account). Remaining: the privacy path (Arcium, Phase 3d) and any signature-abstraction layer |
+| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `LIVE_DEMONSTRATED` | `DEFERRED` — mandate→authorization→consume-on-spend is live on devnet, replay is refused on-chain, and **amendment + terminal revocation are deployed and exercised** (the 96→97 realloc ran on a live account). **Arcium unblocked — see F31.** The blocker was an assumption, not an attempt: Docker, Anchor 1.0.2, arcup and the Arcium CLI all install cleanly here. Remaining for Phase 3d: run the circuit on a local MPC cluster and deploy and any signature-abstraction layer |
 
 **Phase 3b evidence — 2026-10-02, Solana devnet.** Redeploy carrying `revoked`,
 the 97-byte layout, and the `MANDATE_REVOKED` (6014) code.

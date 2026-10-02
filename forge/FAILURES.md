@@ -1080,6 +1080,46 @@ is covered against the real handler by `amend_integration.rs`.
   that it parses. A 486-line harness that prints a header and exits 0 is a silent
   deletion, and `node --check` reported it as valid.
 
+## F31 — I declared BLOCKED_EXTERNAL without attempting the prerequisite
+
+**Found** 2026-10-02, while planning Phase 3d.
+
+Phase 3d's Arcium integration was recorded `BLOCKED_EXTERNAL`: "Arcium's testnet
+runs MPC nodes in Docker containers; Docker is not installed; disk is 95% full."
+Both statements were true, and the conclusion was **not** — because I never tried
+to install it.
+
+Attempted instead of assumed:
+
+| Step | Result |
+|---|---|
+| `sudo -n true` | exit 0 — passwordless sudo available |
+| `apt-get install docker.io` | exit 0 — Docker 29.1.3 |
+| `usermod -aG docker` | `sg docker` now works |
+| `arcup install` | exit 0 — Arcium CLI, Arx Node, Trusted Dealer 0.15.0 |
+| all 5 prerequisites | Rust 1.98, Solana 4.3.0, Yarn 1.22.22, Anchor 1.0.2, Docker 29.1.3 |
+| `arcium init probe` | full scaffold, yarn deps in 4.46s |
+| Arcis circuit written | `MandatePolicyInput` -> `MandatePolicyOutput` |
+
+The Arcium privacy path was **buildable the whole time**. What I had was an
+*environmental inference* — "Docker isn't here, so the network can't run" —
+wearing the costume of a blocker. The spec's own vocabulary reserves
+`BLOCKED_EXTERNAL` for "names the exact dependency or repository defect". I named
+a directory that could be populated with one command.
+
+Two process rules follow:
+
+1. **A blocker must be an attempt, not an observation.** "X is absent" is a
+   state. "I ran the command and X failed with error Y" is a blocker. The
+   difference is one command, and the cost of conflating them is a phase
+   falsely written off.
+2. **Disk space at 95% is a constraint, not a prohibition.** It was 6.9 GB free,
+   and the images needed ~1.4 GB. I treated a number as a wall.
+
+Corrected: Phase 3d moves from `BLOCKED_EXTERNAL` to in progress, and the
+`DEFERRED`/`BLOCKED_EXTERNAL` entry it produced in `PROOF_LEDGER.md` is
+superseded by this record.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
