@@ -1912,6 +1912,81 @@ MPC cluster.
     `evaluate_mandate` was applied to the circuit and its test; the Anchor program
     kept the old name in **nine** macro and type positions, and nothing failed.
 
+## F45 — the clearing commitment was FNV-1a over an ambiguous join
+
+**Status:** `FAILED` — the defect was real; fixed and mutation-audited (5 tests kill the old implementation).
+**Found:** 2026-02-10, while closing Phase 7's blocker.
+
+### Two independent defects, only one of which the blocker mentioned
+
+`EXECUTION_PLAN.md` recorded Phase 7 `PARTIAL` because the clearing digest "is
+FNV-1a, not signature-grade". That is true and it is the **lesser** problem. The
+implementation was:
+
+```ts
+const s = fields.join("|");
+let h = 2166136261 >>> 0; /* FNV-1a over s */
+```
+
+**1. Structural ambiguity.** Joining with `"|"` cannot distinguish a field that
+*contains* `|` from a field boundary. Verified:
+
+```
+["epoch_1", "alice|bob", "100"]  ->  fnv1a_eee9e662
+["epoch_1", "alice", "bob|100"]  ->  fnv1a_eee9e662
+```
+
+Identical. This is a collision that occurs **before the hash's width is
+considered**, and swapping FNV-1a for SHA-256 while keeping `join("|")` would not
+have fixed it — a party could still submit two different obligation sets that
+produce the same commitment. Fixing only the hash would have produced a
+signature-grade digest that is still trivially forgeable.
+
+**2. Width.** 32 bits is not collision-resistant, and this is the value participants
+agree a clearing result by.
+
+### The fix
+
+`digest(domain, fields)` now delegates to `typedHash` — domain-separated SHA-256,
+already used for action digests and the §17.3 receipt chain. Passing the **array**
+rather than a joined string makes `canonicalize` carry the structure, so boundaries
+are encoded rather than guessed.
+
+The domain became a required parameter rather than an internal constant, so
+`inputsRoot` and `resultHash` cannot collide with each other or with any other
+`typedHash` consumer.
+
+Consistency was part of the point: the clearing commitment was the weakest hash in a
+set that otherwise used SHA-256 and EIP-712 signing.
+
+### Tests are about properties, not the output string
+
+`tests/clearing-digest.test.ts` deliberately does **not** pin the hex output.
+Pinning a literal would repeat F40 exactly — the literal cannot fail for any reason
+other than someone editing the test. It asserts instead that a `|` inside a field
+changes the digest, that domains separate, that the width is 64 hex chars, and that
+the value agrees with the repository's other content hashes. Determinism and
+order-independence are asserted too, since those are properties the old digest had
+and a careless fix could have lost.
+
+**Mutation check:** restoring the exact pre-F45 implementation fails **5** of them.
+
+### Breaking change
+
+All clearing digests change value. Any previously-recorded
+`inputsRoot`/`resultHash` is stale — including the two literals in `lib/store/seed.ts`,
+which are seed fixtures rather than recomputed commitments and are not evidence of
+anything.
+
+### Rules added
+
+15. **A delimiter is a structural assumption.** `join("|")` on untrusted field
+    content is a collision waiting to happen, and widening the hash does not help.
+    Pass the structure and let canonicalisation encode it.
+16. **When a blocker names one weakness, test for the others.** "Not
+    signature-grade" was true and hid an ambiguity that would have survived the
+    obvious fix.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

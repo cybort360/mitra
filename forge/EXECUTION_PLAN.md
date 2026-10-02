@@ -21,7 +21,7 @@ record of how the work was actually sequenced.
 | **4. Commerce** | Real job opened, funded, submitted, accepted, rejected, refunded | ✅ Space + lifecycle + routes + **ERC-8183 projection** | `TESTED` | `PARTIAL` — Space covers 4 of 10 §13.1 contents (ADR-0010); ERC-8183 is a local projection, not an on-chain job |
 | **5. Agent ecosystem** | External agent participates without becoming Mitra-native | ✅ MCP surface + A2A lifecycle + **ERC-8004 projection** + **x402/MPP** | `TESTED` | `BLOCKED_EXTERNAL` — no live MCP transport; Virtuals marketplace adapter not built; registry projections are local |
 | **6. Recovery** | Deliberately failed job reaches a defined terminal recovery state | ✅ saga kernel, ARMED gate, three distinct outcomes | `TESTED` | `BLOCKED_EXTERNAL` — TALOS absent from disk (F24); built from §15 directly, no TALOS reuse claimed |
-| **7. Clearing** | Deterministic netting passes adversarial graph tests | ✅ epoch write path, immutability, challenges, 8 adversarial suites | `TESTED` | `PARTIAL` — no live epochs; digest is FNV-1a, not signature-grade |
+| **7. Clearing** | Deterministic netting passes adversarial graph tests | ✅ epoch write path, immutability, challenges, 8 adversarial suites | `TESTED` | `PARTIAL` — **digest FIXED (F45)**, no live epochs. The commitment was FNV-1a over `fields.join("|")`; it is now domain-separated SHA-256 via `typedHash`, and the `join("|")` ambiguity that let two different obligation sets share a digest is gone. **Remaining: no epoch has ever been finalized on a live network** |
 | **8. Base** | Same economic intent executes on Base through the common API | ✅ Base + Solana adapters + **EIP-712** + **ERC-1271** + **ERC-4337 envelope** | `TESTED` | `DEFERRED` — no transport wired; no bundler/EntryPoint/paymaster deployed; nothing here has touched Base |
 | **9. Tempo** | A Mitra obligation can target Tempo settlement through the same interface | ✅ Tempo adapter + **MPP** + **payment metadata** + **receipt mapping** | `TESTED` | `DEFERRED` — no transport wired. **CORRECTED (F40):** the blocker previously also said mints and decimals were "supplied, not read from chain". They now are — `lib/adapters/tempo.ts` carries only what `name()` returned on Moderato, and `tests/tempo-adapter.test.ts` re-derives every name from a node under `TEMPO_LIVE=1`. Deploy/pay semantics are also established live (`scripts/tempo-pay.mjs`) |
 | **10. Production tooling** | A pilot can operate without reading protocol logs | ✅ accounting + reconciliation + `/api/v1/accounting` | `TESTED` | `PARTIAL` — console still a mockup; obligations/settlements still fixture-backed; no webhooks/observability |
@@ -152,6 +152,9 @@ invariants each unblocks per unit of effort, not by phase number:
 3. **Arcium** — start the local MPC cluster and execute `evaluate_mandate`, which
    unblocks `FR-VAULT-008` and `FR-VAULT-009` together.
 4. **Wire transports** for Base and Tempo, then upgrade their evidence above `TESTED`.
+5. **Finalize a clearing epoch on a live network.** The digest is now
+   signature-grade (F45), but no epoch has ever been closed against a real
+   participant set, so Phase 7 stays `PARTIAL` on evidence rather than on code.
 
 **The structural item that outranks all four:** `transition()` in
 `lib/kernel/machines.ts` has **no callers outside tests**. Six of the seven state

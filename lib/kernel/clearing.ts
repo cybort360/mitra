@@ -61,32 +61,44 @@ export function netObligations(obligations: Obligation[]): NettingResult {
 // because the aggregate still looks authoritative.
 
 import { transition } from "@/lib/kernel/machines";
+import { typedHash } from "@/lib/domain/canonical";
 
 export type ClearingResult<T> = { ok: true; value: T } | { ok: false; reason: string };
 const cfail = <T>(reason: string): ClearingResult<T> => ({ ok: false, reason });
 const cpass = <T>(value: T): ClearingResult<T> => ({ ok: true, value });
 
 /**
- * FNV-1a over a canonical field string.
+ * Commitment over an ordered field list.
  *
- * Deterministic and dependency-free. **Not keccak256 and not signature-grade**,
- * and the field is named for it: these commitments detect accidental divergence
- * and casual tampering, not a motivated adversary. A deployment needing the
- * stronger property must swap the digest, and the type says which one it is.
+ * **F45 — this was FNV-1a over `fields.join("|")`, which failed in two
+ * independent ways.**
+ *
+ * 1. **Structural ambiguity.** Joining with a delimiter means a field containing
+ *    `"|"` is indistinguishable from a field boundary, so
+ *    `["epoch_1", "alice|bob", "100"]` and `["epoch_1", "alice", "bob|100"]`
+ *    hashed *identically*. That is a collision before the hash's width is even
+ *    considered, and it survives any upgrade to a wider hash. Passing the
+ *    **array** to `typedHash` canonicalises the structure, so boundaries are
+ *    carried by the encoding rather than by a guessable separator.
+ * 2. **Width.** FNV-1a is 32-bit and not collision-resistant; these commitments
+ *    are what participants agree a clearing result by.
+ *
+ * The replacement is `typedHash` — domain-separated SHA-256 — which the repository
+ * already uses for action digests and the receipt chain. Consistency matters here:
+ * a clearing commitment was previously the weakest link in a set of otherwise
+ * cryptographic hashes.
+ *
+ * The domain is a required parameter rather than an internal constant, so
+ * `inputsRoot` and `resultHash` cannot collide with each other or with any other
+ * `typedHash` consumer.
  */
-export function digest(fields: (string | number)[]): string {
-  const s = fields.join("|");
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return `fnv1a_${h.toString(16).padStart(8, "0")}`;
+export function digest(domain: string, fields: readonly (string | number)[]): string {
+  return typedHash(domain, fields);
 }
 
 /** Commitment to the input set, over the ORDER-SENSITIVE canonical form. */
 export function inputsRoot(obligations: Obligation[], asset: AssetSymbol, domain: Chain): string {
-  return digest([
+  return digest("mitra.clearing.inputs.v1", [
     "mitra-clearing-v1", asset, domain,
     ...obligations
       .map((o) => [o.obligationId, o.debtor, o.creditor, o.amount.amount, o.status].join(":"))
@@ -96,7 +108,7 @@ export function inputsRoot(obligations: Obligation[], asset: AssetSymbol, domain
 
 /** Commitment to the computed result. */
 export function resultHash(result: NettingResult, epochId: string): string {
-  return digest([
+  return digest("mitra.clearing.result.v1", [
     "mitra-clearing-result-v1", epochId,
     result.grossVolume, result.residualVolume,
     ...result.netPositions.map((p) => `${p.party}:${p.amount}`).sort(),
