@@ -52,6 +52,10 @@ function space(over: Partial<Space> = {}): Space {
   };
 }
 
+/**
+ * The draft carries NO spaceIds: `openAgreement` records membership from the Space
+ * it was opened in, so a caller cannot pre-declare a tenancy it is not in.
+ */
 const draft = {
   agreementId: "ag_1",
   runId: "run_1",
@@ -103,9 +107,10 @@ describe("the Phase 4 exit condition, end to end", () => {
   it("a new agreement is born OPEN and bumps the Space version", () => {
     const { space: s, agreement: a } = opened();
     expect(a.status).toBe("OPEN");
-    // The Space does NOT carry a list of its agreements. `Agreement.spaceId` plus
-    // a query is the relationship; a second copy would be a second thing to drift.
-    expect(a.spaceId).toBe("space_1");
+    // The Space does NOT carry a list of its agreements - the relationship is
+    // recorded on the agreement and queried back. A second copy would drift.
+    // Membership is RECORDED at open, not inferred from the Space.
+    expect(a.spaceIds).toEqual(["space_1"]);
     expect(s.version).toBe(2);
   });
 });

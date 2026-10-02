@@ -38,6 +38,17 @@ describeDb("backend parity — in-memory and postgres describe the same world", 
     for (const sql of MIGRATIONS) await pool.query(sql);
     pg = new PostgresRepository(pool);
     mem = new InMemoryRepository();
+    // TRUNCATE before seeding. Without it this file compares a database other
+    // suites have already written to against a FRESH in-memory ledger, and the
+    // derived-field assertion fails on reservations another test created. That is
+    // shared-database pollution, not a backend divergence - and the previous
+    // failure of exactly that kind is how a real divergence would be missed.
+    await pool.query(
+      "TRUNCATE mitra.agreement_spaces, mitra.consumed_nonces, mitra.reservations, " +
+      "mitra.authorizations, mitra.event_log, mitra.mandates, mitra.vaults, " +
+      "mitra.agreements, mitra.spaces, mitra.obligations, mitra.settlements, " +
+      "mitra.runs, mitra.deliverables CASCADE",
+    );
     await pg.seedReferenceData();
   });
   afterAll(async () => { await pool?.end(); });
@@ -134,7 +145,11 @@ describeDb("backend parity — in-memory and postgres describe the same world", 
       const agreements = await repo.listAgreements();
       const spaces = new Set((await repo.listSpaces()).map((s) => s.spaceId));
       for (const a of agreements) {
-        expect(spaces.has(a.spaceId), `${a.agreementId} -> ${a.spaceId}`).toBe(true);
+        // An agreement may legitimately join NO Space (an external, non-Mitra-native
+        // engagement), so only the ids it DOES name are checked.
+        for (const sid of a.spaceIds) {
+          expect(spaces.has(sid), `${a.agreementId} -> ${sid}`).toBe(true);
+        }
       }
     }
   });

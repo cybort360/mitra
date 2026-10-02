@@ -342,17 +342,17 @@ export const spaces: Space[] = [
 
 export const agreements: Agreement[] = [
   {
-    agreementId: "agreement_77", spaceId: "space_research_1", runId: "run_501", intentId: "intent_501", client: "agent_buyer_07", provider: "mech-research-backup-04", evaluator: "agent_eval_02",
+    agreementId: "agreement_77", spaceIds: ["space_research_1"], runId: "run_501", intentId: "intent_501", client: "agent_buyer_07", provider: "mech-research-backup-04", evaluator: "agent_eval_02",
     externalJobRefs: [{ system: "virtuals", id: "acp-job-123456" }, { system: "a2a", id: "task-501" }], price: { asset: "USDC", amount: 12 }, deadline: "2026-09-30T09:30:00Z",
     acceptanceCriteria: ["100 unique projects", "structured JSON output", "source URL for each project", "no duplicate project IDs"], escrowRef: "escrow_55", failurePolicy: "retry once; then reassign to approved backup; refund unused reservation", status: "ACCEPTED", version: 3,
   },
   {
-    agreementId: "agreement_75", spaceId: "space_data_1", runId: "run_498", intentId: "intent_498", client: "agent_data_03", provider: "x402-data-provider-8",
+    agreementId: "agreement_75", spaceIds: ["space_data_1"], runId: "run_498", intentId: "intent_498", client: "agent_data_03", provider: "x402-data-provider-8",
     externalJobRefs: [{ system: "x402", id: "session-market-data-498" }], price: { asset: "USDC", amount: 25.2 }, deadline: "2026-09-30T18:00:00Z",
     acceptanceCriteria: ["schema v2", "freshness under 90 seconds", "complete token universe"], escrowRef: "session_ceiling_498", failurePolicy: "terminate metered session and release unused reservation", status: "EXECUTING", version: 1,
   },
   {
-    agreementId: "agreement_72", spaceId: "space_base_ops_1", runId: "run_492", intentId: "intent_492", client: "agent_buyer_07", provider: "erc8183:provider-3", evaluator: "agent_eval_02",
+    agreementId: "agreement_72", spaceIds: ["space_base_ops_1"], runId: "run_492", intentId: "intent_492", client: "agent_buyer_07", provider: "erc8183:provider-3", evaluator: "agent_eval_02",
     externalJobRefs: [{ system: "erc8183", id: "base-sepolia-job-72" }], price: { asset: "USDC", amount: 100 }, deadline: "2026-10-01T00:00:00Z",
     acceptanceCriteria: ["bounded route only", "no bridge", "max 2 hops", "evidence of quote freshness"], escrowRef: "erc8183:escrow-72", failurePolicy: "refund on expiry/rejection", status: "FUNDED", version: 1,
   },

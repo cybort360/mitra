@@ -217,6 +217,20 @@ export interface Space {
    * the drift risk to zero rather than trading it for a consistency check nobody
    * would remember to write.
    */
+  /**
+   * Assets this Space admits, resolved per engagement.
+   *
+   * **These were module constants in each adapter** — `BASE_ASSETS`,
+   * `SOLANA_ASSETS`, `TEMPO_TOKENS` — which meant one deployer decided which
+   * assets and which mint addresses are real. That is a custodian deciding what
+   * capital is admissible, and it contradicts the whole premise.
+   *
+   * Moving the registry into the Space makes it participant configuration:
+   * resolvable on chain, changeable by the Space's own governance, and absent
+   * where a marketplace's rules govern instead.
+   */
+  assets?: Record<string, { address: string; decimals: number }>;
+
   /** Maximum capital this Space may encumber in total — a treasury ceiling. */
   budget: Money;
   /** Encumbered so far against live agreements. */
@@ -282,16 +296,25 @@ export interface Authorization {
 export interface Agreement {
   agreementId: string;
   /**
-   * The Space this agreement belongs to.
+   * The Spaces this agreement participates in.
    *
-   * Added because without it containment is advisory: `applyAgreementOp(space,
-   * agreement, ...)` takes the Space as an argument, so a caller is free to hand
-   * in the wrong one and every rule check silently validates against a Space the
-   * agreement was never in. Storing the link means a wrong Space is detectable
-   * (the two ids disagree) rather than merely a mistake someone must remember to
-   * avoid — which is the difference between a check and a convention.
+   * **An ARRAY, and it may be EMPTY.** Both properties are load-bearing, and both
+   * came from ADR-0011's open items:
+   *
+   * Empty means the agreement is NOT inside a Mitra tenancy. That is the
+   * interoperability requirement (§3.3: Mitra "works with external agent
+   * economies rather than requiring agents to migrate"), and it was impossible
+   * while `spaceId` was required and backed by a `NOT NULL` foreign key.
+   *
+   * More than one means a multi-party engagement spans contexts — a client, a
+   * provider and an evaluator each in their own Space. Forcing that into one
+   * Space made every such arrangement single-owner, which is the centralisation
+   * ADR-0011 removes.
+   *
+   * `applyAgreementOp` still takes a Space as an argument; storing the ids makes a
+   * WRONG Space detectable (the ids disagree) rather than a mistake to remember.
    */
-  spaceId: string;
+  spaceIds: string[];
   runId: string;
   intentId: string;
   client: string;

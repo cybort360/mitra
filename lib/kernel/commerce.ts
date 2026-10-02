@@ -73,7 +73,7 @@ export function admitsProposal(
  */
 export function openAgreement(
   space: Space,
-  draft: Omit<Agreement, "status" | "version" | "spaceId">,
+  draft: Omit<Agreement, "status" | "version" | "spaceIds">,
   proposal: { capability: string; amount: Money },
 ): Result<{ space: Space; agreement: Agreement }> {
   const admitted = admitsProposal(space, {
@@ -90,7 +90,14 @@ export function openAgreement(
     return fail("PRICE_AMOUNT_MISMATCH");
   }
 
-  const agreement: Agreement = { ...draft, spaceId: space.spaceId, status: "OPEN", version: 1 };
+  // The agreement joins the Space it was opened in. Membership is RECORDED, never
+  // inferred, so a later amend cannot silently re-scope it.
+  const agreement: Agreement = {
+    ...draft,
+    spaceIds: [...new Set([space.spaceId])],
+    status: "OPEN",
+    version: 1,
+  };
 
   // The Space version bumps on every change, so a change to a Space is observable
   // in the same place its rules are read. It does NOT record which agreements it

@@ -123,8 +123,11 @@ export class InMemoryRepository implements EconomicRepository {
   }
 
   async listAgreements(spaceId?: string): Promise<Agreement[]> {
+    // An agreement with an EMPTY spaceIds is a valid, non-Mitra-native
+    // engagement and is returned by an unfiltered list. Filtering by a space
+    // simply cannot match it, which is correct.
     return agreements
-      .filter((a) => !spaceId || a.spaceId === spaceId)
+      .filter((a) => !spaceId || a.spaceIds.includes(spaceId))
       .map((a) => ({ ...a }));
   }
 

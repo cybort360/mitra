@@ -123,14 +123,38 @@ export class PostgresRepository implements EconomicRepository {
     return rows.map((r) => r.document as Space);
   }
 
+  /**
+   * Agreements, with their Space membership REHYDRATED from the join table.
+   *
+   * Membership is stored in `mitra.agreement_spaces` rather than in the
+   * agreement row, so an agreement may join no Space (an external, non-Mitra-native
+   * engagement), one, or several. The `document` therefore carries a `spaceIds` that
+   * the DB does NOT maintain — writing it there would recreate the dual-source
+   * problem F33 describes, so it is derived here and overwritten on read.
+   */
   async listAgreements(spaceId?: string): Promise<Agreement[]> {
-    const { rows } = spaceId
+    const base = spaceId
       ? await this.pool.query(
-          "SELECT document FROM mitra.agreements WHERE space_id = $1 ORDER BY created_at DESC",
+          `SELECT a.document FROM mitra.agreements a
+             JOIN mitra.agreement_spaces s ON s.agreement_id = a.agreement_id
+            WHERE s.space_id = $1 ORDER BY a.created_at DESC`,
           [spaceId],
         )
       : await this.pool.query("SELECT document FROM mitra.agreements ORDER BY created_at DESC");
-    return rows.map((r) => r.document as Agreement);
+
+    const links = await this.pool.query(
+      "SELECT agreement_id, space_id FROM mitra.agreement_spaces ORDER BY agreement_id, space_id",
+    );
+    const byAgreement = new Map<string, string[]>();
+    for (const r of links.rows) {
+      const id = String(r.agreement_id);
+      byAgreement.set(id, [...(byAgreement.get(id) ?? []), String(r.space_id)]);
+    }
+
+    return base.rows.map((r) => ({
+      ...(r.document as Agreement),
+      spaceIds: byAgreement.get((r.document as Agreement).agreementId) ?? [],
+    }));
   }
 
   /**

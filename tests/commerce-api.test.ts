@@ -86,7 +86,8 @@ describe("GET /api/v1/agreements — scoped, and machine-derived affordances", (
     const body = await res.json();
     expect(body.spaceId).toBe("space_research_1");
     for (const a of body.data) {
-      expect(a.spaceId).toBe("space_research_1");
+      // Membership is an ARRAY: an agreement may span several Spaces, or none.
+      expect(a.spaceIds).toContain("space_research_1");
     }
     expect(body.count).toBeGreaterThan(0);
   });
@@ -100,13 +101,16 @@ describe("GET /api/v1/agreements — scoped, and machine-derived affordances", (
     expect(body.data).toEqual([]);
   });
 
-  it("every agreement names a space that exists", async () => {
-    // A dangling spaceId makes containment untestable while appearing wired.
+  it("every Space an agreement names actually exists", async () => {
+    // A dangling id makes containment untestable while appearing wired. An
+    // agreement naming NO Space is legitimate and is not a failure.
     const spaces = await (await listSpaces()).json();
     const known = new Set(spaces.data.map((s: { spaceId: string }) => s.spaceId));
     const agreements = await (await listAgreements(new Request("http://x/api/v1/agreements"))).json();
     for (const a of agreements.data) {
-      expect(known.has(a.spaceId), `agreement ${a.agreementId} -> ${a.spaceId}`).toBe(true);
+      for (const sid of a.spaceIds) {
+        expect(known.has(sid), `${a.agreementId} -> ${sid}`).toBe(true);
+      }
     }
   });
 });
@@ -121,9 +125,11 @@ describe("removing Space.agreementIds lost no information", () => {
     const spaces = await (await listSpaces()).json();
     const all = await (await listAgreements(new Request("http://x/api/v1/agreements"))).json();
 
-    // Forward: every agreement names a Space that exists.
+    // Forward: every Space an agreement names exists. An agreement may name none.
     const known = new Set(spaces.data.map((s: { spaceId: string }) => s.spaceId));
-    for (const a of all.data) expect(known.has(a.spaceId)).toBe(true);
+    for (const a of all.data) {
+      for (const sid of a.spaceIds) expect(known.has(sid)).toBe(true);
+    }
 
     // Reverse: querying a Space returns exactly the agreements that name it.
     // Nothing on the Space object is consulted for this.
@@ -131,7 +137,7 @@ describe("removing Space.agreementIds lost no information", () => {
       const scoped = await (
         await listAgreements(new Request(`http://x/api/v1/agreements?spaceId=${space.spaceId}`))
       ).json();
-      const expected = all.data.filter((a: { spaceId: string }) => a.spaceId === space.spaceId);
+      const expected = all.data.filter((a: { spaceIds: string[] }) => a.spaceIds.includes(space.spaceId));
       expect(scoped.count, `space ${space.spaceId}`).toBe(expected.length);
       expect(scoped.data.map((a: { agreementId: string }) => a.agreementId).sort())
         .toEqual(expected.map((a: { agreementId: string }) => a.agreementId).sort());

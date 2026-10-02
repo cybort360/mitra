@@ -153,12 +153,31 @@ export const MIGRATIONS: string[] = [
   -- inserted, so the containment link cannot be left dangling by a buggy caller.
   CREATE TABLE IF NOT EXISTS mitra.agreements (
     agreement_id TEXT PRIMARY KEY,
-    space_id     TEXT NOT NULL REFERENCES mitra.spaces(space_id) ON DELETE RESTRICT,
     status       TEXT NOT NULL,
     document     JSONB NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-  CREATE INDEX IF NOT EXISTS idx_agreement_space ON mitra.agreements(space_id);
+
+  -- **A JOIN TABLE, not a NOT NULL column.**
+  --
+  -- The previous "agreements.space_id TEXT NOT NULL REFERENCES spaces" was correct
+  -- F33 (it made the containment link enforceable) and wrong for interoperability:
+  -- it made a Mitra tenancy MANDATORY, so an external agent's job could not exist
+  -- without joining a Mitra Space. ADR-0011 open items 1 and 3.
+  --
+  -- A join table expresses three cases the single column could not:
+  --   no Spaces     - an external, non-Mitra-native engagement interoperates
+  --   one Space     - the common case
+  --   several Spaces - a multi-party engagement spanning contexts
+  --
+  -- An agreement with zero rows here is NOT a broken row; it is a valid one with
+  -- no tenancy, which is what interoperability requires.
+  CREATE TABLE IF NOT EXISTS mitra.agreement_spaces (
+    agreement_id TEXT NOT NULL REFERENCES mitra.agreements(agreement_id) ON DELETE CASCADE,
+    space_id     TEXT NOT NULL REFERENCES mitra.spaces(space_id) ON DELETE RESTRICT,
+    PRIMARY KEY (agreement_id, space_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_agreement_space ON mitra.agreement_spaces(space_id);
 
   CREATE TABLE IF NOT EXISTS mitra.obligations (
     obligation_id TEXT PRIMARY KEY,
@@ -203,5 +222,32 @@ export const MIGRATIONS: string[] = [
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_deliverable_agreement ON mitra.deliverables(agreement_id);
+  `,
+  `
+  -- MIGRATION (idempotent). CREATE TABLE IF NOT EXISTS never ALTERS an existing
+  -- table, so the schema change from a single NOT NULL space_id to a join table
+  -- cannot be delivered by the CREATE above alone - a database created before the
+  -- change keeps its old shape and every insert then fails.
+  --
+  -- Three steps, each independently safe to run twice:
+  --   1. backfill the join table from whatever space_id rows still have
+  --   2. drop the NOT NULL so an agreement may join no Space at all
+  --   3. drop the column, so there is no second source of truth left behind
+  -- Step 3 is what stops the dual-write problem F33 describes.
+  DO $$
+  BEGIN
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+       WHERE table_schema='mitra' AND table_name='agreements' AND column_name='space_id'
+    ) THEN
+      INSERT INTO mitra.agreement_spaces (agreement_id, space_id)
+      SELECT a.agreement_id, a.space_id FROM mitra.agreements a
+       WHERE a.space_id IS NOT NULL
+      ON CONFLICT DO NOTHING;
+
+      ALTER TABLE mitra.agreements ALTER COLUMN space_id DROP NOT NULL;
+      ALTER TABLE mitra.agreements DROP COLUMN space_id;
+    END IF;
+  END $$;
   `,
 ];

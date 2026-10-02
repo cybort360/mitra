@@ -104,11 +104,24 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
   let agreementCount = 0;
   for (const a of agreements) {
     const res = await pool.query(
-      `INSERT INTO mitra.agreements (agreement_id, space_id, status, document)
-       VALUES ($1,$2,$3,$4::jsonb)
-       ON CONFLICT (agreement_id) DO UPDATE SET space_id=EXCLUDED.space_id, status=EXCLUDED.status, document=EXCLUDED.document`,
-      [a.agreementId, a.spaceId, a.status, JSON.stringify(a)],
+      `INSERT INTO mitra.agreements (agreement_id, status, document)
+       VALUES ($1,$2,$3::jsonb)
+       ON CONFLICT (agreement_id) DO UPDATE SET status=EXCLUDED.status, document=EXCLUDED.document`,
+      [a.agreementId, a.status, JSON.stringify(a)],
     );
+    // The document must NOT carry membership: it is stored once, in the join
+    // table, and rehydrated on read. Writing it in both places would recreate the
+    // dual-source problem F33 describes.
+    const { spaceIds } = JSON.parse(JSON.stringify(a)) as { spaceIds?: string[] };
+    await pool.query("DELETE FROM mitra.agreement_spaces WHERE agreement_id = $1", [a.agreementId]);
+    for (const sid of a.spaceIds ?? []) {
+      await pool.query(
+        `INSERT INTO mitra.agreement_spaces (agreement_id, space_id) VALUES ($1,$2)
+         ON CONFLICT DO NOTHING`,
+        [a.agreementId, sid],
+      );
+    }
+    void spaceIds;
     agreementCount += res.rowCount ?? 0;
   }
 
