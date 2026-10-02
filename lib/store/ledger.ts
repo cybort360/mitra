@@ -39,6 +39,20 @@ export class CapitalLedger {
     return v ? { ...v } : undefined;
   }
 
+  /**
+   * Every vault the ledger holds.
+   *
+   * Added because the `/vaults` API route was reading the static seed array
+   * directly: it returned *fixtures* with a live reconciliation computed on top,
+   * which is indistinguishable from real state at the HTTP boundary. The ledger
+   * already owned the vaults; it simply had no way to enumerate them, so the
+   * route reached past it. A store that cannot list what it holds invites its
+   * callers to go around it.
+   */
+  listVaults(): Vault[] {
+    return [...this.vaults.values()].map((v) => ({ ...v }));
+  }
+
   /** Capital that is actually spendable, with a reservation applied if required. */
   reserveCapital(vaultId: string, amount: number, reserve: (v: Vault, a: number) => Vault): Vault {
     const current = this.vaults.get(vaultId);

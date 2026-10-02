@@ -25,7 +25,7 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Authorization, Mandate, Obligation, Reservation, RunEvent, Vault,
+  Agreement, Authorization, Mandate, Obligation, Reservation, RunEvent, Space, Vault,
 } from "@/lib/domain/types";
 
 export interface ReservationInput {
@@ -80,7 +80,27 @@ export type CapitalResult =
 
 export interface EconomicRepository {
   getVault(vaultId: string): Promise<Vault | null>;
+
+  /**
+   * Every vault. Added because `/api/v1/vaults` was reading the seed array
+   * directly and returning fixtures with a live reconciliation attached —
+   * indistinguishable from real state over HTTP. The store held the vaults; it
+   * just could not enumerate them.
+   */
+  listVaults(): Promise<Vault[]>;
+
   getMandate(mandateId: string): Promise<Mandate | null>;
+
+  /**
+   * Spaces (PRD §13.1) and the agreements inside them.
+   *
+   * Both are read-only here: the write path is `lib/kernel/commerce.ts`, which is
+   * pure and has no store dependency, so the routes apply a transition and then
+   * persist the result. Keeping the kernel store-free is what lets the same
+   * lifecycle be exercised in a unit test and, later, against Solana.
+   */
+  listSpaces(): Promise<Space[]>;
+  listAgreements(spaceId?: string): Promise<Agreement[]>;
 
   /**
    * Load the reference fixtures into this store.

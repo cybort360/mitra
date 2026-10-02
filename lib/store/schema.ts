@@ -130,4 +130,34 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_event_run ON mitra.event_log(run_id, seq);
   `,
+  `
+  -- Spaces (PRD §13.1): the bounded commercial context.
+  --
+  -- Stored as JSONB plus the columns worth constraining or indexing. The nested
+  -- shape (Money, participant and capability arrays) would otherwise be a dozen
+  -- join tables for a boundary that is read whole every time — a Space is
+  -- fetched to answer "is this participant admitted", never queried by field.
+  CREATE TABLE IF NOT EXISTS mitra.spaces (
+    space_id  TEXT PRIMARY KEY,
+    owner     TEXT NOT NULL,
+    status    TEXT NOT NULL CHECK (status IN ('ACTIVE','SUSPENDED','CLOSED')),
+    document  JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  -- Agreements, with a REAL foreign key to their Space.
+  --
+  -- The spaceId field was added to the Agreement type so that handing a kernel op
+  -- the wrong Space would be DETECTABLE rather than merely discouraged. This
+  -- makes that structural: an agreement whose space_id names no Space cannot be
+  -- inserted, so the containment link cannot be left dangling by a buggy caller.
+  CREATE TABLE IF NOT EXISTS mitra.agreements (
+    agreement_id TEXT PRIMARY KEY,
+    space_id     TEXT NOT NULL REFERENCES mitra.spaces(space_id) ON DELETE RESTRICT,
+    status       TEXT NOT NULL,
+    document     JSONB NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_agreement_space ON mitra.agreements(space_id);
+  `,
 ];

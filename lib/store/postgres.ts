@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
-import type { Authorization, Mandate, Reservation, RunEvent, Vault } from "@/lib/domain/types";
+import type { Agreement, Authorization, Mandate, Reservation, RunEvent, Space, Vault } from "@/lib/domain/types";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput } from "./repository";
 
 const num = (v: unknown): number => Number(v);
@@ -49,6 +49,35 @@ export class PostgresRepository implements EconomicRepository {
       ? await this.pool.query("SELECT * FROM mitra.reservations WHERE vault_id = $1 ORDER BY created_at DESC", [vaultId])
       : await this.pool.query("SELECT * FROM mitra.reservations ORDER BY created_at DESC");
     return rows.map(rowToReservation);
+  }
+
+  async listVaults(): Promise<Vault[]> {
+    const { rows } = await this.pool.query("SELECT * FROM mitra.vaults ORDER BY vault_id");
+    return rows.map(rowToVault);
+  }
+
+  /**
+   * Spaces and agreements.
+   *
+   * `document` holds the whole entity; the scalar columns exist to be indexed or
+   * constrained, and the mapping prefers the document so a shape change does not
+   * silently drop a field the column list does not know about.
+   */
+  async listSpaces(): Promise<Space[]> {
+    const { rows } = await this.pool.query(
+      "SELECT document FROM mitra.spaces ORDER BY space_id",
+    );
+    return rows.map((r) => r.document as Space);
+  }
+
+  async listAgreements(spaceId?: string): Promise<Agreement[]> {
+    const { rows } = spaceId
+      ? await this.pool.query(
+          "SELECT document FROM mitra.agreements WHERE space_id = $1 ORDER BY created_at DESC",
+          [spaceId],
+        )
+      : await this.pool.query("SELECT document FROM mitra.agreements ORDER BY created_at DESC");
+    return rows.map((r) => r.document as Agreement);
   }
 
   /**

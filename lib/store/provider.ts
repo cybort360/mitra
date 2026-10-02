@@ -43,7 +43,7 @@
 // already enforced by the fact that only app/api routes import this module.
 import type { Pool } from "pg";
 import type {
-  Authorization, Mandate, Reservation, RunEvent, Vault,
+  Agreement, Authorization, Mandate, Reservation, RunEvent, Space, Vault,
 } from "@/lib/domain/types";
 import type {
   CapitalResult, EconomicRepository, ReserveCapitalInput,
@@ -51,7 +51,7 @@ import type {
 import { createPool } from "@/lib/store/db";
 import { PostgresRepository } from "@/lib/store/postgres";
 import { CapitalLedger, getLedger } from "@/lib/store/ledger";
-import { mandates } from "@/lib/store/seed";
+import { agreements, mandates, spaces } from "@/lib/store/seed";
 
 /** Which store served a request. Surfaced in API responses; never inferred. */
 export type Backend = "postgres" | "memory";
@@ -79,6 +79,29 @@ export class InMemoryRepository implements EconomicRepository {
   /** Served from the seed array: the ledger has no mandate store of its own. */
   async getMandate(mandateId: string): Promise<Mandate | null> {
     return mandates.find((m) => m.mandateId === mandateId) ?? null;
+  }
+
+  /** Enumerated from the ledger, which is the only owner of vault state. */
+  async listVaults(): Promise<Vault[]> {
+    return this.ledger.listVaults();
+  }
+
+  /**
+   * Spaces and agreements, from the reference fixtures.
+   *
+   * The in-memory backend is a development store, so it reads the same arrays the
+   * seed defines rather than duplicating them. What matters is that the *route*
+   * now goes through the repository: when the Postgres backend is selected the
+   * same call returns rows from the database, and no route changes.
+   */
+  async listSpaces(): Promise<Space[]> {
+    return spaces.map((s) => ({ ...s }));
+  }
+
+  async listAgreements(spaceId?: string): Promise<Agreement[]> {
+    return agreements
+      .filter((a) => !spaceId || a.spaceId === spaceId)
+      .map((a) => ({ ...a }));
   }
 
   async listReservations(vaultId?: string): Promise<Reservation[]> {
