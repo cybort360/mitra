@@ -238,8 +238,13 @@ fn initialize_vault(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) 
 /// devnet figure. That is acceptable precisely because this path only executes
 /// on chain — and if it ever ran in a test, the account would not be a PDA
 /// anyway.
+///
+/// **This returns the minimum *with headroom***, not the bare
+/// `minimum_balance`. See `rent::rent_exempt_with_headroom` for why the bare
+/// minimum is a trap: an account created at exactly the minimum cannot be
+/// written to, and consuming a permit is a one-byte write. Found on devnet.
 pub fn rent_for_bytes(bytes: usize) -> Result<u64, ProgramError> {
-    rent::rent_exempt_minimum(bytes)
+    rent::rent_exempt_with_headroom(bytes)
 }
 
 /// `deposit(amount)` — moves lamports in and credits `available`.
@@ -528,6 +533,16 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
 
     if !holder.is_signer {
         return Err(err::custom(err::NOT_SIGNER));
+    }
+    // Every other handler that takes a system program validates it. This one
+    // read the account and then ignored it, which the compiler flagged as an
+    // unused variable — a warning that turned out to be a missing security
+    // check rather than a style nit. Without it, `create_account` below is
+    // invoked against whatever account the caller placed third, and the CPI
+    // fails late with a runtime error instead of being refused up front with
+    // IncorrectProgramId.
+    if system_program.key != &solana_program::system_program::ID {
+        return Err(ProgramError::IncorrectProgramId);
     }
     // A zero limit or a zero ceiling would create a mandate that can authorize
     // nothing. Refusing it is friendlier than minting a dead object: a caller

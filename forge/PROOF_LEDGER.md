@@ -230,7 +230,39 @@ from [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md).
 | 0 Ground truth | "Every P0 object has a schema and state transition definition." | `INTEGRATED` | `BLOCKED_INTERNAL` — 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
 | 1 Core | "Purely local end-to-end lifecycle passes." | `E2E_VERIFIED` | — |
 | 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | `LIVE_DEMONSTRATED` | — |
-| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: engraving, signer abstraction, Arcium path absent |
+| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `LIVE_DEMONSTRATED` | `DEFERRED` — the mandate→authorization→consume-on-spend path is live on devnet and the replay is refused on-chain, but **mandate revision/revocation and the privacy path are unbuilt** (Phase 3b, 3d). The cited exit condition is met for the *spend* leg only |
+
+**Phase 3 evidence — 2026-01-10, Solana devnet.**
+
+- Program: `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` (redeployed this run, slot 506526518+)
+- Vault: `5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T`
+- Agent: `69P6furryqiLh4QzusKKxQftFJFsSADiGzGE2XdYYeU7` · Engine: `AsekkLdQWCE7dcCZxtkLhJvNR5e4zUbDhrBM1mKSM4e6`
+- Mandate: `HByESBJV5DvoyR2bTHnK42SA55NmHqW1m8js2e1zUCPX` (96 B, v1, limit 100000)
+- Authorization (run `final1`): `CMdWgCWGvX2K8VxZxkAW63rFgnPX4i8Me9c2yTgtkpcE` (98 B, `consumed=1`, 1_148_080 lamports slack)
+
+Commands:
+
+```bash
+cargo test --manifest-path programs/mitra-vault/Cargo.toml          # 51/51
+PHASE3_RUN=final1 node scripts/authority-devnet.mjs                  # ALL CHECKS PASSED
+node scripts/verify-phase3.mjs final1                                # VERIFIED
+```
+
+Decoded on-chain outcomes, not signatures:
+
+| Claim | Evidence |
+|---|---|
+| A mandate is opened by its own holder | mandate `holder == agent`; no privileged creator exists in the handler |
+| A permit is **derived**, never asserted | instruction carries only `action_hash` + `amount`; version and expiry are copied from the mandate |
+| The permit is bound to one exact action | spending under a different hash → `0x177d` (6013 ACTION_HASH_MISMATCH) |
+| A permit cannot be re-issued | re-`authorize` → `0x1779` (6009 ALREADY_INITIALIZED) |
+| A permit is single-use | `consumed` byte on chain is `1` after the spend |
+| **Replay moves no value** | replay → `0x177c` (6012 AUTHORIZATION_CONSUMED); vault `3183640 → 3183640`; recipient `2496160 → 2496160`; 10 further attempts all refused |
+| Capital stayed reconciled | six positions sum to total, checked on every read and again by the independent verifier |
+| The refund is not a loophole | amount comes from the permit; the instruction has no amount field |
+
+The two refusals that matter were each confirmed by a **decoded custom error
+code**, not by the mere presence of a failure.
 | 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation in Mitra. **Substrate located**: Microcosm at `/opt/microcosm-x` (§50 reuse list audited, F24) |
 | 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — interfaces plus one `local` stub; no A2A, MCP server, ERC-8004, marketplace, x402 |
 | 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `PROPOSED` | `BLOCKED_INTERNAL` **and** `BLOCKED_EXTERNAL` — no implementation, and PRD §50's named source (TALOS) is not present anywhere on disk (F24). Buildable; any claim of TALOS reuse would be unsupported |

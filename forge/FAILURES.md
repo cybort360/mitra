@@ -902,6 +902,76 @@ property anyone relies on. And when a mutation is *undetectable*, ask whether it
 is a coverage hole or a **false claim in a comment** before adding a test to
 paper over it — the second is a documentation bug that a test would cement.
 
+## F26 — accounts created at the bare rent minimum could not be written to
+
+**Found** 2026-01-10, on devnet during the Phase 3 run.
+
+`rent_for_bytes` returned `Rent::minimum_balance(len)` — *exactly* the minimum for
+an account to be rent-exempt at creation. Consuming a permit is a one-byte write
+to a 98-byte authorization, and that failed:
+
+```
+InsufficientFundsForRent { account_index: 2 }
+```
+
+An account created at precisely the minimum cannot be written to: the runtime
+rejects any transaction that would leave a data-carrying account below its
+minimum. The vault was unaffected because its lamports *move through* it, so it
+always holds a balance; the authorization was created at the bare minimum and only
+ever needed writing.
+
+Fixed with `rent::rent_exempt_with_headroom` — a 2x multiplier, so an account
+created today cannot fall below the minimum if rent parameters change with a
+cluster-wide vote. The authorization on devnet now shows 1_148_080 lamports of
+slack. The pre-existing mandate still shows 0 and is reported as an INFO, not a
+failure: it is a pre-fix artifact, and asserting on it would fail forever while
+proving nothing.
+
+## F27 — the harness reported its own bugs as program refusals
+
+**Found** 2026-01-10, the same run. The more instructive failure, and the reason
+`HARNESS_ERRORS` and `checkRefused` exist.
+
+Four separate defects in `scripts/authority-devnet.mjs` each produced output that
+read like a *correct* program rejection:
+
+| Harness fault | Printed as | Reality |
+|---|---|---|
+| Airdrop failed with 429, logged and continued | downstream `0x1` failures | unfunded signer |
+| `spend_ix` sent no signers | `REPLAY REFUSED` → **PASS** | transaction never ran |
+| `engine.publicKey` (undefined) | `toString of undefined` | JS TypeError |
+| Recipient left at 0 lamports | `InsufficientFundsForRent` | not a program error |
+
+The second is the dangerous one. A transaction that never reached the program has
+refused nothing, and the harness counted it as evidence for the exact property
+the product exists to provide. **A green replay check was manufactured from a
+harness bug.**
+
+Fixed by:
+- `checkRefused`, which refuses to count a transaction as a program refusal if
+  the error matches harness faults (`no signers`, `prior credit`, fetch failures),
+  and says so loudly when it does;
+- `TypeError`/`ReferenceError` surfaced with a stack instead of being swallowed
+  into a "refusal" string;
+- failed funding is now **fatal** — a harness that continues past an unmet
+  precondition will report its own bugs as the system's;
+- funding by **transfer from the funded authority** rather than airdrop, because
+  the devnet faucet is rate-limited and returned `429 ... faucet has run dry`.
+
+A fourth error, `insufficient account keys for instruction`, was a genuine
+interface mismatch: the `create_account` CPI needs a fourth account (the program
+account) that the harness was not sending. **No in-process test could have caught
+it**, since `dispatch` is called with whatever `AccountInfo`s the test chooses and
+never exercises a real CPI. This is the entire reason the on-chain harness exists.
+
+### A note on how I found account 2
+
+I guessed wrong three times — authz PDA, then vault, then mandate — before
+reading that the runtime's `account_index` counts the fee payer and the program
+id, making index 2 the *first instruction key*, the recipient. The error named the
+index; I spent several turns not reading it. Where a tool reports a precise
+coordinate, use it before forming a hypothesis.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
