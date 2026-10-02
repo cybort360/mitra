@@ -11,7 +11,9 @@
 //! for the same struct, preceded by the 8-byte Anchor discriminator. That is
 //! what makes the eventual Anchor migration a wrapper rather than a rewrite.
 
-use crate::anchor_parity::{err, mandate_discriminator, VAULT_DISCRIMINATOR};
+use crate::anchor_parity::{
+    authorization_discriminator, err, mandate_discriminator, VAULT_DISCRIMINATOR,
+};
 use solana_program::{entrypoint::ProgramResult, program_error::ProgramError, pubkey::Pubkey};
 
 /// The six capital positions from PRD §4.12, plus the total they must sum to.
@@ -296,5 +298,129 @@ impl Mandate {
     /// refusal look like a ceiling problem and hide expiry entirely.
     pub fn is_live_at(&self, now: u64) -> bool {
         now < self.expires_at
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Authorization: a single-use, action-bound permit (ADR-0009, decision 4).
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// **The type that makes the load-bearing mechanism structural.** AGENTS.md is
+// blunt that "an ALLOW decision is never itself permission to move value", and
+// that an ALLOW which skips re-derivation "is not a weaker guarantee — it is no
+// guarantee". An `Authorization` is that re-derivation, made into an object the
+// chain can hold.
+//
+// Why one account per action (design option (a)) rather than a replay bitmap on
+// the mandate (option (b)):
+//
+//   The rejected alternative was a bitmap. It is cheaper — one account, no rent
+//   per action — and it was refused because it makes evidence *unnnameable*: with
+//   a bitmap, "was this specific authorization used?" is a question about the
+//   whole mandate, not about any addressable object, so a dispute over one action
+//   forces a reader to load and decode the entire policy history to answer a
+//   yes/no question. The whole purpose of the versioned mandate is that a
+//   decision can cite the policy text that produced it, and a bitmap forfeits
+//   that. Rent is a price; unnameable evidence is a design error.
+//
+// **Single-use is enforced by a program-mutated flag, not by the caller.** The
+// caller cannot assert "I have not used this" any more than it can assert its
+// own spend decision; the program sets `consumed = true` in the same
+// instruction that moves value, so there is no window in which a second spend
+// could observe an unused authorization.
+
+/// Byte length: 8 discriminator + 32 holder + 32 action_hash + 8 amount + 8
+/// mandate_version + 8 expires_at + 1 consumed + 1 bump = 98.
+pub const AUTHORIZATION_LEN: usize = 98;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Authorization {
+    /// The agent this authorizes. Bound into the PDA seeds, so an authorization
+    /// cannot be presented by a different agent than the one it was issued to.
+    pub holder: Pubkey,
+    /// Commitment to **one exact economic action**.
+    ///
+    /// This is the field that does the real work. A permit that said "spend up to
+    /// 100" would be reusable across any action within that amount; hashing the
+    /// action itself means the permit dies with the thing it describes. A caller
+    /// that wants to spend 100 must hold 100 *distinct* authorizations.
+    pub action_hash: [u8; 32],
+    /// The amount this specific action may move, checked against the vault at
+    /// spend time.
+    pub amount: u64,
+    /// Which mandate version authorized this. Stored, not re-read, so evidence
+    /// survives the mandate being tightened afterwards.
+    pub mandate_version: u64,
+    /// The mandate's own expiry, copied at issue time. A permit cannot outlive
+    /// the policy that created it.
+    pub expires_at: u64,
+    /// Single-use flag. Written only by this program, only in the instruction
+    /// that moves value.
+    pub consumed: bool,
+    pub bump: u8,
+}
+
+impl Authorization {
+    pub fn to_bytes(&self) -> [u8; AUTHORIZATION_LEN] {
+        let mut out = [0u8; AUTHORIZATION_LEN];
+        out[0..8].copy_from_slice(&authorization_discriminator());
+        out[8..40].copy_from_slice(self.holder.as_ref());
+        out[40..72].copy_from_slice(&self.action_hash);
+        out[72..80].copy_from_slice(&self.amount.to_le_bytes());
+        out[80..88].copy_from_slice(&self.mandate_version.to_le_bytes());
+        out[88..96].copy_from_slice(&self.expires_at.to_le_bytes());
+        out[96] = u8::from(self.consumed);
+        out[97] = self.bump;
+        out
+    }
+
+    pub fn try_from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() != AUTHORIZATION_LEN {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        if data[0..8] != authorization_discriminator() {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        let read_u64 = |from: usize| {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&data[from..from + 8]);
+            u64::from_le_bytes(b)
+        };
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&data[40..72]);
+        Ok(Self {
+            holder: Pubkey::try_from(&data[8..40])
+                .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
+            action_hash: hash,
+            amount: read_u64(72),
+            mandate_version: read_u64(80),
+            expires_at: read_u64(88),
+            // Strictly `!= 0` rather than `== 1`. A corrupted account holding any
+            // non-zero byte must read as consumed, not as unused — the safe
+            // direction to be wrong in. Treating a stray 0xFF as an unspent permit
+            // would turn corruption into spendable value.
+            consumed: data[96] != 0,
+            bump: data[97],
+        })
+    }
+
+    /// May this authorization be spent, right now, for this exact action?
+    ///
+    /// Three independent refusals, deliberately not collapsed into one. Each
+    /// answers a different question and a client needs to tell them apart:
+    /// a consumed permit is a replay attempt, a mismatched hash is a confused
+    /// deputy, and an expired one is stale policy. A single boolean would erase
+    /// the distinction and make replay attempts indistinguishable from typos.
+    pub fn spendable_at(&self, action: &[u8; 32], now: u64) -> Result<(), ProgramError> {
+        if self.consumed {
+            return Err(err::custom(err::AUTHORIZATION_CONSUMED));
+        }
+        if &self.action_hash != action {
+            return Err(err::custom(err::ACTION_HASH_MISMATCH));
+        }
+        if now >= self.expires_at {
+            return Err(err::custom(err::MANDATE_EXPIRED));
+        }
+        Ok(())
     }
 }

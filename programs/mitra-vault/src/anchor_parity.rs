@@ -64,6 +64,12 @@ pub mod ix {
     pub const RESERVE: [u8; 8] = [92, 99, 244, 209, 28, 65, 213, 157];
     /// sha256("global:release")[..8]
     pub const RELEASE: [u8; 8] = [253, 249, 15, 206, 28, 127, 193, 241];
+    /// sha256("global:open_mandate")[..8]
+    pub const OPEN_MANDATE: [u8; 8] = [116, 145, 190, 28, 86, 223, 105, 74];
+    /// sha256("global:authorize")[..8]
+    pub const AUTHORIZE: [u8; 8] = [173, 193, 102, 210, 219, 137, 113, 120];
+    /// sha256("global:spend_authorized")[..8]
+    pub const SPEND_AUTHORIZED: [u8; 8] = [203, 103, 151, 6, 82, 80, 185, 117];
 }
 
 /// Error codes. Anchor reserves 0–999 for its framework and assigns user errors
@@ -239,4 +245,27 @@ mod tests {
         // attacker and a direct signature.
         assert!(!a.is_on_curve(), "a PDA must not be on the ed25519 curve");
     }
+}
+
+/// sha256("account:Authorization")[..8], derived for the same reason as
+/// `mandate_discriminator` — see the note there.
+pub fn authorization_discriminator() -> [u8; 8] {
+    account_discriminator("Authorization")
+}
+
+/// The authorization seed. **The action hash is part of the derivation**, which
+/// is what makes option (a) work: each action gets its own address, so two
+/// permits can never alias, and a replay is a second signature on an address
+/// that already exists rather than a value inside some other account.
+///
+/// Seeds are `[b"authorization", holder, action_hash]`.
+pub const AUTHORIZATION_SEED: &[u8] = b"authorization";
+
+/// One lifetime for both inputs, not two. The returned array mixes a borrow of
+/// `holder` with a borrow of `action_hash`, so their lifetimes must unify; with
+/// independent lifetimes there is no `&'x` the array could take. One shared
+/// `'a` is both sufficient and the strictest correct constraint, which keeps
+/// the signature honest about what it holds on to.
+pub fn authorization_seeds<'a>(holder: &'a Pubkey, action_hash: &'a [u8; 32]) -> [&'a [u8]; 3] {
+    [AUTHORIZATION_SEED, holder.as_ref(), action_hash.as_ref()]
 }

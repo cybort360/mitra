@@ -22,6 +22,7 @@ use solana_program::{
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
+    sysvar::Sysvar,
 };
 use state::Vault;
 // System-program instructions live in the `system_program` crate, not `solana_program`.
@@ -35,6 +36,27 @@ solana_program::entrypoint!(process);
 /// discriminators with `to_le_bytes()[..8]`, so shorter input cannot be
 /// dispatched. `InvalidInstructionData` rather than a panic.
 pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    // The on-chain clock, read once and passed explicitly. This mirrors the
+    // kernel's own rule (functions take explicit time; they never call
+    // `new Date()`): the handler that makes an expiry decision must be testable
+    // at a chosen instant, and a handler that reaches for the clock itself
+    // cannot be tested at a boundary. Reading it here and threading it down keeps
+    // the decision points pure.
+    let now = solana_program::clock::Clock::get()?.unix_timestamp.max(0) as u64;
+    dispatch(program_id, accounts, data, now)
+}
+
+/// Dispatches with an explicit `now`.
+///
+/// Separated from [`process`] so tests and the devnet harness can exercise the
+/// exact instants that matter — the second before expiry, the second *at*
+/// expiry — which are the cases a real clock will never land on by accident.
+pub fn dispatch(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    data: &[u8],
+    now: u64,
+) -> ProgramResult {
     if data.len() < 8 {
         return Err(ProgramError::InvalidInstructionData);
     }
@@ -47,6 +69,9 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
         ix::WITHDRAW => withdraw(program_id, accounts, args),
         ix::RESERVE => reserve(program_id, accounts, args),
         ix::RELEASE => release(program_id, accounts, args),
+        ix::OPEN_MANDATE => open_mandate(program_id, accounts, args),
+        ix::AUTHORIZE => authorize(program_id, accounts, args, now),
+        ix::SPEND_AUTHORIZED => spend_authorized(program_id, accounts, args, now),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -471,4 +496,349 @@ mod devnet_regressions {
         assert_eq!(instruction_discriminator("reserve"), ix::RESERVE);
         assert_eq!(instruction_discriminator("withdraw"), ix::WITHDRAW);
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 3 — Authority: mandate, authorization, consume-on-spend (ADR-0009).
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// `open_mandate(limit, ceiling, expires_at)` — creates the holder's mandate.
+///
+/// Signature `[u64 limit][u64 ceiling][u64 expires_at][u8 bump?]`, matching the
+/// field order in `Mandate` so the arg order and the account layout stay
+/// auditable side by side.
+///
+/// **The authority that opens a mandate is the holder's keypair, not a separate
+/// "policy engine" signer.** There is deliberately no privileged creator: a
+/// mandate is a self-binding limit on its own holder. An external policy engine
+/// appears in Phase 3d as a *proposal* producer, and even then it cannot mint a
+/// permit — it can only cause one to be derived. Putting the signer here would
+/// let a compromised policy engine widen anyone's limits, which is the inverse
+/// of the mechanism AGENTS.md requires.
+fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
+    let limit = read_amount(&args[0..8])?;
+    let ceiling = read_amount(&args[8..16])?;
+    let expires_at = read_amount(&args[16..24])?;
+    let bump_arg = args.get(24).copied();
+
+    let mut it = accounts.iter();
+    let holder = next_account_info(&mut it)?;
+    let mandate_account = next_account_info(&mut it)?;
+    let system_program = next_account_info(&mut it)?;
+
+    if !holder.is_signer {
+        return Err(err::custom(err::NOT_SIGNER));
+    }
+    // A zero limit or a zero ceiling would create a mandate that can authorize
+    // nothing. Refusing it is friendlier than minting a dead object: a caller
+    // that passes 0 has made an argument mistake, and an inert mandate on chain
+    // looks like a policy that was deliberately set to nil.
+    if limit == 0 || ceiling == 0 {
+        return Err(ProgramError::InvalidArgument);
+    }
+    // The ceiling is the vault-total bound and the limit is the per-action bound.
+    // A ceiling below the limit is not "restrictive", it is incoherent: no single
+    // action could ever fit. Catching it at open time means a later spend
+    // failure cannot be mistaken for a missing balance.
+    if ceiling < limit {
+        return Err(err::custom(err::EXCEEDS_MANDATE_CEILING));
+    }
+    if mandate_account.owner != &solana_program::system_program::ID
+        && mandate_account.owner != program_id
+    {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    if mandate_account.owner == program_id {
+        return Err(err::custom(err::ALREADY_INITIALIZED));
+    }
+
+    let (expected, derived_bump) = Pubkey::try_find_program_address(
+        &anchor_parity::mandate_seeds(holder.key),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if expected != *mandate_account.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    let bump = match bump_arg {
+        None => derived_bump,
+        Some(b) if b == derived_bump => b,
+        Some(_) => return Err(ProgramError::InvalidSeeds),
+    };
+
+    if mandate_account.lamports() == 0 {
+        let lamports = rent_for_bytes(state::MANDATE_LEN)?;
+        let cpi = system_instruction::create_account(
+            holder.key, mandate_account.key, lamports,
+            state::MANDATE_LEN as u64, &program_id,
+        );
+        let program_account = next_account_info(&mut it)?;
+        let bump_seed = [bump];
+        let seed_sets: &[&[&[u8]]] = &[&[
+            anchor_parity::MANDATE_SEED,
+            holder.key.as_ref(),
+            &bump_seed,
+        ]];
+        invoke_signed(
+            &cpi,
+            &[holder.clone(), mandate_account.clone(), program_account.clone()],
+            seed_sets,
+        )?;
+    }
+
+    // Version starts at 1, never 0 — `try_from_bytes` treats 0 as "not written by
+    // this program", so a fresh mandate must not be born indistinguishable from
+    // an uninitialized one.
+    let mandate = state::Mandate {
+        holder: *holder.key,
+        limit,
+        // Version starts at 1, never 0 — `try_from_bytes` treats 0 as "not
+        // written by this program", so a fresh mandate must not be born
+        // indistinguishable from an uninitialized one.
+        version: 1,
+        expires_at,
+        ceiling,
+    };
+    mandate_account.try_borrow_mut_data()?.copy_from_slice(&mandate.to_bytes());
+    msg!("mandate v1 opened for {}", holder.key);
+    Ok(())
+}
+
+/// `authorize(action_hash, amount)` — the policy engine issues a single-use permit.
+///
+/// The permit is **derived by the program from the mandate**, never asserted by
+/// the caller. The caller supplies only two things it is entitled to know: which
+/// action it wants, and how much that action costs. It cannot supply the
+/// authorization, the version, the expiry, or the limit. This is the
+/// load-bearing boundary from AGENTS.md rendered as a function signature — the
+/// reason an "ALLOW" is not permission is that no path exists by which a caller
+/// can hand the program its own permission.
+fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u64) -> ProgramResult {
+    let amount = read_amount(&args[32..40])?;
+    let mut action_hash = [0u8; 32];
+    action_hash.copy_from_slice(&args[0..32]);
+
+    let mut it = accounts.iter();
+    let policy_engine = next_account_info(&mut it)?;
+    let holder = next_account_info(&mut it)?;
+    let mandate_account = next_account_info(&mut it)?;
+    let authorization_account = next_account_info(&mut it)?;
+    let system_program = next_account_info(&mut it)?;
+
+    if !policy_engine.is_signer {
+        return Err(err::custom(err::NOT_SIGNER));
+    }
+    if system_program.key != &solana_program::system_program::ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    if mandate_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    let mandate = state::Mandate::try_from_bytes(&mandate_account.try_borrow_data()?)?;
+    if mandate.holder != *holder.key {
+        return Err(err::custom(err::UNAUTHORIZED));
+    }
+
+    // Refuse to issue against a dead mandate *before* checking the amount, so an
+    // expired policy reports expiry rather than a ceiling complaint.
+    if !mandate.is_live_at(now) {
+        return Err(err::custom(err::MANDATE_EXPIRED));
+    }
+    if amount == 0 || amount > mandate.limit {
+        return Err(err::custom(err::EXCEEDS_MANDATE_CEILING));
+    }
+
+    let (expected, derived_bump) = Pubkey::try_find_program_address(
+        &anchor_parity::authorization_seeds(holder.key, &action_hash),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if expected != *authorization_account.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    let bump = args.get(40).copied().unwrap_or(derived_bump);
+    if bump != derived_bump {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // An existing account at this exact address means this action was already
+    // authorized. Re-issuing would silently resurrect a spent permit, so this is
+    // refused rather than overwritten — the same reasoning as ALREADY_INITIALIZED
+    // on a vault.
+    if authorization_account.owner == program_id {
+        return Err(err::custom(err::ALREADY_INITIALIZED));
+    }
+
+    if authorization_account.lamports() == 0 {
+        let lamports = rent_for_bytes(state::AUTHORIZATION_LEN)?;
+        let cpi = system_instruction::create_account(
+            policy_engine.key, authorization_account.key, lamports,
+            state::AUTHORIZATION_LEN as u64, &program_id,
+        );
+        let program_account = next_account_info(&mut it)?;
+        let bump_seed = [bump];
+        let seed_sets: &[&[&[u8]]] = &[&[
+            anchor_parity::AUTHORIZATION_SEED,
+            holder.key.as_ref(),
+            action_hash.as_ref(),
+            &bump_seed,
+        ]];
+        invoke_signed(
+            &cpi,
+            &[
+                policy_engine.clone(),
+                authorization_account.clone(),
+                program_account.clone(),
+            ],
+            seed_sets,
+        )?;
+    }
+
+    let authorization = state::Authorization {
+        holder: *holder.key,
+        action_hash,
+        amount,
+        // Copied from the mandate, not supplied by the caller: this is the record
+        // that lets evidence name the policy version behind a spend, even after
+        // the mandate has since been tightened or expired.
+        mandate_version: mandate.version,
+        expires_at: mandate.expires_at,
+        consumed: false,
+        bump,
+    };
+    authorization_account
+        .try_borrow_mut_data()?
+        .copy_from_slice(&authorization.to_bytes());
+    msg!("authorization issued for mandate v{}", mandate.version);
+    Ok(())
+}
+
+/// `spend_authorized(action_hash)` — moves value under a permit, consuming it.
+///
+/// **This is the instruction the whole product turns on.** It is the only path
+/// by which an agent's action becomes a capital movement, and it re-derives
+/// permission from the mandate and the permit rather than trusting anything the
+/// caller said.
+///
+/// **On the ordering of consume versus value movement** — a correction.
+///
+/// The first draft of this comment claimed that consuming before moving was "a
+/// security property" and that the reverse order would leave value moved with
+/// the permit still unspent. Mutation testing showed that claim to be false in
+/// this context, and it is worth recording why rather than quietly deleting it.
+///
+/// Replaying this instruction is a *separate transaction*. Within one
+/// transaction the two orderings are observationally identical: both end with
+/// `consumed = true` and the lamports moved, and Solana applies the
+/// transaction atomically, so a failure after either step rolls the whole thing
+/// back. The inverted-order mutant (M5) is therefore **not detectable by any
+/// test, and is not a defect** — there is no state in which it produces a
+/// different outcome.
+///
+/// The ordering is kept consume-first anyway, for two reasons that are real but
+/// weaker than the original claim:
+///
+///   1. It fails safe under the one way this could actually diverge — if this
+///      program were ever extended with a CPI between the two steps, a rollback
+///      would be all-or-nothing while a *revert-in-handler* path could leave the
+///      permit consumed without value moved. Consuming first means the worse
+///      error is a burned permit, not an unspent permit over moved value.
+///   2. It matches the read of the code: a reader scanning the handler sees the
+///      permission destroyed before the consequence, which is the order the
+///      argument in the ADR describes.
+///
+/// Deleting the consume write entirely (M4) *is* caught, by three tests. That
+/// is the mutation that matters, and the suite catches it.
+/// The vault is debited and the destination credited by direct mutation, exactly
+/// as in `withdraw`, for the same reason: the program owns the vault, so the
+/// runtime permits it, and the system program's `transfer` would reject a
+/// data-carrying source.
+fn spend_authorized(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: &[u8],
+    now: u64,
+) -> ProgramResult {
+    let mut action_hash = [0u8; 32];
+    action_hash.copy_from_slice(&args[0..32]);
+
+    let mut it = accounts.iter();
+    let recipient = next_account_info(&mut it)?;
+    let vault_account = next_account_info(&mut it)?;
+    let authorization_account = next_account_info(&mut it)?;
+    let mandate_account = next_account_info(&mut it)?;
+
+    if authorization_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    if mandate_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    if vault_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+
+    let mandate = state::Mandate::try_from_bytes(&mandate_account.try_borrow_data()?)?;
+    let mut authorization =
+        state::Authorization::try_from_bytes(&authorization_account.try_borrow_data()?)?;
+
+    // The permit is bound to a holder. The holder is not required to sign — an
+    // agent paying a counterparty does not have the holder's keypair — but the
+    // permit must at least be one that was issued to *someone*, and the mandate
+    // it names must be the same one. A permit from a different mandate is a
+    // confused-deputy attempt even when it is otherwise valid.
+    if authorization.holder != mandate.holder {
+        return Err(err::custom(err::UNAUTHORIZED));
+    }
+    // A permit issued under mandate v3 must not be spendable once the mandate has
+    // moved on *and revoked* the version that issued it. Phase 3a has no
+    // revocation, so version monotonicity is checked instead: a permit naming a
+    // version *newer* than the live mandate is not something this mandate issued.
+    if authorization.mandate_version > mandate.version {
+        return Err(err::custom(err::UNAUTHORIZED));
+    }
+
+    // Three refusals, in this order, from `spendable_at`. Consumed is checked
+    // first so a replay is reported as a replay rather than as a hash mismatch.
+    authorization.spendable_at(&action_hash, now)?;
+
+    // The amount comes from the PERMIT, never from the caller. A caller-supplied
+    // amount would let a holder of a 1-unit permit request 1,000,000; the
+    // ceiling check below would then be the only thing standing between a small
+    // permit and a large transfer.
+    let amount = authorization.amount;
+    if amount == 0 {
+        return Err(ProgramError::InvalidArgument);
+    }
+    if amount > mandate.limit {
+        return Err(err::custom(err::EXCEEDS_MANDATE_CEILING));
+    }
+
+    // ── consume FIRST ────────────────────────────────────────────────────────
+    authorization.consumed = true;
+    authorization_account
+        .try_borrow_mut_data()?
+        .copy_from_slice(&authorization.to_bytes());
+
+    // ── then move value ─────────────────────────────────────────────────────
+    let mut data = vault_account.try_borrow_mut_data()?;
+    let mut vault = Vault::from_bytes(&data)?;
+    if amount > vault.available {
+        return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
+    }
+    vault.available -= amount;
+    vault.total -= amount;
+    vault.reconcile()?;
+    data.copy_from_slice(&vault.to_bytes());
+    drop(data);
+
+    **vault_account.try_borrow_mut_lamports()? = vault_account.lamports()
+        .checked_sub(amount)
+        .ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
+    **recipient.try_borrow_mut_lamports()? = recipient.lamports()
+        .checked_add(amount)
+        .ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
+
+    msg!("spent {} under mandate v{} action {}", amount, authorization.mandate_version, action_hash[0]);
+    Ok(())
 }

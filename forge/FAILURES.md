@@ -853,6 +853,55 @@ not the directory where you expected it. And distinguish "the concept appears in
 our seed data" from "we have read the implementation" — the first is a fixture,
 the second is a substrate audit.
 
+## F25 — the replay guarantee was untested at the point it is enforced
+
+**Found** 2026-01-10, by mutation-auditing Phase 3c.
+
+Phase 3c's first test suite passed 10/10 and was reported as covering the
+consumable authorization. It was not. The suite exercised
+`Authorization::spendable_at` — the *type* — while the security property lives in
+the *handler*, which is what writes `consumed = true` and moves the lamports.
+
+Mutation testing made the gap concrete:
+
+| Mutation | Result |
+|---|---|
+| Delete the consume write from the handler | **0 tests failed** |
+| Set `consumed = false` instead of `true` in the handler | **0 tests failed** |
+| Delete the replay check from `spendable_at` (the type) | 3 tests failed |
+
+So the suite was green against a build in which **replay protection had been
+removed outright** — while it reliably detected damage to the method nobody's
+security depends on. Deleting the *handler's* consume step is the mutation that
+matters, and nothing saw it.
+
+**Fixed** by `tests/spend_integration.rs`, which drives the real handler through
+`dispatch()` with real `AccountInfo`s. All three mutations are now caught, and
+the replay test asserts not only that the second spend errors but that
+`recipient_lamports` and `vault.available` are **unchanged** — "it returned an
+error" would not catch a handler that errored after moving the value.
+
+Two corrections fell out of the same work, both recorded in the code:
+
+1. **The "consume first" comment was a false security claim.** It asserted that
+   inverting the order would leave value moved with the permit unspent. It would
+   not: replay is a *separate transaction*, and within one transaction both
+   orderings end in the same state under Solana's atomicity. The inverted mutant
+   is undetectable *because it is not a defect*. The ordering is kept for two
+   weaker but real reasons (a future CPI between the steps; readability), now
+   stated as what they are.
+
+2. **The first fixture modelled a cross-mandate replay.** It gave the mandate and
+   the permit independent holders, so every test failed `6008` UNAUTHORIZED. The
+   handler was correct; the fixture was wrong. Worth recording because the
+   instinct on seeing six red tests is to loosen the assertion — here that would
+   have deleted a real guard.
+
+**Rule.** A test that exercises a method but not its caller has not tested the
+property anyone relies on. And when a mutation is *undetectable*, ask whether it
+is a coverage hole or a **false claim in a comment** before adding a test to
+paper over it — the second is a documentation bug that a test would cement.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
