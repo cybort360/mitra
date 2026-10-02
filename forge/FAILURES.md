@@ -750,6 +750,71 @@ filename.
 
 **Rule.** A reference is a claim. Check that it resolves.
 
+## F22 — ten days of work were built from half the governing specification
+
+**Found** 2026-01-10, when asked what Mitra is *according to the specification*
+rather than the PRD.
+
+`AGENTS.md` names both documents as the specification:
+
+> The full specification is `docs/product/MITRA_PRD.md` (normative) and
+> `docs/product/MITRA_0_1_FULL_PRODUCT_SPEC.md`.
+
+I had read the PRD and **never opened the full product spec** — 4,041 lines.
+Everything built to that point derived from the PRD alone.
+
+**Why it mattered, concretely.** The spec's thesis appears in exactly one
+document:
+
+```
+$ grep -c 'Payments let machines move money' MITRA_0_1_FULL_PRODUCT_SPEC.md
+1
+$ grep -c 'Payments let machines move money' MITRA_PRD.md
+0
+```
+
+So the defining sentence of the product existed nowhere in what I had read. The
+PRD expresses the thesis in its own words — *"financial coordination control
+plane"* — and I had been building a **vault**. Those are related, and a vault is
+genuinely Phase 2's exit condition, but the vault is the *enforcement substrate
+the thesis needs*, not the thesis.
+
+**Three things the spec says that I had not internalised:**
+
+1. **§3.2, what Mitra is not** — not a payment protocol, not a marketplace, not a
+   wallet, not a bridge. "Marketplace-interoperable, not primarily a marketplace."
+   This is why §2.1 demands adapters to A2A, MCP, ERC-8004, ERC-8183, x402 and MPP
+   rather than replacements: an agent must transact with Mitra *without becoming
+   Mitra-native*.
+2. **§4.6, clearing is distinct from settlement** — clearing determines the
+   obligation, settlement moves the asset. I had conflated them.
+3. **§1.1, the four primitives form a lifecycle**, not a feature list: Authority →
+   Commerce → Clearing → Recovery. My phase audit treated Phases 3–10 as
+   independent items with independent blockers, which understates their
+   dependency.
+
+**The spec also pre-empts the overclaims this repository has guarded against**,
+which is a sign of a well-written document: *"A mocked marketplace response must
+not be described as a live marketplace integration"* / *"A local clearing result
+must not be described as decentralized clearing"* / *"A testnet settlement must
+not be described as production settlement."* And: *"Mitra must not claim that it
+invented deferred agent payment"* — x402, Payment Channels and MPP all predate it.
+The value is composition, not invention.
+
+**Not recorded as a gap in the product** — the PRD and spec do not contradict each
+other; the thesis lines are concordant where both speak. The failure is entirely
+mine: I read one of two documents and did not notice the other existed, for ten
+days, while writing twenty-one records about exactly this class of error.
+
+**Guard.** `tests/spec-parity.test.ts` asserts the defining statements of the
+product — thesis, category, the four primitives, the "is not" list — are present
+in the spec, and that the PRD is consistent with it where it overlaps. A future
+reader can no longer build from half the specification without the suite failing.
+
+**Rule.** When a governing document names its sources, read all of them before
+building. "I read the important one" is a judgement no one can audit, and it is
+the judgement that produced this record.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
