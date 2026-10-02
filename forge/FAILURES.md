@@ -693,9 +693,38 @@ Until then, this mapping is the working equivalence:
 | `BLOCKED_EXTERNAL` / `BLOCKED_INTERNAL` | `PARTIAL` + the blocker named in prose |
 | `REGRESSED` / `FAILED` | `FAILED` / `REGRESSED` |
 
+**Resolution.** [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md)
+adopts the **union** in **two fields**, and `AGENTS.md` now points at BUILD_FOUNDRY
+§2 rather than carrying its own list, so the two cannot drift apart again.
+
+**How I measured the overlap, and got it wrong first.** A regex of
+`^\| \`[A-Z_]+\`` reported **13** states — it excluded digits, so `E2E_VERIFIED`
+vanished silently. Corrected to `[A-Z0-9_]`, the real answer is 14 and the
+intersection with AGENTS.md's five is **exactly one word: `PARTIAL`**.
+
+That is the same failure as F17, one turn after writing F17: a measurement asserted
+before it was checked. Worth recording rather than quietly correcting, because the
+whole point of this record is that evidence outranks confidence — and for about
+thirty seconds it did not.
+
+**Two errors the new guard caught in my own ADR.** `tests/phase0-docs.test.ts`
+failed immediately on:
+
+- **`PARTIAL` was missing from both field lists.** It is the one word both
+  documents share, and it belongs on the `blocker` side — BUILD_FOUNDRY defines it
+  as "some behavior works, with explicitly named residual gaps", which is a
+  statement about what is *missing*. Had I written the vocabulary without the guard,
+  the repository would have had a rule that rejected its own most common word.
+- **`ALLOW` was flagged as a status.** The first version of the guard
+  backticked any ALL-CAPS token in the table and picked up `ALLOW` from prose
+  about the policy engine. Fixed by scoping extraction to the status *cells* rather
+  than by loosening the vocabulary — loosening would have let any invented word in.
+
 **Rule.** When two governing documents disagree, record the disagreement and the
 mapping rather than silently picking one. Silently picking one is how a
-repository loses a distinction without noticing it lost one.
+repository loses a distinction without noticing it lost one. And write the guard in
+the same change as the rule it guards — it found two errors in the rule on its first
+run.
 
 ## F21 — AGENTS.md links a standards file under a name that does not exist
 

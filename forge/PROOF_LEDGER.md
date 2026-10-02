@@ -222,31 +222,38 @@ node shared-context-mcp/dist/cli.js audit --db .shared-context/context.db
 ## Phase audit — 2026-01-10
 
 Conducted against `docs/product/MITRA_PRD.md` §52, `forge/standards/BUILD_FOUNDRY.md`
-and `Repository-Starter-Virtuous-Build-Cycle.md`. Statuses use the five-state
-vocabulary AGENTS.md mandates (see F20 for the conflict with BUILD_FOUNDRY).
+and `Repository-Starter-Virtuous-Build-Cycle.md`, using the two-field vocabulary
+from [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md).
 
-| Phase | Exit condition (PRD, verbatim) | Status | Blocker |
+| Phase | Exit condition (PRD, verbatim) | evidence | blocker |
 |---|---|---|---|
-| 0 Ground truth | "Every P0 object has a schema and state transition definition." | `PARTIAL` | 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
-| 1 Core | "Purely local end-to-end lifecycle passes." | `VERIFIED` | None. 150/150 local tests; the lifecycle runs without any network |
-| 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | **`VERIFIED`** | None. All six clauses demonstrated on devnet — `scripts/vault-devnet.mjs`, idempotent across runs |
-| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `UNTESTED` | **No implementation.** Engraving, signer abstraction and the Arcium path are absent. `confidentialPolicy` is a type field with no enclave |
-| 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `UNTESTED` | **No implementation.** No Space, evaluator, deliverable or acceptance objects |
-| 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `PARTIAL` | Adapters are interfaces plus one `local` stub. No A2A, MCP server, ERC-8004, marketplace or x402 |
-| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `UNTESTED` | **No implementation.** Saga recovery is undefined in code; `EXECUTION_PLAN` records it as not started |
-| 7 Clearing | "Deterministic netting passes adversarial graph tests." | `PARTIAL` | Netting works locally; there is no epoch model, challenge process, or adversarial graph suite |
-| 8 Base | "Same economic intent executes on Base through the common API." | `UNTESTED` | **No implementation.** No ERC-8004/8183/4337/1271, no EIP-712 path |
-| 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `PARTIAL` | Balances and settlement adapter absent. The *environment* is ready and verified (Moderato funded, 2M × 5 TIP-20), but no adapter reads it |
-| 10 Tooling | "A pilot organization can operate the system without reading protocol logs." | `UNTESTED` | Console exists but is a mockup; no accounting, webhooks, or observability |
+| 0 Ground truth | "Every P0 object has a schema and state transition definition." | `INTEGRATED` | `BLOCKED_INTERNAL` — 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
+| 1 Core | "Purely local end-to-end lifecycle passes." | `E2E_VERIFIED` | — |
+| 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | `LIVE_DEMONSTRATED` | — |
+| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: engraving, signer abstraction, Arcium path absent |
+| 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: no Space, evaluator, deliverable, acceptance |
+| 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — interfaces plus one `local` stub; no A2A, MCP server, ERC-8004, marketplace, x402 |
+| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation; saga recovery undefined |
+| 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
+| 8 Base | "Same economic intent executes on Base through the common API." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: no ERC-8004/8183/4337/1271, no EIP-712 |
+| 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `PROPOSED` | `BLOCKED_INTERNAL` — adapter absent; the *environment* is ready and verified (Moderato funded) |
+| 10 Tooling | "A pilot organization can operate the system without reading protocol logs." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — console is a mockup; no accounting, webhooks, observability |
+
+Phase 2 carries no `blocker` because `evidence` is `LIVE_DEMONSTRATED`. Phase 3's
+`PROPOSED` is not a judgement about ambition — it records that no code exists.
 
 ### What is genuinely blocked, and on what
 
-**Nothing is blocked externally.** Every prerequisite for Phases 3–10 is in place:
-all three chains are funded and reachable, the Solana toolchain builds and deploys,
-the program is live on devnet, and the local kernel is green. The remaining eight
-phases are **unbuilt**, not blocked. Per BUILD_FOUNDRY that is
-`BLOCKED_INTERNAL` (a repository gap), not `BLOCKED_EXTERNAL` — and this
-repository does not yet have a status for that distinction (F20).
+**Every remaining blocker is `BLOCKED_INTERNAL`. Not one is `BLOCKED_EXTERNAL`.**
+
+All three chains are funded and reachable, the Solana toolchain builds and deploys,
+the program is live on devnet, and the local kernel is green. Phases 3–10 are
+**unbuilt, not blocked by the world** — which is what the `blocker` column now
+states outright rather than leaving to prose.
+
+That distinction was previously inexpressible. Under the old single status it
+collapsed into `PARTIAL`, which is exactly the ambiguity this audit was asked to
+resolve and could not.
 
 ### The honest sequencing finding
 

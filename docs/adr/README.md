@@ -16,6 +16,7 @@ part that was hard to recover.
 | [0005](0005-evidence-levels-untested-through-verified.md) | Five evidence levels; `PARTIAL` is not `VERIFIED` | Accepted |
 | [0006](0006-tempo-balances-require-tip20.md) | Tempo balances come from TIP-20 `balanceOf`, never `eth_getBalance`; assert chain ID 42431 | Accepted |
 | [0007](0007-phase2-builds-a-real-solana-program.md) | Phase 2 builds a real Solana program; capital is six positions (ADR-0002), not a status | Accepted |
+| [0008](0008-evidence-two-fields-union-vocabulary.md) | Evidence is two fields (`evidence` + `blocker`); the union of both vocabularies supersedes ADR-0005 | Accepted |
 
 ## Format
 

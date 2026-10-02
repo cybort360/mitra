@@ -6,9 +6,30 @@ This repository is under the **FORGE 1.4** control plane. The map lives in [`for
 
 - **Repository files are the source of truth.** Prior chat summaries, transcripts, and memories are
   *not* authoritative — when they disagree with the code or the `forge/` docs, the code wins.
-- **Do not mark a claim `VERIFIED` without executed evidence.** "The code exists" is not evidence.
-  Use only these statuses: `UNTESTED · PARTIAL · FAILED · VERIFIED · REGRESSED`. Record what command
-  produced the evidence in [`forge/PROOF_LEDGER.md`](forge/PROOF_LEDGER.md).
+- **Do not mark a claim `LIVE_DEMONSTRATED` without a named substrate, a date, and
+  executed evidence.** "The code exists" is not evidence.
+
+  Every claim carries **two** fields, not one — see `forge/standards/BUILD_FOUNDRY.md` §2:
+
+  | Field | Permitted values |
+  |---|---|
+  | `evidence` | `PROPOSED` · `IMPLEMENTED` · `TESTED` · `INTEGRATED` · `E2E_VERIFIED` · `LIVE_DEMONSTRATED` · `LIVE` · `MONITORED` |
+  | `blocker` | `PARTIAL` · `BLOCKED_EXTERNAL` · `BLOCKED_INTERNAL` · `DEFERRED` · `REJECTED` · `FAILED` · `REGRESSED` · `—` |
+
+  Read as `evidence: LIVE_DEMONSTRATED, blocker: —`. A single flat status cannot
+  express "reached `E2E_VERIFIED`, but the remainder is blocked internally", and
+  BUILD_FOUNDRY's own rule — *"claims must never use evidence from a lower state
+  to imply a higher one"* — requires both halves to be writable.
+
+  Coherence rules:
+  1. `blocker` is required whenever `evidence` is below `LIVE_DEMONSTRATED`, and
+     must be `—` when it is not.
+  2. `BLOCKED_EXTERNAL` and `BLOCKED_INTERNAL` name the exact dependency or
+     repository defect. "Blocked" without a named cause is not a blocker.
+  3. `DEFERRED` and `REJECTED` record who decided and why. `FAILED` and
+     `REGRESSED` name the test that caught it.
+
+  Record the command that produced the evidence in [`forge/PROOF_LEDGER.md`](forge/PROOF_LEDGER.md).
 - **Do not weaken a test to make it pass.** Fix the code or record the failure.
 - **Do not introduce a mock/fake success path into production code.** Dev adapters must announce
   themselves and must never claim a real settlement, reservation release, or delivery occurred.
