@@ -91,6 +91,47 @@ export interface Mandate {
   confidentialPolicy: boolean;
 }
 
+/**
+ * A **bounded commercial context** (PRD §13.1).
+ *
+ * The PRD defines the Space as the container a job lives inside — treasury,
+ * participants, rules, work orders. Mitra had no equivalent type at all: the
+ * word appears 35 times in Microcosm's source and 0 times here, while PRD §50
+ * explicitly asks for the "Space concept" to be reused.
+ *
+ * Its absence was not cosmetic. Without a container there is no scoped
+ * authority — a mandate, a rule and an evaluator are all global, so an agent
+ * admitted to one engagement is implicitly admitted to every one. That is the
+ * opposite of §13.1's "bounded", and it is the containment property the whole
+ * policy-enclave idea rests on.
+ *
+ * Deliberately a *value* type with an `id`, not a class: the kernel stays pure
+ * and the boundary is enforced by callers comparing `spaceId`, which keeps the
+ * guarantee testable rather than hidden in inheritance.
+ */
+export type SpaceStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
+
+export interface Space {
+  spaceId: string;
+  /** Owning agent or organisation. The only party that may amend the rules. */
+  owner: string;
+  status: SpaceStatus;
+  /** Agents permitted inside this context. Membership is the containment check. */
+  participants: string[];
+  /** Capability allow-list scoped to this Space. */
+  allowedCapabilities: string[];
+  /** Chains this Space may settle on. */
+  settlementChains: string[];
+  /** Agreements opened inside this Space. */
+  agreementIds: string[];
+  /** Maximum capital this Space may encumber in total — a treasury ceiling. */
+  budget: Money;
+  /** Encumbered so far against live agreements. */
+  committed: Money;
+  version: number;
+  createdAt: string;
+}
+
 export interface Intent {
   intentId: string;
   runId: string;
@@ -147,6 +188,17 @@ export interface Authorization {
 
 export interface Agreement {
   agreementId: string;
+  /**
+   * The Space this agreement belongs to.
+   *
+   * Added because without it containment is advisory: `applyAgreementOp(space,
+   * agreement, ...)` takes the Space as an argument, so a caller is free to hand
+   * in the wrong one and every rule check silently validates against a Space the
+   * agreement was never in. Storing the link means a wrong Space is detectable
+   * (the two ids disagree) rather than merely a mistake someone must remember to
+   * avoid — which is the difference between a check and a convention.
+   */
+  spaceId: string;
   runId: string;
   intentId: string;
   client: string;

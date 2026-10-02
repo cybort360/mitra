@@ -1,6 +1,6 @@
 import type {
   Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration,
-  Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga, Settlement, Vault
+  Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga, Settlement, Space, Vault
 } from "@/lib/domain/types";
 
 export const vaults: Vault[] = [
@@ -278,19 +278,69 @@ export const authorizations: Authorization[] = [
   },
 ];
 
+/**
+ * Bounded commercial contexts (PRD §13.1).
+ *
+ * Seeded to match the three reference agreements' `spaceId` values, so the
+ * containment link resolves rather than pointing at a Space that does not exist.
+ * A fixture whose foreign keys dangle is worse than no fixture: it makes the
+ * containment check untestable while appearing wired.
+ */
+export const spaces: Space[] = [
+  {
+    spaceId: "space_research_1",
+    owner: "agent_buyer_07",
+    status: "ACTIVE",
+    participants: ["agent_buyer_07", "mech-research-backup-04", "agent_eval_02"],
+    allowedCapabilities: ["research", "deliverable_evaluation", "payment"],
+    settlementChains: ["solana"],
+    agreementIds: ["agreement_77"],
+    budget: { asset: "USDC", amount: 50 },
+    committed: { asset: "USDC", amount: 12 },
+    version: 2,
+    createdAt: "2026-09-28T08:00:00Z",
+  },
+  {
+    spaceId: "space_data_1",
+    owner: "agent_data_03",
+    status: "ACTIVE",
+    participants: ["agent_data_03", "x402-data-provider-8"],
+    allowedCapabilities: ["market_data", "payment"],
+    settlementChains: ["solana", "base"],
+    agreementIds: ["agreement_75"],
+    budget: { asset: "USDC", amount: 40 },
+    committed: { asset: "USDC", amount: 25.2 },
+    version: 1,
+    createdAt: "2026-09-29T10:00:00Z",
+  },
+  {
+    spaceId: "space_base_ops_1",
+    owner: "agent_buyer_07",
+    status: "ACTIVE",
+    participants: ["agent_buyer_07", "erc8183:provider-3", "agent_eval_02"],
+    allowedCapabilities: ["erc8183_job", "deliverable_evaluation", "payment"],
+    settlementChains: ["base"],
+    agreementIds: ["agreement_72"],
+    budget: { asset: "USDC", amount: 100 },
+    committed: { asset: "USDC", amount: 100 },
+    version: 1,
+    createdAt: "2026-09-30T12:00:00Z",
+  },
+];
+
 export const agreements: Agreement[] = [
   {
-    agreementId: "agreement_77", runId: "run_501", intentId: "intent_501", client: "agent_buyer_07", provider: "mech-research-backup-04", evaluator: "agent_eval_02",
+    agreementId: "agreement_77", spaceId: "space_research_1", runId: "run_501", intentId: "intent_501", client: "agent_buyer_07", provider: "mech-research-backup-04", evaluator: "agent_eval_02",
     externalJobRefs: [{ system: "virtuals", id: "acp-job-123456" }, { system: "a2a", id: "task-501" }], price: { asset: "USDC", amount: 12 }, deadline: "2026-09-30T09:30:00Z",
     acceptanceCriteria: ["100 unique projects", "structured JSON output", "source URL for each project", "no duplicate project IDs"], escrowRef: "escrow_55", failurePolicy: "retry once; then reassign to approved backup; refund unused reservation", status: "ACCEPTED", version: 3,
   },
   {
-    agreementId: "agreement_75", runId: "run_498", intentId: "intent_498", client: "agent_data_03", provider: "x402-data-provider-8",
+    agreementId: "agreement_75", spaceId: "space_data_1", runId: "run_498", intentId: "intent_498", client: "agent_data_03", provider: "x402-data-provider-8",
     externalJobRefs: [{ system: "x402", id: "session-market-data-498" }], price: { asset: "USDC", amount: 25.2 }, deadline: "2026-09-30T18:00:00Z",
     acceptanceCriteria: ["schema v2", "freshness under 90 seconds", "complete token universe"], escrowRef: "session_ceiling_498", failurePolicy: "terminate metered session and release unused reservation", status: "EXECUTING", version: 1,
   },
   {
-    agreementId: "agreement_72", runId: "run_492", intentId: "intent_492", client: "agent_buyer_07", provider: "erc8183:provider-3", evaluator: "agent_eval_02",
+    agreementId: "agreement_72", spaceId: "space_base_ops_1", runId: "run_492", intentId: "intent_492", client: "agent_buyer_07", provider: "erc8183:provider-3", evaluator: "agent_eval_02",
     externalJobRefs: [{ system: "erc8183", id: "base-sepolia-job-72" }], price: { asset: "USDC", amount: 100 }, deadline: "2026-10-01T00:00:00Z",
     acceptanceCriteria: ["bounded route only", "no bridge", "max 2 hops", "evidence of quote freshness"], escrowRef: "erc8183:escrow-72", failurePolicy: "refund on expiry/rejection", status: "FUNDED", version: 1,
   },

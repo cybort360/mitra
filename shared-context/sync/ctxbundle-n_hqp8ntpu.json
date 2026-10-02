@@ -1,0 +1,587 @@
+{
+  "fromNodeId": "n_hqp8ntpu",
+  "highSeq": 30,
+  "entries": [
+    {
+      "entryId": "ctx_9114ecb85dd5d8ca",
+      "seq": 1,
+      "kind": "decision",
+      "title": "Sequence: harden the kernel before any chain integration",
+      "body": "The README's 10-step path put Solana programs at step 3. We reordered: the authorization kernel decides what is ever allowed to move value, so it must be trustworthy before anything anchors to it. Live-chain evidence is worthless if the thing emitting commitments has holes.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "kernel",
+        "sequencing"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.389Z",
+      "parents": [],
+      "hash": "8ca224b3e8528016786e2754e2a434116d5dd1a0e9862304286551db1a188f7a"
+    },
+    {
+      "entryId": "ctx_0e68e0dedf4f0e40",
+      "seq": 2,
+      "kind": "finding",
+      "title": "Reservation expiry was never enforced in the execution guard",
+      "body": "validateExecutionBinding read no expiresAt, so stale RESERVED/COMMITTED reservations returned ok:true. Confirmed against seed data res_run496. Fixed by requiring an explicit `now` and adding a RESERVATION_EXPIRED check.",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "expiry",
+        "security"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.392Z",
+      "parents": [
+        "8ca224b3e8528016786e2754e2a434116d5dd1a0e9862304286551db1a188f7a"
+      ],
+      "hash": "cc306b00c227146af68996f81d3b803bc5af9eae30c35fde6f34f8b9afa415c0"
+    },
+    {
+      "entryId": "ctx_71d2840f6c293276",
+      "seq": 3,
+      "kind": "finding",
+      "title": "velocityLimit was declared but never evaluated",
+      "body": "The field existed on the Mandate type and was set on seed data, but evaluateProposal never read it. Now enforced over a caller-supplied window of recent spend.",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "policy"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.394Z",
+      "parents": [
+        "cc306b00c227146af68996f81d3b803bc5af9eae30c35fde6f34f8b9afa415c0"
+      ],
+      "hash": "a3455091bac68cffc15949817652707f4536f3db2126eb8f1e9b07ae8fe2546a"
+    },
+    {
+      "entryId": "ctx_a47b18a16b13eebd",
+      "seq": 4,
+      "kind": "finding",
+      "title": "Negative amounts returned ALLOW at the policy layer",
+      "body": "Every amount guard was one-sided (>), so -100 passed policy and was only caught downstream in reserve(). Added INVALID_AMOUNT lower-bound guards in both the policy and execution layers, plus a NaN guard in reserve().",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "validation"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.396Z",
+      "parents": [
+        "a3455091bac68cffc15949817652707f4536f3db2126eb8f1e9b07ae8fe2546a"
+      ],
+      "hash": "9d392b377400015f4064d45cccb908e1696fe7d0e44501e2bd7bb0e001b8474a"
+    },
+    {
+      "entryId": "ctx_89ce3e9f71bf4b34",
+      "seq": 5,
+      "kind": "convention",
+      "title": "Kernel functions take explicit time; they never call new Date()",
+      "body": "A hidden wall-clock read is what allowed the expiry bug to sit undetected. Time is now an injected parameter so the kernel stays pure and testable.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "purity",
+        "testing"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.398Z",
+      "parents": [
+        "9d392b377400015f4064d45cccb908e1696fe7d0e44501e2bd7bb0e001b8474a"
+      ],
+      "hash": "7ada9d8291bdbb4efc5833e69b644f00d985f5afbe651dae165a93fb47d886ff",
+      "data": {
+        "files": [
+          "lib/kernel/authorization.ts",
+          "lib/kernel/vault.ts",
+          "lib/kernel/clearing.ts"
+        ]
+      }
+    },
+    {
+      "entryId": "ctx_850848858ab43f8a",
+      "seq": 6,
+      "kind": "invariant",
+      "title": "An ALLOW decision is never itself permission to move value",
+      "body": "The exact instruction must still match the evaluated action digest, amount, asset, chain, expiry, nonce and reservation. This is the thesis of the product and the reason the execution guard exists as a separate gate from policy evaluation.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "security",
+        "thesis"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.401Z",
+      "parents": [
+        "7ada9d8291bdbb4efc5833e69b644f00d985f5afbe651dae165a93fb47d886ff"
+      ],
+      "hash": "a2dfb8ea1626741c5061116c31146b6b22e3e3ac9b38558f15cadc65598ae4dd"
+    },
+    {
+      "entryId": "ctx_38bb7a12d9f84d8e",
+      "seq": 7,
+      "kind": "invariant",
+      "title": "Available vault capital reflects every encumbrance",
+      "body": "total = available + reserved + escrowed + encumbered + settling + frozen. reconcileVault must report zero difference or the log is not trustworthy.",
+      "status": "active",
+      "scope": "kernel/vault",
+      "tags": [
+        "conservation"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.404Z",
+      "parents": [
+        "a2dfb8ea1626741c5061116c31146b6b22e3e3ac9b38558f15cadc65598ae4dd"
+      ],
+      "hash": "788d732e69f2c355508be6fd74d4195bc83af2fcdcfda85d96bb2873fece33f9",
+      "data": {
+        "files": [
+          "lib/kernel/vault.ts"
+        ]
+      }
+    },
+    {
+      "entryId": "ctx_737589f6a838c2fe",
+      "seq": 8,
+      "kind": "blocker",
+      "title": "Economic kernel is not yet reachable from any API route or page",
+      "body": "evaluateProposal and validateExecutionBinding are never called in production paths. Only reconcileVault, netObligations and failureScenarios are wired. The authorization engine is effectively dead code until Phase 1 adds /reservations and /authorizations routes.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "phase1",
+        "wiring"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.407Z",
+      "parents": [
+        "788d732e69f2c355508be6fd74d4195bc83af2fcdcfda85d96bb2873fece33f9"
+      ],
+      "hash": "bcc0b20cc34f8fefb6f2f56e98e3b73bc21cb847c8b44f859a6ed691327bf372"
+    },
+    {
+      "entryId": "ctx_db21ae062806c5ce",
+      "seq": 9,
+      "kind": "finding",
+      "title": "Console UI is template-literal HTML, not components",
+      "body": "15 pages totalling 89 lines, built from giant inline HTML strings (app/policies/page.tsx has a 2496-char single line). It demonstrates information architecture but is a mockup, not a product.",
+      "status": "active",
+      "scope": "ui",
+      "tags": [
+        "phase1",
+        "ui"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.409Z",
+      "parents": [
+        "bcc0b20cc34f8fefb6f2f56e98e3b73bc21cb847c8b44f859a6ed691327bf372"
+      ],
+      "hash": "42a1d03efb8d0acad6cd69ba7cc5de051f716cc41792312b8676f4d9c1f79aef"
+    },
+    {
+      "entryId": "ctx_280ae778d07adcbb",
+      "seq": 10,
+      "kind": "decision",
+      "title": "Store is a static seed array; data.ts only re-exports it",
+      "body": "lib/store/data.ts is `export * from './seed'`. There is no persistence and no event log. Replacing this with Postgres plus an append-only event log is the first item of Phase 1.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "phase1",
+        "storage"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.411Z",
+      "parents": [
+        "42a1d03efb8d0acad6cd69ba7cc5de051f716cc41792312b8676f4d9c1f79aef"
+      ],
+      "hash": "98f8a82a9ee6d8a33a07637f908ac62fe4b4e38d6ad2ca214f82a3f283daf405"
+    },
+    {
+      "entryId": "ctx_9ee0723be8e15371",
+      "seq": 11,
+      "kind": "question",
+      "title": "Should the shared context server live inside the app or beside it?",
+      "body": "Currently a standalone package with its own build. Integrating into Next.js would couple memory availability to the app's lifecycle, which is undesirable for a tool that must run even when the app is down.",
+      "status": "active",
+      "scope": "tooling",
+      "tags": [
+        "architecture"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.412Z",
+      "parents": [
+        "98f8a82a9ee6d8a33a07637f908ac62fe4b4e38d6ad2ca214f82a3f283daf405"
+      ],
+      "hash": "213d588eed8e3321e50b4bb77848e5434774e8228a92fbbe41a77808b23eaa54"
+    },
+    {
+      "entryId": "ctx_7e6e4a22e3abd61d",
+      "seq": 12,
+      "kind": "convention",
+      "title": "Agents announce intent in shared context before non-obvious work",
+      "body": "Record a decision entry BEFORE making the change, not a summary after. The reasoning is the only part a future reader cannot reconstruct from the diff. If you stop mid-task, leave a handoff entry stating what is done, what is next, and the risk.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.711Z",
+      "parents": [
+        "213d588eed8e3321e50b4bb77848e5434774e8228a92fbbe41a77808b23eaa54"
+      ],
+      "hash": "9761cccee4ec1ca0590a3ba9fcebdf9cbd6d4f6cbfdb80a4353fe670caa7d0ad"
+    },
+    {
+      "entryId": "ctx_7037dc563528b28e",
+      "seq": 13,
+      "kind": "convention",
+      "title": "Search shared context before editing code you did not write",
+      "body": "Code that looks wrong is usually a decision you cannot see from the code itself. Run context_recall on the area first, and again whenever something surprises you. This is the cheapest way to avoid re-solving a settled problem.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.718Z",
+      "parents": [
+        "9761cccee4ec1ca0590a3ba9fcebdf9cbd6d4f6cbfdb80a4353fe670caa7d0ad"
+      ],
+      "hash": "274b956240a031b6819cb0f3d14bba848a8483be1b0aafd0883f71f8d9fac888"
+    },
+    {
+      "entryId": "ctx_fd66a511da42b4e6",
+      "seq": 14,
+      "kind": "convention",
+      "title": "A wrong context entry is worse than a missing one",
+      "body": "Record only what you verified, never speculation. Every entry is read as fact by someone who was not there. If you were wrong, supersede it loudly and say what changed — never quietly contradict an entry you did not write.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "protocol",
+        "quality"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.720Z",
+      "parents": [
+        "274b956240a031b6819cb0f3d14bba848a8483be1b0aafd0883f71f8d9fac888"
+      ],
+      "hash": "50992cc017c4f7f5738720617d55e1337da3d42a95baece2cf4f8c67b787300f"
+    },
+    {
+      "entryId": "ctx_60612d38c3c3742f",
+      "seq": 15,
+      "kind": "convention",
+      "title": "Actor ids are stable and prefixed by kind",
+      "body": "Use agent:<name>, human:<name> or service:<name> and reuse the same id across all sessions and machines. A fresh id per session makes context look like it came from a crowd of one-off strangers and breaks attribution.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "identity",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.722Z",
+      "parents": [
+        "50992cc017c4f7f5738720617d55e1337da3d42a95baece2cf4f8c67b787300f"
+      ],
+      "hash": "51f338316b3b28f829f14657f1d879c7b174311c99f386f3307e35eb9f6fa049"
+    },
+    {
+      "entryId": "ctx_df3de9f840b82444",
+      "seq": 16,
+      "kind": "invariant",
+      "title": "A stopped agent must leave a handoff or the work is lost",
+      "body": "An agent that stops mid-task without a handoff entry is the most expensive failure mode: worse than one that never started, because a human or another agent must re-derive all the reasoning. Done / next / risk, always.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "handoff",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.725Z",
+      "parents": [
+        "51f338316b3b28f829f14657f1d879c7b174311c99f386f3307e35eb9f6fa049"
+      ],
+      "hash": "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
+    },
+    {
+      "entryId": "ctx_eb0700bdd778580c",
+      "seq": 17,
+      "kind": "convention",
+      "title": "Disagreements are resolved by superseding, not by picking silently",
+      "body": "When context_digest reports a topic as contested, two people recorded the same decision differently. Write a new decision that supersedes both and states the tradeoff, so the reasoning survives. If it truly needs a human, record a question naming the exact choice.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "conflict",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.727Z",
+      "parents": [
+        "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
+      ],
+      "hash": "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+    },
+    {
+      "entryId": "ctx_7314de9d331ec1b4",
+      "seq": 18,
+      "kind": "finding",
+      "title": "Partner verified sync round-trip on a fresh clone",
+      "body": "Auto-detected sync dir publishes correctly.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [],
+      "authorId": "human:partner",
+      "createdAt": "2026-10-01T13:54:15.017Z",
+      "parents": [
+        "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+      ],
+      "hash": "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
+    },
+    {
+      "entryId": "ctx_69f2138f13ca7a5a",
+      "seq": 19,
+      "kind": "finding",
+      "title": "PR #2 review: kernel hardening verifies clean, safe to merge",
+      "body": "Reviewed feat/kernel-hardening against main in /tmp/pr2 worktree. Typecheck clean, vitest 23/23 green. No production callers of evaluateProposal/validateExecutionBinding in app/ lib/ components/ - breaking now/context params are test-only migration, safe. All four holes confirmed by reading diff: expiry check with required now, velocityLimit over caller-supplied recentSpend, INVALID_AMOUNT lower bound in policy+guard+reserve NaN guard, NONCE_ALREADY_CONSUMED via ExecutionContext. Residual notes (not blockers): negative SpendEvent amounts would reduce windowed sum - no lower-bound guard on SpendEvent; nonce replay protection is only as strong as caller-supplied consumedNonces list, no persistent store yet; releaseReservation accepts RESERVED only, COMMITTED must go through consume. Does not make kernel reachable - blocker #8 still stands.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "kernel",
+        "pr-2",
+        "review"
+      ],
+      "authorId": "agent:opencode",
+      "createdAt": "2026-10-01T14:36:10.711Z",
+      "parents": [
+        "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
+      ],
+      "hash": "19ae025b90fc19661bc3ffef32eedc7af2e46818d883fa30632341c762d7916b"
+    },
+    {
+      "entryId": "ctx_f20b4f0a54cb6d68",
+      "seq": 20,
+      "kind": "convention",
+      "title": "Read AGENTS.md and forge/ before any meaningful change; the PRD is normative",
+      "body": "This repo is under the FORGE 1.4 control plane. Read forge/PRODUCT.md, forge/INVARIANTS.md, forge/ARCHITECTURE.md, forge/EXECUTION_PLAN.md, forge/PROOF_LEDGER.md. Repository files beat chat memory. Never mark a claim VERIFIED without executed evidence; record the command. Where docs/*.md and docs/product/MITRA_PRD.md disagree, the PRD wins and the disagreement goes in forge/FAILURES.md.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "forge",
+        "governance"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T16:18:22.502Z",
+      "parents": [
+        "19ae025b90fc19661bc3ffef32eedc7af2e46818d883fa30632341c762d7916b"
+      ],
+      "hash": "b1f3bbc1f35bab14c7a3be541569fea192e40ff757b6540bb1b2316fb24484bd"
+    },
+    {
+      "entryId": "ctx_dc74a4e153a1085a",
+      "seq": 21,
+      "kind": "decision",
+      "title": "The PRD roadmap governs; local phase numbering is superseded",
+      "body": "The PRD defines 11 phases. Its Phase 2 exit condition is REAL testnet proof (vault creation, funding, guarded spend, release/refund, settlement). Our local kernel is a prerequisite for that, not progress toward it. PHASES.md is retained as history and labelled superseded; forge/EXECUTION_PLAN.md is authoritative. Do not describe Postgres work as Phase 2 progress.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "correction",
+        "prd",
+        "roadmap"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T16:18:22.510Z",
+      "parents": [
+        "b1f3bbc1f35bab14c7a3be541569fea192e40ff757b6540bb1b2316fb24484bd"
+      ],
+      "hash": "3869208247a108230d11e6e37f2fa4e4a1da5cf698f5957cb37e2133f2c55bec"
+    },
+    {
+      "entryId": "ctx_5f068fea2551a905",
+      "seq": 22,
+      "kind": "finding",
+      "title": "FR-VAULT-006 holds by absence: there is no withdrawal path to test",
+      "body": "Agent authority not implying principal withdrawal authority is the weakest link in the build. It is true today because no withdrawal route exists at all, which is not evidence. The moment one is added nothing stops it being wrong. Recorded UNTESTED rather than VERIFIED; PRD places it in Phase 3.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "evidence",
+        "prd",
+        "security"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T16:18:22.513Z",
+      "parents": [
+        "3869208247a108230d11e6e37f2fa4e4a1da5cf698f5957cb37e2133f2c55bec"
+      ],
+      "hash": "d83c74cf519a3e307a135033d1ec9db3947b6b465ea21b45dff69b9e6b194b29"
+    },
+    {
+      "entryId": "ctx_e87744e2aee1a43e",
+      "seq": 23,
+      "kind": "finding",
+      "title": "Entries 8 and 10 are STALE — do not rely on them",
+      "body": "Entry 8 ('kernel not reachable from any API route') and entry 10 ('store is a static seed array') were true in week 1 and are FALSE now.\n\nCurrent state 2026-01-10:\n- Durable Postgres repository is wired; routes go through getStore() with InMemoryRepository/PostgresRepository behind one interface (ADR-0003).\n- PRD Phase 2 exit condition is VERIFIED on Solana devnet: vault creation, funding, reservation, guarded spend, release/refund, settlement. Program GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY, vault 5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T.\n- Phases 3-10 are unbuilt (BLOCKED_INTERNAL), except TALOS which is BLOCKED_EXTERNAL (not on disk).\n- 24 self-recorded failures in forge/FAILURES.md. Read those before trusting any claim.\n\nThe context db predates all of this. Treat entries 1-22 as historical unless they are invariants or conventions.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T04:19:15.249Z",
+      "parents": [
+        "d83c74cf519a3e307a135033d1ec9db3947b6b465ea21b45dff69b9e6b194b29"
+      ],
+      "hash": "974d0956afc43a971cd27330998ca5c2ac40ac7d011f534acb899474273a5eb7"
+    },
+    {
+      "entryId": "ctx_50a4c1b44cffd933",
+      "seq": 24,
+      "kind": "decision",
+      "title": "Substrate locations for PRD section 50 reuse",
+      "body": "Four inherited projects named in PRD section 50. Verified locations (F24):\n\n  Engraving  /home/ubuntu/engravings     github.com/etvjay/Engraving\n  Microcosm  /opt/microcosm-x            github.com/Jaydearcadian/microcosm-x  [RUNNING systemd service, FORGE 1.4]\n  Cleara     /home/ubuntu/ClearaOnGen    github.com/etvjay/ClearaOnGen\n  TALOS      NOT FOUND - depth-6 sweep of / returned zero hits\n\nMicrocosm is NOT in /home/ubuntu with its siblings; it is at /opt. A directory listing of the obvious location misses it.\n\nTALOS absent is BLOCKED_EXTERNAL for Phase 6. Phase 6 can still be built, but claiming it reuses TALOS semantics would be unsupported.\n\nNoema is explicitly non-core per section 50.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T04:19:25.736Z",
+      "parents": [
+        "974d0956afc43a971cd27330998ca5c2ac40ac7d011f534acb899474273a5eb7"
+      ],
+      "hash": "6bb6696ba3c1c930f8776488a84f6d9f1d797f8f569367e80e3f6204411f0442"
+    },
+    {
+      "entryId": "ctx_21623ef067787574",
+      "seq": 25,
+      "kind": "handoff",
+      "title": "5 analyses delegated to an external agent via MCP",
+      "body": "Cline teammate dispatch is BLOCKED_EXTERNAL (all 6 runs failed with 'Unauthorized - re-authenticate'). An external agent is taking these over.\n\nDo them IN THIS ORDER. Read forge/FAILURES.md and forge/PROOF_LEDGER.md before starting - they contain 24 self-recorded failures and the current evidence state.\n\n1. CLEARA CLEARING MAP (Phase 7 substrate). Repo: /home/ubuntu/ClearaOnGen. PRD section 50 says reuse: clearing state machine, obligation/settlement separation, proof-native receipts, reconciliation. ALSO: 'Do not force GenLayer semantic adjudication into every Mitra transaction' - flag anything GenLayer-specific. ASSESS MATURITY HONESTLY: does netting actually exist in code, or only in docs? Do tests exist and pass?\n\n2. MICROCOSM COMMERCE MAP (Phase 4 substrate). Repo: /opt/microcosm-x (note: /opt, not /home/ubuntu). PRD section 50 says reuse: Space concept, work-order lifecycle, escrow semantics, evidence-linked delivery, MCP integration, commercial coordination, event/proof discipline. Has packages/policy-engine (attestation, capability-manifest, delegation, governance), contracts/ (foundry), apps/charcoal.\n\n3. RED-TEAM EVIDENCE AUDIT (highest value). Find failure records the repo has NOT self-identified. Check: can tests/dev-scripts.test.ts, spec-parity, evidence-vocabulary, adr-0009-reuse, and Rust tests/capital.rs actually FAIL? Does scripts/vault-devnet.mjs bind to on-chain state or to its own bookkeeping? Is any VERIFIED claim supported only by 'the script that made it passed'?\n\n4. EVM ADAPTER FEASIBILITY (Phases 8/9). READ F12 and F15 IN forge/FAILURES.md FIRST: on Tempo, eth_getBalance returns a large CONSTANT identical for every address, and api.tempo.xyz indexes MAINNET not Moderato. Verify both yourself before writing balance code. State the smallest genuinely-working settlement per chain and what credential each lacks.\n\nEvery claim needs a file:line or a command you ran plus its output. 'NOT FOUND IN REPO' is a valid and useful result.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T04:19:43.415Z",
+      "parents": [
+        "6bb6696ba3c1c930f8776488a84f6d9f1d797f8f569367e80e3f6204411f0442"
+      ],
+      "hash": "289658b1f6cfe6c12014256d40794f202a805e59f4c42f6b3abf81b7ef881856"
+    },
+    {
+      "entryId": "ctx_0bad23f74442e03f",
+      "seq": 26,
+      "kind": "finding",
+      "title": "Arcium is NOT blocked - F31: I declared BLOCKED_EXTERNAL without attempting it",
+      "body": "Phase 3d was recorded BLOCKED_EXTERNAL because 'Docker is not installed, disk 95% full'. Both true. The blocker was not, because I never ran the install.\n\nAttempted instead of assumed, all exit 0:\n  sudo -n true                -> passwordless sudo available\n  apt-get install docker.io   -> Docker 29.1.3\n  usermod -aG docker          -> sg docker works (cannot re-login mid-session, so use sg)\n  arcup install               -> Arcium CLI 0.15.0 + Arx Node + Trusted Dealer\n  arcium init probe           -> full scaffold, yarn deps in 4.46s\n  arcium build                -> BUILD/evaluate_mandate.arcis COMPILED (267KB + 192KB IR)\n\nPrerequisites now all present: Rust 1.98.0, Solana 4.3.0, Yarn 1.22.22, Anchor 1.0.2, Docker 29.1.3.\n\nRULE THIS PRODUCED: a blocker must be an ATTEMPT, not an observation. 'X is absent' is a state; 'I ran the command and X failed with Y' is a blocker. One command separates them and the cost of conflating them is a phase falsely written off.\n\nGotcha for anyone continuing: arcup needs Docker. My user was not in the docker group and a session cannot re-login, so run it as: sg docker -c 'arcup install'. Also arcium build's ANCHOR step fails with 'Platform tools v1.52 is incompatible with SBPFv3' - that is the Solana program build, NOT the Arcis circuit, which compiles first. Fix is cargo-build-sbf --arch v0 or a newer platform-tools.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:50:50.083Z",
+      "parents": [
+        "289658b1f6cfe6c12014256d40794f202a805e59f4c42f6b3abf81b7ef881856"
+      ],
+      "hash": "3d2b47ee6c3aab3596f40415194a70a6fd8ccc90d7bc35588cc3cbd54c2d787b"
+    },
+    {
+      "entryId": "ctx_3436837bf1f8814f",
+      "seq": 27,
+      "kind": "decision",
+      "title": "Phase 3c: one policy-evaluation seam, not scattered 'if encrypted' branches",
+      "body": "PRD 11.11 requires that a down enclave FAIL CLOSED and that 'no component may silently downgrade a confidential policy into an unrestricted approval'. That rule is only enforceable if 'is this confidential?' is a property of the evaluation REQUEST rather than an if at each call site. So: one PolicyEvaluator interface, two implementations (PublicPolicyEvaluator, and Arcium behind the same interface), one flag on one type, one gate.\n\nPRD 11.10 binds an enclave output to six fields: policy version, action digest, vault, mandate, decision expiry, execution guard. These are now a TS interface with all six REQUIRED, so adding one to the PRD forces adding it to the type and an implementation cannot omit one and compile.\n\nTHE FALLBACK, precisely. The PRD says 'fail closed UNLESS a separately defined public-policy fallback exists'. Those readings reconcile only if the fallback is (a) declared per-call, never a global default someone wires up and forgets; (b) marked evaluator:'public' on the result; (c) tagged ENCLAVE_FALLBACK_USED. An untagged fallback IS the silent downgrade the clause forbids, because evidence would claim a confidentiality that never happened.\n\nALSO ADDED: SignerAdapter (wallet signer abstraction, the other Phase 3 requirement). It exists because the same economic intent must execute on Solana, Base and Tempo (PRD 4.2) and each signs differently; a caller depending on Keypair directly would force a per-chain rewrite of the execution guard, which is the most dangerous code we have. mayExecute keeps two questions SEPARATE: is policy satisfied, and can this wallet sign. A local keypair answering yes to both must still be refused when policy says no.\n\nMUTATION AUDIT 6/6 caught (implicit downgrade, hidden fallback marking, skipped expiry, public-error-as-outage, guard token not re-derived, DENY reaching the signer). This is the standard F25/F28 failed.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:51:37.608Z",
+      "parents": [
+        "3d2b47ee6c3aab3596f40415194a70a6fd8ccc90d7bc35588cc3cbd54c2d787b"
+      ],
+      "hash": "7a32ef1638fda4b1d8ff7e0ef6209e20041eb6a1228d837341c9f9bac32040fe"
+    },
+    {
+      "entryId": "ctx_439b6d1b1d252a36",
+      "seq": 28,
+      "kind": "decision",
+      "title": "Phase 4 started: Space exists, and the agreement machine finally has a write path",
+      "body": "TWO FINDINGS FROM GROUNDING PHASE 4 IN THE ACTUAL CODE.\n\n1. SPACE WAS MISSING ENTIRELY. The word appears 35x in Microcosm's source and 0x in Mitra's domain types, while PRD 50 explicitly asks for the 'Space concept'. Its absence was not cosmetic: without a container there is no SCOPED authority, so a mandate/rule/evaluator defined for one engagement is implicitly global and an agent admitted to one job is admitted to all. That is the opposite of 13.1's 'bounded' and it is the containment property the policy enclave rests on. Now a real type in lib/domain/types.ts.\n\n2. THE AGREEMENT MACHINE HAD NO WRITE PATH. canTransition/transition existed and were called ONLY from tests - no production code touched them. That is exactly Phase 0's recorded blocker, 'six of seven state machines lack write paths'. A transition table nothing consults is documentation with a type signature. lib/kernel/commerce.ts now routes every status change through transition(), which THROWS on an illegal edge so a caller that forgets to check cannot write the state anyway.\n\nCONTainment DESIGN POINT: I added spaceId to the Agreement type. Without it containment was ADVISORY - applyAgreementOp(space, agreement, ...) takes the Space as an argument, so a caller can hand in the wrong one and every rule silently validates against a Space the agreement was never in. Storing the link makes a wrong Space DETECTABLE rather than a mistake people must remember to avoid. That is the difference between a check and a convention.\n\nRefund is deliberately EXEMPT from the budget admission check: requiring headroom to give money back would strand it.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:52:02.237Z",
+      "parents": [
+        "7a32ef1638fda4b1d8ff7e0ef6209e20041eb6a1228d837341c9f9bac32040fe"
+      ],
+      "hash": "b95f8a2bfe9d6cb380cb2703c042e01189cf1498bdefc177d60e90b6a12a8114"
+    },
+    {
+      "entryId": "ctx_42aa4a63e2d0bb0d",
+      "seq": 29,
+      "kind": "handoff",
+      "title": "Phase status 2026-10-02 + the one-shot plan (waves 1-6)",
+      "body": "PHASE AUDIT, honest, with the caveat below.\n\n  0 Ground truth  INTEGRATED        schemas + ADRs; 6/7 machines had no write path (Phase 4 starts fixing)\n  1 Core          E2E_VERIFIED      full local lifecycle\n  2 Solana kernel LIVE_DEMONSTRATED devnet\n  3 Authority     LIVE_DEMONSTRATED spend+amend+revoke on devnet; replay refused on-chain (0x177c)\n  4 Commerce      IN PROGRESS       Space type + commerce lifecycle landed; no API routes yet\n  5 Ecosystem     IMPLEMENTED       only a 65-LOC local stub; no A2A/MCP/ERC-8004/x402\n  6 Recovery      PROPOSED          failure-lab.ts has ZERO exports; TALOS absent from disk (F24)\n  7 Clearing      TESTED            netObligations only; no epochs/challenge/adversarial suite\n  8 Base          PROPOSED          no adapter\n  9 Tempo         PROPOSED          env funded, no adapter\n 10 Tooling       IMPLEMENTED       console is a mockup; AND 4 of 9 API routes serve static seed.ts\n                                   instead of the repository (/vaults, /runs, /clearing, /obligations)\n\nREAL DEFECT FOUND WHILE GROUNDING: /api/v1/vaults imports  from lib/store/seed, so it returns\nFIXTURES with a reconciliation computed on top. 4 of 9 routes do this. That is Phase 10's 'console is\na mockup' leaking into the API layer, and it means the API is not yet a view of the store.\n\nTHE ONE-SHOT PLAN, waves 1-6 in dependency order (user asked for this):\n  W1 Authority 3c/3d  <- policy seam DONE, signer abstraction DONE, Arcium unblocked + circuit compiles\n  W2 Commerce         <- Space + lifecycle DONE; needs API routes + tests + mutation audit\n  W3 Recovery         <- saga/compensation/redirect; TALOS is BLOCKED_EXTERNAL (F24)\n  W4 Clearing         <- epochs, netting, challenges, adversarial tests\n  W5 Adapters         <- A2A/MCP/ERC-8004/x402 | Base | Tempo\n  W6 Tooling          <- accounting, webhooks, observability, FIX THE 4 SEEDED ROUTES\n\nVERIFICATION STAYS INSIDE EACH WAVE. Mutation audit is part of the step, not a later ceremony.\nEvidence for why: F25 (green suite, replay protection deleted, nobody noticed), F28 (5 mutations\nsurvived, 3 tests named guarantees and never tested them), F30 (harness printed ALL CHECKS PASSED\nhaving skipped half the run). All three were caught by stopping to verify, not by moving faster.\n\nCURRENT GATES: Rust 72/72, TS 164 pass / 15 gated (persistence needs DATABASE_URL), tsc clean.\n30 failure records in forge/FAILURES.md - read them before trusting any claim.",
+      "status": "superseded",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:52:29.158Z",
+      "parents": [
+        "b95f8a2bfe9d6cb380cb2703c042e01189cf1498bdefc177d60e90b6a12a8114"
+      ],
+      "hash": "3a981d72e4f1501b2d4249ad1c38a7cfc9b0092b51a4ba203380b2e724cd8621"
+    },
+    {
+      "entryId": "ctx_4d920222748f308b",
+      "seq": 30,
+      "kind": "handoff",
+      "title": "Phase status 2026-10-02 + the one-shot plan (waves 1-6) [CORRECTED: supersedes the damaged entry]",
+      "body": "PHASE AUDIT, honest.\n\n  0 Ground truth  INTEGRATED        schemas + ADRs; 6/7 machines had no write path (Phase 4 starts fixing)\n  1 Core          E2E_VERIFIED      full local lifecycle\n  2 Solana kernel LIVE_DEMONSTRATED devnet\n  3 Authority     LIVE_DEMONSTRATED spend+amend+revoke on devnet; replay refused on-chain (0x177c)\n  4 Commerce      IN PROGRESS       Space type + commerce lifecycle landed; no API routes yet\n  5 Ecosystem     IMPLEMENTED       only a 65-LOC local stub; no A2A/MCP/ERC-8004/x402\n  6 Recovery      PROPOSED          failure-lab.ts has ZERO exports; TALOS absent from disk (F24)\n  7 Clearing      TESTED            netObligations only; no epochs/challenge/adversarial suite\n  8 Base          PROPOSED          no adapter\n  9 Tempo         PROPOSED          env funded, no adapter\n 10 Tooling       IMPLEMENTED       console is a mockup; AND 4 of 9 API routes serve static seed fixtures\n                                   instead of the repository (/vaults, /runs, /clearing, /obligations)\n\nREAL DEFECT FOUND WHILE GROUNDING: the /api/v1/vaults route imports the vaults array straight from\nlib/store/seed, so it returns FIXTURES with a reconciliation computed on top. 4 of 9 routes do this.\nThat is Phase 10's mockup leaking into the API layer; the API is not yet a view of the store.\n\nTHE ONE-SHOT PLAN, waves 1-6 in dependency order:\n  W1 Authority 3c/3d  <- policy seam DONE, signer abstraction DONE, Arcium unblocked + circuit compiles\n  W2 Commerce         <- Space + lifecycle DONE; needs API routes + tests + mutation audit\n  W3 Recovery         <- saga/compensation/redirect; TALOS is BLOCKED_EXTERNAL (F24)\n  W4 Clearing         <- epochs, netting, challenges, adversarial tests\n  W5 Adapters         <- A2A/MCP/ERC-8004/x402 | Base | Tempo\n  W6 Tooling          <- accounting, webhooks, observability, FIX THE 4 SEEDED ROUTES\n\nVERIFICATION STAYS INSIDE EACH WAVE. Mutation audit is part of the step, not a later ceremony.\nEvidence: F25 (green suite, replay protection deleted, nobody noticed), F28 (5 mutations survived,\n3 tests named guarantees and never tested them), F30 (harness printed ALL CHECKS PASSED having\nskipped half the run). All three were caught by stopping to verify, not by moving faster.\n\nCURRENT GATES: Rust 72/72, TS 164 pass / 15 gated (persistence needs DATABASE_URL), tsc clean.\n30 failure records in forge/FAILURES.md - read them before trusting any claim.\n\nNOTE: the superseded entry was damaged because backticks in a shell-quoted body trigger command\nsubstitution. Use single quotes, never backticks, when posting via the CLI.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:56:06.301Z",
+      "parents": [
+        "3a981d72e4f1501b2d4249ad1c38a7cfc9b0092b51a4ba203380b2e724cd8621"
+      ],
+      "hash": "73dc905caa4a05ce0a48578dfc611704778729366af1422682a8cece88298be9",
+      "supersedesId": "ctx_42aa4a63e2d0bb0d"
+    }
+  ],
+  "actors": [
+    {
+      "actorId": "agent:cline",
+      "kind": "agent",
+      "displayName": "Cline",
+      "role": "kernel + tooling",
+      "createdAt": "2026-10-01T13:38:04.384Z"
+    },
+    {
+      "actorId": "agent:newbie",
+      "kind": "agent",
+      "displayName": "New Partner Agent",
+      "role": "backend",
+      "createdAt": "2026-10-01T13:50:14.645Z"
+    },
+    {
+      "actorId": "agent:opencode",
+      "kind": "agent",
+      "displayName": "Opencode (Muse Spark)",
+      "role": "partner agent",
+      "createdAt": "2026-10-01T14:10:28.123Z"
+    }
+  ],
+  "tipHash": "73dc905caa4a05ce0a48578dfc611704778729366af1422682a8cece88298be9"
+}
