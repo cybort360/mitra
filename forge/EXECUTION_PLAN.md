@@ -40,13 +40,21 @@ eBPF ELF, and **5 SOL** on devnet (`err=None` signature). [ADR-0007](../docs/adr
 records the decision to build a real program rather than a controller stub. The
 exit condition is still unmet; the gap is now a *build*, not a *blocker*.
 
-**And then the build happened.** `programs/mitra-vault` compiles to a 37,432-byte
-eBPF ELF, deploys to a live local validator, and passes 18 tests covering the six
-capital positions and Anchor parity. **The exit condition is still `PARTIAL`**,
-for a specific reason recorded as F18: `solana-program-test` does not build in
-this environment (an upstream `five8` conflict inside `solana-keypair 4.0.0`), so
-the per-handler behaviour inside a real BPF VM is `UNTESTED`, and nothing has run
-on devnet. An artifact that compiles is not an exit condition.
+**And then the build happened, and ran on devnet.** `programs/mitra-vault` is
+deployed at `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` with vault
+`5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T`.
+
+**Phase 2 is `VERIFIED`.** All six clauses of the exit condition are demonstrated
+on devnet by `scripts/vault-devnet.mjs`, which is idempotent — run twice, same
+result — so the evidence is reproducible rather than a one-shot observation.
+
+Five defects surfaced only on a real chain and are recorded as F19. The local
+suite passed 18/18 before every one of them; the BPF-VM path is moot now that a
+real validator has been used.
+
+**What remains is Phases 3–10, and none of them is blocked externally.** Every
+environment is funded and reachable; the eight remaining phases are unbuilt, not
+blocked. Per-phase blockers are in `forge/PROOF_LEDGER.md`.
 
 What exists is a *local* economic kernel that is correct and well tested:
 
