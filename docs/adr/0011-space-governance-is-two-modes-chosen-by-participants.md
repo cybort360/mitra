@@ -132,15 +132,23 @@ Mitra may observe.
 
 ## Open items — implementation, NOT re-decision
 
-These follow from the decision above and are not grounds to reopen it:
+**All five are now implemented.** This section is retained because a decision
+record that deletes its own worklist invites re-litigating completed work.
 
-1. Make `spaceId` optional and the FK nullable.
-2. Move asset registries from module constants into Space configuration.
-3. Multi-Space references for multi-party engagements.
-4. Surface governance state in `GET /api/v1/spaces`, so a participant can see
-   *who can freeze me, on whose authority*.
-5. ERC-7715/7710 as the on-chain delegation standard for the same rule, and the
-   Virtuals adapter under `rules.source = "external"`.
+1. ✅ `spaceIds: string[]`, may be empty; FK replaced by `mitra.agreement_spaces`.
+   An idempotent migration backfills, drops `NOT NULL`, then drops the column —
+   step 3 exists so membership is not left with two sources (F33).
+2. ✅ `resolveAsset` consults the Space, then a caller-supplied external registry,
+   then **refuses**. No built-in fallback; the module constants are gone from the
+   resolution path.
+3. ✅ Same change as (1) — an agreement may span several Spaces.
+4. ✅ `GET /api/v1/spaces` publishes mode, admins, governors, threshold, validity,
+   external governance and admitted assets. `PUT` answers rule-set drift and
+   returns `RE_AGREEMENT_REQUIRED` on a mismatch — new terms are never adopted
+   silently.
+5. ✅ ERC-7715/7710 delegation with a domain-bound digest (F38), and a Virtuals
+   adapter that operates **under** the marketplace's rule set, refuses to run
+   under Mitra's, and refuses to adjudicate an unrecognised marketplace state.
 
 ## Why this is locked
 

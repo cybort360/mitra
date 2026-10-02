@@ -1312,6 +1312,45 @@ contract that both satisfy is a contract about *shape*, not about *behaviour*.
 Nothing in the type system can assert that two backends return the same data, so
 something outside it must — otherwise "consistent" means "compiles".
 
+## F38 — the ERC-7715 delegation digest omitted the domain, so it replayed across chains
+
+**Found** 2026-10-02, building ADR-0011 open item 5.
+
+`delegationDigest(input)` destructured `input.domain`, **validated the addresses
+inside it**, and then never used it in the hash. The EIP-712 domain separator is
+what stops a signature meaning one thing on chain A and another on chain B; a
+digest without it is chain-blind.
+
+So a delegation signed on one Base deployment — same delegate, same ceiling, same
+validity window — would verify on **every** Base deployment. The `validAfter` /
+`validUntil` bounds and the `maxValue` ceiling were all still enforced, which is
+what made it hard to see: the delegation looked bounded in every way a reader
+would check by eye, and was unbounded in the one way that mattered.
+
+**How it was caught.** Not by a mutation I chose, but by a test assertion —
+"the digest changes with the chain id" — that failed against correct-looking code.
+I had written the assertion assuming the domain was included, and its failure is
+what exposed that it was not.
+
+This is the **same defect class twice**: the settlement commitment originally used
+FNV-1a over the fields alone (fixed when EIP-712 landed), and now a delegation
+digest ignored the domain while looking EIP-712-shaped. Both times the code had
+the vocabulary of a bound commitment and none of the binding.
+
+**The rule, now stated once:**
+
+> If a function takes a domain, verify it is in the HASH, not just in the
+> signature. Validating a parameter and then discarding it is the most expensive
+> kind of unused argument, because the type says it matters.
+
+Fixed: the EIP-712 `domainSeparator` is computed first and hashed as the first
+field, in the spec's exact type order. The chain id is now bound; a delegation
+cannot cross deployments.
+
+Mutations 7/7: domain removed from the digest, delegate unchecked, ceiling
+unenforced, expiry made exclusive, Virtuals running under Mitra's rules, unknown
+marketplace state coerced to REJECTED, pricing in an unadmitted asset.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
