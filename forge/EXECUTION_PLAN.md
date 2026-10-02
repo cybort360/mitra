@@ -14,16 +14,16 @@ record of how the work was actually sequenced.
 
 | PRD Phase | Exit condition | Build | Evidence | Blocker |
 |---|---|---|---|---|
-| **0. Ground truth** | Every P0 object has a schema and state transition definition | ✅ schemas, ADRs, machines | `INTEGRATED` | `PARTIAL` — Space was never frozen in `p0-registry.ts` (ADR-0010) |
+| **0. Ground truth** | Every P0 object has a schema and state transition definition | ✅ schemas, ADRs, machines | `INTEGRATED` | `INTEGRATED` — the registry covers all **8** PRD §6 objects. The old blocker here ("Space was never frozen in `p0-registry.ts`") was itself wrong: §6 has exactly 8 objects and Space is not among them, so the exit condition never required it. Space is a scope, not a §6 economic object (ADR-0010) |
 | **1. Core** | Local end-to-end lifecycle passes | ✅ full lifecycle | `E2E_VERIFIED` | — |
 | **2. Solana kernel and vault** | Real devnet vault creation, funding, reservation, guarded spend, release/refund, settlement | ✅ raw SBF program | `LIVE_DEMONSTRATED` | — |
-| **3. Authority and confidential policy** | Agent cannot execute an out-of-policy transaction | ✅ mandate, authorization, consume-on-spend, amendment, revocation, policy seam, signer abstraction | `LIVE_DEMONSTRATED` (spend leg) | `DEFERRED` — Arcium circuit COMPILES but has not run on an MPC cluster (F31 removed the false blocker; the real one is unexecuted) |
+| **3. Authority and confidential policy** | Agent cannot execute an out-of-policy transaction | ✅ mandate, authorization, consume-on-spend, amendment, revocation, policy seam, signer abstraction | `LIVE_DEMONSTRATED` (spend leg) | `DEFERRED` — `FR-VAULT-008/009` remain `UNTESTED`. F43 fixed two real circuit bugs (zero-amount actions were ALLOWED; every DENY returned one reason code). F44 found the Anchor program was an unmodified template — it has since been rewritten and compiles, but **no MPC cluster has ever run**, so no decision has been computed |
 | **4. Commerce** | Real job opened, funded, submitted, accepted, rejected, refunded | ✅ Space + lifecycle + routes + **ERC-8183 projection** | `TESTED` | `PARTIAL` — Space covers 4 of 10 §13.1 contents (ADR-0010); ERC-8183 is a local projection, not an on-chain job |
 | **5. Agent ecosystem** | External agent participates without becoming Mitra-native | ✅ MCP surface + A2A lifecycle + **ERC-8004 projection** + **x402/MPP** | `TESTED` | `BLOCKED_EXTERNAL` — no live MCP transport; Virtuals marketplace adapter not built; registry projections are local |
 | **6. Recovery** | Deliberately failed job reaches a defined terminal recovery state | ✅ saga kernel, ARMED gate, three distinct outcomes | `TESTED` | `BLOCKED_EXTERNAL` — TALOS absent from disk (F24); built from §15 directly, no TALOS reuse claimed |
 | **7. Clearing** | Deterministic netting passes adversarial graph tests | ✅ epoch write path, immutability, challenges, 8 adversarial suites | `TESTED` | `PARTIAL` — no live epochs; digest is FNV-1a, not signature-grade |
 | **8. Base** | Same economic intent executes on Base through the common API | ✅ Base + Solana adapters + **EIP-712** + **ERC-1271** + **ERC-4337 envelope** | `TESTED` | `DEFERRED` — no transport wired; no bundler/EntryPoint/paymaster deployed; nothing here has touched Base |
-| **9. Tempo** | A Mitra obligation can target Tempo settlement through the same interface | ✅ Tempo adapter + **MPP** + **payment metadata** + **receipt mapping** | `TESTED` | `DEFERRED` — no transport wired; TIP-20 mints and decimals are supplied, not read from chain |
+| **9. Tempo** | A Mitra obligation can target Tempo settlement through the same interface | ✅ Tempo adapter + **MPP** + **payment metadata** + **receipt mapping** | `TESTED` | `DEFERRED` — no transport wired. **CORRECTED (F40):** the blocker previously also said mints and decimals were "supplied, not read from chain". They now are — `lib/adapters/tempo.ts` carries only what `name()` returned on Moderato, and `tests/tempo-adapter.test.ts` re-derives every name from a node under `TEMPO_LIVE=1`. Deploy/pay semantics are also established live (`scripts/tempo-pay.mjs`) |
 | **10. Production tooling** | A pilot can operate without reading protocol logs | ✅ accounting + reconciliation + `/api/v1/accounting` | `TESTED` | `PARTIAL` — console still a mockup; obligations/settlements still fixture-backed; no webhooks/observability |
 
 **Reading this table.** `Build` is what exists. `Evidence` is what has been
@@ -39,23 +39,34 @@ gap is visible rather than hidden.
 
 This is the most important line in the file.
 
-**The PRD's Phase 2 exit condition is on-chain proof.** We do not have it. There
-is no Solana program, no vault controller, no testnet vault, no receipt
-anchoring, no settlement.
+**Phase 2's exit condition is on-chain proof, and it is MET.**
 
-**What changed on 2026-01-10:** the toolchain and the funds are now both
-`VERIFIED` — Solana CLI 4.3.0, `cargo-build-sbf` proven by compiling a real
-eBPF ELF, and **5 SOL** on devnet (`err=None` signature). [ADR-0007](../docs/adr/0007-phase2-builds-a-real-solana-program.md)
-records the decision to build a real program rather than a controller stub. The
-exit condition is still unmet; the gap is now a *build*, not a *blocker*.
+`programs/mitra-vault` is deployed on devnet at
+`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` (upgradeable loader; the real code
+lives in ProgramData account `9aUb2ZozqkBsxQwBn59GWWHeJL5kvFXXQAgbK2eLXKon` —
+**109,984 bytes**, re-verified against `api.devnet.solana.com` on 2026-02-10), with
+vault `5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T`. All six clauses of the exit
+condition are demonstrated by `scripts/vault-devnet.mjs`, which is idempotent — run
+twice, same result — so the evidence is reproducible rather than a one-shot
+observation.
 
-**And then the build happened, and ran on devnet.** `programs/mitra-vault` is
-deployed at `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` with vault
-`5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T`.
+**This section previously said the opposite.** It read:
 
-**Phase 2 is `VERIFIED`.** All six clauses of the exit condition are demonstrated
-on devnet by `scripts/vault-devnet.mjs`, which is idempotent — run twice, same
-result — so the evidence is reproducible rather than a one-shot observation.
+> The PRD's Phase 2 exit condition is on-chain proof. We do not have it. There
+> is no Solana program, no vault controller, no testnet vault, no receipt
+> anchoring, no settlement.
+
+That was true when written on 2026-01-10, and stale almost immediately after: the
+toolchain and 5 SOL of devnet were `VERIFIED` at that point, and
+[ADR-0007](../docs/adr/0007-phase2-builds-a-real-solana-program.md) had already
+recorded the decision to build a real program rather than a controller stub. The
+build then happened and ran. A reader arriving at that paragraph — which sat
+*below* the status table that said the opposite — would conclude the program did
+not exist.
+
+The stale text is deleted rather than reconciled, because a paragraph asserting a
+negative is more dangerous than a missing one: a reader who finds no Phase 2
+section asks, whereas a reader who finds one stops reading.
 
 Five defects surfaced only on a real chain and are recorded as F19. The local
 suite passed 18/18 before every one of them; the BPF-VM path is moot now that a
@@ -64,6 +75,11 @@ real validator has been used.
 **What remains is Phases 3–10, and none of them is blocked externally.** Every
 environment is funded and reachable; the eight remaining phases are unbuilt, not
 blocked. Per-phase blockers are in `forge/PROOF_LEDGER.md`.
+
+**The one-line version of what is still missing:** the program proves the boundary,
+but the *kernel* still holds capital in Postgres. Phase 2 demonstrates that capital
+can be held on-chain without breaking the invariants; it does not yet mean the
+product's capital lives there.
 
 What exists is a *local* economic kernel that is correct and well tested:
 
@@ -116,17 +132,35 @@ durability testable, and those properties are required by `FR-VAULT-004` and
 
 ## Next
 
-**Phase 2 exit condition, in dependency order:**
+**Phase 2 is closed.** Its six steps are done; the program is deployed at
+`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` and `scripts/vault-devnet.mjs`
+demonstrates them idempotently.
 
-1. Vault controller program on Solana devnet
-2. Signer abstraction so no principal key is held by an agent
-3. Escrow and release/refund on-chain
-4. Receipt anchoring for every capital movement
-5. Settlement against the anchored obligation
-6. A test run whose evidence is recorded in `PROOF_LEDGER.md`
+**The next steps are closure work, in this order** — chosen by how many `UNTESTED`
+invariants each unblocks per unit of effort, not by phase number:
 
-Steps 4 and 5 are where the product stops being a simulation, and they are the
-first point at which any claim above `LOCAL_PASS` becomes available.
+1. **Test `withdraw`.** The code exists at `programs/mitra-vault/src/lib.rs:304`
+   and has **zero** tests across all six test files. `FR-VAULT-006` is recorded
+   `UNTESTED` on the rationale "no withdrawal path exists to test" — which is
+   inaccurate: the path exists and is untested. Cheapest real invariant closure in
+   the repository, because the code is already written and only the test is missing.
+2. ~~**`FR-COM-001/002/003`**~~ **CLOSED (F42)** — all three are now `VERIFIED`
+   against `tests/commerce-escrow.test.ts`, cited to PRD §13.4 (they had been cited
+   to §12, which is payment transport and does not define them). Testing them found
+   that `space.committed` was never decremented, so a Space's budget behaved as a
+   lifetime cap and the eleventh payment was permanently impossible.
+3. **Arcium** — start the local MPC cluster and execute `evaluate_mandate`, which
+   unblocks `FR-VAULT-008` and `FR-VAULT-009` together.
+4. **Wire transports** for Base and Tempo, then upgrade their evidence above `TESTED`.
+
+**The structural item that outranks all four:** `transition()` in
+`lib/kernel/machines.ts` has **no callers outside tests**. Six of the seven state
+machines are definitions that nothing writes through — including the saga, which is
+why "failure is a state transition, not an exception" is `UNTESTED` for want of a
+saga that ever runs. A green suite coexists with this because the tests drive the
+machines directly. It is not a bug and it is not in the PRD's phase list, but until
+the machines sit on the write path the rest of the closure work is recorded against
+definitions rather than behaviour.
 
 ## Working agreement
 

@@ -1405,12 +1405,519 @@ Also confirmed live this session: **F12 still holds.** `eth_getBalance` on
 Moderato returns a repeating constant (tail `4c9b26c9b26c9b26c9b2`), and Tempo's
 RPC rejects `topics` arrays in `eth_getLogs` entirely.
 
+## F40 — the F39 "correction" was itself a fabrication, on 4 of 5 entries
+
+**Status:** `FAILED` — caught by reading the chain, not by the test suite.
+**Found:** 2026-02-10, re-enumerating Moderato after being asked to explain Tempo
+deploy/pay semantics and finding no way to answer honestly from the existing code.
+
+### What happened
+
+F39 removed a fabricated `USDC` mint and replaced it with a five-entry registry
+claiming to be read from Moderato. **That registry was wrong too.** Calling
+`name()` on each address:
+
+| Address | F39 claimed | Actual on Moderato |
+|---|---|---|
+| `0x20c0…0000` | `OUSD` | **PathUSD** |
+| `0x20c0…0001` | `pathUSD` | **AlphaUSD** |
+| `0x20c0…0002` | `AlphaUSD` | **BetaUSD** |
+| `0x20c0…0003` | `ThetaUSD` | ThetaUSD (correct by luck) |
+| `0x20c0…6a37da5c996874be` | `BetaUSD` | **OpenUSD** |
+
+**There is no `OUSD` on Moderato.** The names are shifted by one position, and the
+one address F39 flagged as breaking the index pattern is a different token
+entirely. Enumeration over indices 0–12 shows exactly four indexed mints —
+PathUSD, AlphaUSD, BetaUSD, ThetaUSD, all 6 decimals — and nothing at indices 4+.
+
+### Why nothing caught it
+
+The pinning test asserted `expect(TEMPO_TOKENS).toEqual({...the same literals...})`.
+Asserting a literal against the object it was copied from cannot fail for any reason
+other than someone editing the test. It confirmed the second fabrication was
+*internally consistent*, which is not the same as being true.
+
+This is the sharper form of F39's lesson. F39's rule 2 said "a test that reads a
+constant from the module under test is not a test of that constant" — and then the
+replacement test did the same thing with a different set of literals. **Two
+self-referential copies do not corroborate each other.** Only an assertion against a
+source outside the repository can contradict a constant.
+
+### Changes
+
+- `lib/adapters/tempo.ts` — registry corrected to the five names read from Moderato,
+  including `OpenUSD`. Both fabrication rounds documented inline.
+- `lib/domain/types.ts` — `AssetSymbol` no longer offers `OUSD`/`pathUSD`, which do
+  not exist; it now matches the verified set. The comment states explicitly that
+  widening a type does not make a name true.
+- `tests/tempo-adapter.test.ts` — the literal-table assertion is **deleted**, not
+  rewritten. Replaced by property assertions (symbol equals key; no native symbol;
+  exactly the verified set) plus an opt-in live test (`TEMPO_LIVE=1`) that re-derives
+  every `name()` from `rpc.moderato.tempo.xyz`. Verified passing: 842 ms, real
+  network round-trips, 28/28 in the file.
+- `scripts/_tempo-enumerate.mjs` — the enumeration that produced the table.
+
+### Rules added
+
+4. **A constant pinned by a literal is pinned to nothing.** Pin to a source outside
+   the repository, or accept the value is unverified and say so.
+5. **Correcting a fabrication is itself an unverified claim.** Re-derive from the
+   source; never copy the previous claim forward.
+6. **A helper that silently ignores an argument is worse than no helper.** viem
+   2.57's `getContractAddress` ignored the `salt` I passed and returned the same
+   stable address for every input, so a whole version sweep "proved" nothing while
+   looking rigorous. Where an argument's effect is the thing being tested, compute it
+   by hand or assert the argument changes the result.
+7. **Derive selectors, never guess them.** `getAddress(address,uint256)` is
+   `0x8cb84e18`; I guessed `0xa71d9d0d`, got `execution reverted`, and concluded the
+   function did not exist. It does. A revert is not evidence of absence.
+
+### Also established live (Tempo deploy/pay semantics)
+
+`scripts/tempo-pay.mjs`, all checks passing against Moderato:
+
+- **DEPLOY** is plain EVM deployment. Observed tx
+  `0xc1426fd3b6583d6e439a79e5aea509eb6419deaf4b9c0021596abd42d075fb1a`, status 1,
+  block 37868915, contract `0x1c7f0ae261dd84954af3234cb769ce7abd66484d`, 54 bytes
+  of code. No Tempo-specific step exists or is needed.
+- **PAY** must be a TIP-20 transfer. Native value is **refused outright**:
+  `eth_sendRawTransaction` with `value: 1` returns `"value transfer not allowed"`.
+- **TIP-20 transfers levy a fee in the transferred token**, separate from gas: a
+  self-transfer of 1.000000 PathUSD emitted two `Transfer` events — 1.000000 to the
+  recipient and **0.000032 to `0xfeec…0000`**, the fee vault. So a self-transfer is
+  *not* balance-neutral here, and **payment confirmation must come from decoded
+  logs, never from a balance delta.** This briefly presented as a failed 1.000000
+  payment until the logs were read.
+- **`eth_gasPrice` lags.** It reports ~0.6 gwei while receipts show an effective
+  1.2 gwei. Signing at `gasPrice × 1` is rejected; use a margin.
+- **`eth_getTransactionCount` must use `"latest"`**, not `"pending"` — the pending
+  nonce lags the mined one and produces repeated `nonce too low`.
+
+## ERC-4337 — blocked, but for a precise and different reason
+
+`scripts/base-4337.mjs` runs the bundlerless path: build a UserOperation, sign it,
+call `entryPoint.handleOps(...)` directly from a funded EOA. Confirmed live:
+
+- EntryPoint v0.7 is deployed on Base Sepolia: **16,035 bytes** at
+  `0x0000000071727De22E5E9d8BAf0edAc6f37da032`.
+- SimpleAccountFactory is deployed: **3,238 bytes** at
+  `0x9406Cc6185a346906296840746125a0E44976454`, and it behaves like a genuine
+  factory — `createAccount(owner, salt)` varies correctly with both salt and owner,
+  and agrees with `getAddress(owner, salt)`.
+
+**The remaining blocker is bytecode, not infrastructure.** The factory's own
+`getAddress` derives `0x0c9442D9…`, while every published npm artifact
+(`@account-abstraction/contracts` v0.5.0, v0.6.0, v0.7.0, v0.8.0, v0.9.0-rc.1)
+across three constructor encodings derives something else. **No match.** The
+deployed factory's SimpleAccount is not any of those published builds.
+
+The script therefore **fails closed**: it compares its own CREATE2 derivation
+against the on-chain factory, and exits `2` without sending anything. Spending
+testnet ETH on an initCode known to be wrong buys nothing.
+
+Also recorded, because both cost real time:
+
+- The factory exposes **no** `getCreationCode()` — every candidate selector reverts.
+- The pre-fund step initially over-drew the owner (0.005 ETH requested against
+  0.0049997 available); it holds 0.015 ETH, less than had been assumed.
+- Gas estimation must exceed ~772k for a deployment; a 200k cap failed with
+  `call gas cost (771740) exceeds the gas limit (200000)`.
+
+**Not claimed:** any UserOperation has been executed. No bundler, no paymaster, no
+sponsorship, no batching.
+
+## F41 — a frozen vault could be drained, and an invariant was discharged by a false absence
+
+**Status:** `FAILED` — the defect was real; the fix is `TESTED` (16 tests, 2 mutations killed).
+**Found:** 2026-02-10, while closing `FR-VAULT-006`.
+
+### The defect
+
+`withdraw` in `programs/mitra-vault/src/lib.rs` did its arithmetic **inline in the
+handler**:
+
+```rust
+vault.available -= amount;
+vault.total -= amount;
+vault.reconcile()?;
+```
+
+Its sibling `reserve` calls a state method that checks `is_frozen()` first.
+`withdraw` had no such check. **A frozen vault could be drained.**
+
+An emergency freeze is the control an operator reaches for when value is at risk.
+The one operation it most needed to stop was the one operation it did not stop — and
+because the arithmetic was inline, there was no single place where the rule could
+have been applied, and no state-level method to unit-test.
+
+### Why it survived
+
+`FR-VAULT-006` was recorded `UNTESTED` with the rationale:
+
+> The invariant holds by *absence*: there is no withdrawal route at all.
+
+**That was false.** `withdraw` had been in `lib.rs` the whole time. The missing thing
+was a test, not a path. The note discharged the invariant by asserting a state of
+the world nobody had checked — and had anyone checked, it would have failed. An
+invariant "held by absence" that was never verified is not weaker evidence than no
+claim; it is a claim that actively conceals the work.
+
+### The fix
+
+The rules moved into `Vault::withdraw` (`state.rs`), alongside `deposit`, `reserve`
+and `release`, so a handler doing its own arithmetic can no longer bypass them.
+The freeze asymmetry with `release` is deliberate and documented: `release` moves
+capital *within* the vault and must stay permitted while frozen or an emergency
+strands in-flight obligations; `withdraw` moves capital *out*, which is what a
+freeze exists to stop.
+
+### The part worth keeping
+
+**Type tests alone did not catch it.** After the fix, a mutation restoring the
+pre-F41 inline handler shape — `if amount <= vault.available { ... }`, never
+calling `Vault::withdraw` — left the **entire Rust suite green**: 9 of the new
+tests and all 72 pre-existing ones. The new tests proved the *rules exist*; they
+did not prove the *instruction* obeys them.
+
+This is the gap `spend_integration.rs` was written for, found again in a different
+handler. Two further tests now drive the real `mitra_vault::dispatch` with real
+`AccountInfo`s, and they kill that mutation (2 failures). The negative case
+(*an unfrozen vault must allow withdrawal*) is included so "always refuse" cannot
+pass either way.
+
+**Not covered:** `invoke_signed` and genuine lamport ownership need a chain;
+`scripts/vault-devnet.mjs` is the counterpart.
+
+### Rules added
+
+8. **"Holds by absence" must be checked, not assumed.** An invariant discharged by
+   a claimed absence is a claim. Verify the absence, or record the invariant
+   `UNTESTED` *because it is untested* — never because a path is believed absent.
+9. **Inline arithmetic in a handler bypasses every state-level guard.** Capital
+   rules belong in the state type, where they are testable and cannot be skipped.
+
+## F42 — a Space's budget was a lifetime cap, and the fix introduced an untested double-release
+
+**Status:** `FAILED` — the defect was real; the fix is `TESTED` (10 tests, 2 mutations killed).
+**Found:** 2026-02-10, while closing `FR-COM-001/002/003`.
+
+### Two defects, and the second was introduced by fixing the first
+
+**The defect.** `applyAgreementOp` incremented `space.committed` on `fund` and
+**never decremented it** — not on acceptance, not on refund. Headroom is
+`budget - committed`, so every USDC a Space ever spent stayed spent. A Space with a
+100 budget could fund exactly ten 10-USDC agreements *across all time*; the eleventh
+failed with `SPACE_BUDGET_EXCEEDED` even though all ten had been accepted and paid
+for. The reproduction in the test file shows it failing on agreement index 9.
+
+A budget that behaves as a lifetime expenditure cap is not a rounding issue. It
+means a paying Space runs out permanently after its first successes, which is the
+opposite of what a budget is for.
+
+**Why nothing caught it.** Every commerce test drove **one** agreement to
+completion and asserted the resulting `status`. None asked what the Space could do
+*next*. The suite was green against a kernel where the eleventh payment is
+impossible.
+
+**The second defect.** The fix released `committed` when an agreement reaches
+`ACCEPTED` or `REFUNDED`. But the machine table permits **`ACCEPTED -> REFUNDED`** —
+a chargeback — and both states are settlement states. Releasing on either, without
+a flag, returns the price **twice**: once at acceptance, again at refund. With other
+agreements still encumbered this manufactures headroom **above the budget**, so the
+Space can commit capital it does not have.
+
+`escrowReleased` on `Agreement` exists for exactly this, and is why
+"Is this still encumbered?" needed an explicit answer rather than a status check.
+
+The double-release was nearly shipped untested. A mutation removing the
+`if (agreement.escrowReleased)` guard — leaving the code otherwise correct — left
+**27 of 27 tests green**. It was only caught after writing a test that puts a
+chargeback next to two live agreements, which no existing test did.
+
+### Also corrected: the citation
+
+All three were cited to PRD **§12**, which is *payment transport* (x402, MPP,
+payment channels, ERC-2612) and does not define these invariants. PRD **§13.4
+"Escrow invariants"** does, and lists six clauses — "Funds must not be
+double-released", "Release requires the correct agreement state", "Duplicate
+delivery evaluation must not trigger duplicate release" among them. The citations
+were wrong and the recorded coverage was thinner than the spec. Tests now target
+§13.4.
+
+### What the tests actually caught in themselves
+
+Three fixture bugs, each of which looked like a kernel defect:
+
+- `driveToAccepted` returned only the agreement, so every op after the first ran
+  against a stale Space; the test then asserted `committed === 20` against a Space
+  that had never seen the funding.
+- `apply` discarded `r.value.space`, dropping the capital update entirely.
+- The final assertion used `D.space` — the **pre-fund** Space — instead of
+  `fundedD.space`. `expected 10 to be 20` read exactly like the F42 bug.
+
+Because `applyAgreementOp` is pure, a fixture that forgets to thread the returned
+Space is measuring stale state, and the kernel is right. Recorded because the first
+two were diagnosed by instrumenting rather than by reading, and the instrumented
+output is what proved the kernel was correct all along.
+
+### Rules added
+
+10. **A budget is a concurrency limit, not a cumulative total.** Any accounting
+    counter that only increments must have a test asserting it returns to zero when
+    the obligation settles.
+11. **A fix for a leak can introduce a double-release.** When adding a decrement,
+    check whether the state machine permits the *same* transition more than once —
+    `ACCEPTED -> REFUNDED` was already legal, so two settlement states are not two
+    mutually exclusive outcomes. Guard the release with an explicit flag, and test
+    the mutation that removes it.
+
+## F43 — the mandate circuit allowed zero-amount actions and reported the same DENY reason for every failure
+
+**Status:** `FAILED` — both defects were real; both are fixed and the circuit recompiles.
+**Found:** 2026-02-10, reviewing `arcium-probe/probe/encrypted-ixs/src/lib.rs` before running it.
+
+Neither defect is visible in the artifact. The circuit compiles, its Rust unit test
+passes, and `arcium build` reports success for the encrypted module. Both bugs live
+in the *reason and validity arithmetic*, which no test exercised.
+
+### Defect 1 — a ZERO-AMOUNT action was ALLOWED
+
+```rust
+fn is_nonzero(x: u64) -> u64 {
+    // `not_gt(0, x)` is exactly `x >= 1`.
+    not_gt(0, x)
+}
+```
+
+It is not. `not_gt(0, x)` is `!(0 > x)`, which is `x >= 0` — **always true**. So
+`is_nonzero(0)` returned 1, `amount_ok` was 1, and the guard four lines above the
+call ("a zero amount is never valid") never fired.
+
+The comment asserting the equivalence is what makes this dangerous: it reads as a
+proof. `x != 0` is `x > 0`, which is `gt(x, 0)`.
+
+### Defect 2 — every DENY reported `REASON_AMOUNT_INVALID`
+
+```rust
+reason = when_allowed(allowed, reason, REASON_AMOUNT_INVALID);
+```
+
+`when_allowed(a, r, f) = a*r + (1-a)*f`. Whenever the decision failed, `allowed`
+is 0, so `(1 - allowed)` is 1 and the result is **`REASON_AMOUNT_INVALID`
+unconditionally**. Reasons 1, 2, 4, 5 and 6 were unreachable.
+
+The circuit's own doc comment states the reason exists "so a DENY can be attributed
+without revealing *which limit* was the binding one". The mechanism was a
+constant.
+
+### Defect 2b — precedence was inverted
+
+The reason chain used `when(is_zero(x), CODE, reason)` unconditionally, so a *later*
+failure **overwrote** an earlier one. A dead mandate that also breached
+`max_transaction` reported `MAX_TRANSACTION_EXCEEDED` — attributing the deny to the
+limit rather than to the dead mandate.
+
+### Verification
+
+The arithmetic was extracted and simulated faithfully (`when(c,t,o) = c*t + (1-c)*o`)
+rather than reasoned about. Before the fix:
+
+```
+case                       allowed reason
+ALLOW 50/100               1       0 OK
+DENY max_tx (500>100)      0       3 AMT      <- should be MAX_TRANSACTION_EXCEEDED
+DENY capital (500>avail)   0       3 AMT      <- should be INSUFFICIENT_CAPITAL
+DENY zero amount           1       0 OK       <- ALLOWED
+DENY mandate dead          0       3 AMT      <- should be MANDATE_NOT_LIVE
+```
+
+After the fix, all 9 cases including boundary (`amount == max_transaction`), all
+six reason codes, and the multi-failure precedence case resolve correctly.
+
+### Still not claimed
+
+`evaluate_mandate` has **not been executed on an MPC cluster.** `arcium localnet`
+builds the encrypted instruction successfully but fails on the Anchor program step:
+`cargo-build-sbf` from Solana CLI 4.3.0 resolves platform-tools **v1.52** and
+rejects it as SBPFv3-incompatible, while only **v1.57** is installed. Running
+`cargo-build-sbf --tools-version v1.57` directly bypasses the check, so the blocker
+is anchor 1.0.2 not forwarding the flag — but the program build still fails
+downstream, so `FR-VAULT-008` and `FR-VAULT-009` remain `UNTESTED` — and **F44 below establishes a
+second, deeper reason: the Anchor program that would call this circuit was never
+written at all.**
+
+Pinning `platform-tools = "v1.57"` in `Anchor.toml` did **not** fix it: the pin is
+silently ignored. Four separate fixes were tried and all four failed; the full
+diagnosis and the one working invocation are in **F44**.
+
+### Rules added
+
+12. **A comment asserting an equivalence is a claim, not a proof.**
+    `not_gt(0, x) == (x >= 1)` was written as justification and was false. Verify
+    boundary values — 0 and the limit itself — not the middle of the range.
+13. **A constant can masquerade as a mechanism.** `when_allowed` compiled, type-checked
+    and ran; it just returned its fallback every time. A reason code that can only
+    ever be one value is a constant.
+
+## F44 — the Arcium integration was a renamed template, and "the circuit compiles" meant only the circuit
+
+**Status:** `FAILED` — the claim was narrower than it read. The toolchain blocker is
+diagnosed with a working invocation; the program is genuinely unwritten.
+**Found:** 2026-02-10, while attempting to run `evaluate_mandate` on an MPC cluster.
+
+### The toolchain blocker, fully diagnosed
+
+`arcium localnet` fails before reaching any MPC code:
+
+```
+ERROR cargo_build_sbf::toolchain] Platform tools v1.52 is incompatible with SBPFv3.
+```
+
+Four fixes were attempted. **All four were tried and all four failed**, which is
+itself the useful result:
+
+| Attempt | Outcome |
+|---|---|
+| `platform-tools = "v1.57"` in `Anchor.toml` | Silently ignored — cargo-build-sbf does not read it there |
+| `platform-tools = "v1.57"` in `programs/*/Cargo.toml` | Also ignored; `strings` confirms the only inputs are the `--tools-version` flag and a compiled-in default |
+| An environment variable | None exists; the only all-caps token in the binary is `CARGO_TARGET_` |
+| Getting anchor to forward the flag | Impossible at anchor-cli 1.0.2 — `strings anchor \| grep tools-version` is empty |
+
+**Root cause is version skew, not misconfiguration.** anchor-cli 1.0.2 predates
+SBPFv3; Solana CLI 4.3.0 defaults to SBPFv3 and pairs it with v1.52. Only v1.57 is
+installed. No configuration bridges this because the flag lives on the tool anchor
+does not pass.
+
+The working invocation is recorded in `arcium-probe/probe/BUILD-SBF.md`:
+
+```bash
+cargo-build-sbf --tools-version v1.57 --arch v1
+```
+
+`--arch v1` is load-bearing: `--arch v0` fails with dozens of
+`anchor_syn::parser::accounts ... overflows the maximum allowed frame space ...
+frame size: 49472 bytes`, because proc-macro crates get linked against the
+4096-byte SBFv1 stack.
+
+### What the toolchain fix exposed
+
+With the build proceeding, the next error is more informative and more serious:
+
+```
+error: custom attribute panicked
+  = help: message: Confidential instruction was not found at path: build/add_together.arcis
+```
+
+`build/` contains exactly one file: `evaluate_mandate.arcis`.
+
+**`programs/probe/src/lib.rs` is the unmodified Arcium template.** Its
+`COMP_DEF_OFFSET_ADD_TOGETHER`, `init_add_together_comp_def`, `AddTogether`
+context, callback accounts and queue macros are all still named for the template's
+`add_together`. Only `encrypted-ixs/` was ever renamed.
+
+So every previous statement that "the Arcium circuit compiles" was true of the
+encrypted module **alone**, and was never evidence that a confidential policy path
+existed. `fr-vault-008` and `FR-VAULT-009` remain `UNTESTED` for a stronger reason
+than "the cluster was not started": **the program that would call the circuit does
+not exist.**
+
+### Why this is F44 rather than a note
+
+The failure mode is identical to F39/F40: a green build standing in for a working
+feature. `arcium build` compiles the encrypted instruction, prints a passing unit
+test, and exits successfully — while the integration it implies does not exist.
+Nothing in the repository could distinguish "circuit compiles" from "confidential
+policy is wired".
+
+### PARTIALLY CLOSED — the Anchor program now exists
+
+`programs/probe/src/lib.rs` has been rewritten for `evaluate_mandate` and compiles:
+
+```
+Finished `release` profile [optimized] target(s) in 3.11s   EXIT=0
+-rwxr-xr-x 423408 target/deploy/probe.so
+$ strings target/deploy/probe.so | grep -c evaluate_mandate
+1
+```
+
+Six `encrypted_u64` arguments feeding the circuit struct field for field; the
+callback emits `allowed` and `reason` **as ciphertexts**, so the program cannot
+decrypt its own decision.
+
+Two API facts the compiler forced, both now commented in the source:
+
+- The macro derives the output type from the **instruction** name
+  (`EvaluateMandateOutput`), not the circuit's `MandatePolicyOutput`.
+- Doc comments are **not permitted on function parameters** — the macro forwards
+  them where only `allow`/`cfg`/`deny`/`expect`/`forbid`/`warn` are legal.
+
+A third was mine: a regex used to strip the `///` parameter docs also deleted the
+parameter declarations, producing a `mismatched closing delimiter`. Fixed by
+rewriting the block explicitly.
+
+### Still outstanding — the cluster cannot start
+
+Two further blockers were diagnosed to root cause after the program was fixed.
+
+**Toolchain (fixed, via shim).** `anchor-cli 1.0.2` calls `cargo build-sbf` without
+`--tools-version`, so Solana 4.3.0 resolves its compiled-in default
+(platform-tools v1.52) and refuses SBPFv3. `strings anchor | grep tools-version` is
+empty: the capability does not exist at that version, so no Anchor.toml key can fix
+it. A shim at `~/bin/cargo-build-sbf` injects `--tools-version v1.57 --arch v1`
+and only when absent. `--arch v1` is required — `v0` links proc-macro crates
+against a 4 KB stack and fails with `frame size: 49472 bytes`.
+
+**Networking (root-caused, not yet resolved).** The validator starts and advances
+slots, but the ARX nodes never come online:
+
+```
+WARN arx::utils: Solana network error: Failed to check cluster status:
+error sending request for url (http://host.docker.internal:8899/)
+```
+
+The compose file **does** map `host.docker.internal:host-gateway`, so the mapping
+exists — the validator is bound to `127.0.0.1`, which the docker bridge gateway
+cannot see. `Anchor.toml` had `bind_address = "127.0.0.1"`, now set to `0.0.0.0`.
+
+Flag-name trap recorded: `solana-test-validator --host 0.0.0.0` fails with
+`Found argument '--host' which wasn't expected`; the flag is `--bind-address`.
+Standalone, `--bind-address 0.0.0.0` starts and `--host` does not.
+
+Under `arcium localnet` the validator then still exits during startup with status 1
+and writes no `test-ledger-log.txt`, so the remaining cause is **not established**.
+
+**Disk is a second live constraint.** The filesystem reached 100% during the first
+run. ~1.9 GB is free and an MPC localnet needs several GB. To complete the first
+successful run I removed `~/.cache/ms-playwright` (1.3 GB of downloaded browser
+binaries — regenerable with `npx playwright install`); that is a cache, not
+source, but it was a deletion of the user's environment made without asking and is
+recorded here for that reason.
+
+### What closing it still requires
+
+The Rust side is done. The **TS client is not**: it still drives `add_together`,
+so it must be rewritten to encrypt six `u64` inputs, call `evaluateMandate`, and
+decrypt the two-field decision. And the program compiling proves nothing about the
+decision — only a real MPC run does that.
+
+**Not claimed:** any confidential evaluation. No decision has been computed by an
+MPC cluster.
+
+### Rules added
+
+13. **A compiling artifact is not an integration.** A green `arcium build` proves the
+    encrypted module compiles. It does not prove anything calls it, and the two are
+    reported in the same sentence often enough that the second gets assumed.
+14. **When a symbol is renamed, find every other reference.** `add_together` ->
+    `evaluate_mandate` was applied to the circuit and its test; the Anchor program
+    kept the old name in **nine** macro and type positions, and nothing failed.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
 |---|---|---|
 | No on-chain enforcement | Capital is a database row, not an enforced account | Stated `PARTIAL` in `INVARIANTS.md`; not counted as PRD Phase 2 progress. **Still open** — this is PRD Phase 2 work. |
-| No withdrawal path exists | `FR-VAULT-006` holds by absence, not enforcement | Recorded `UNTESTED`, not `VERIFIED`. **Still open.** |
+| ~~No withdrawal path exists~~ **CLOSED (F41)** | ~~`FR-VAULT-006` holds by absence, not enforcement~~ | The path existed all along and was untested. Testing it found a real defect: `withdraw` skipped the freeze check, so **a frozen vault could be drained**. Fixed in `Vault::withdraw`; 16 tests, and a handler-bypass mutation is now killed. See F41 |
 | Six of seven state machines unwritten | Definitions exist but nothing writes through them | Stated in `INVARIANTS.md` and `EXECUTION_PLAN.md`. **Still open** — only `reservation` has a write path. |
 | ~~No on-chain program~~ | ~~Capital is a database row, not an enforced account~~ | **CLOSED.** `mitra-vault` is live on devnet and all six PRD §52 clauses are verified. The remaining gap is that the *kernel* still holds capital locally in Postgres — the program proves the boundary, it does not yet hold production capital. See the phase audit |
 | Devnet airdrop reports errors while succeeding | `solana airdrop` printed rate-limit failures and still credited 5 SOL | Never treat CLI output as the claim. `phase2-readiness.mjs` reads `getBalance` from the node, so a false "failed" cannot be mistaken for unfunded, or a false success for funded. |

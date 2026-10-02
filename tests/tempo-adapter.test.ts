@@ -21,11 +21,13 @@ import {
 } from "@/lib/adapters/tempo";
 import { UnconfiguredAdapterError, type SettlementAdapter } from "@/lib/adapters/types";
 
-// There is NO USDC on Tempo. See the registry comment in lib/adapters/tempo.ts.
-const A = "OUSD" as AssetSymbol;
+// There is NO USDC and NO OUSD on Tempo, and the asset that actually moves value
+// here is a TIP-20 mint. See the registry comment in lib/adapters/tempo.ts for the
+// two rounds of fabrication this file's fixtures were built on.
+const A = "PathUSD" as AssetSymbol;
 const TO = "0x1111111111111111111111111111111111111111";
 const FROM = "0x2222222222222222222222222222222222222222";
-const MINT = TEMPO_TOKENS.OUSD.mint;
+const MINT = TEMPO_TOKENS.PathUSD.mint;
 const AMOUNT: Money = { asset: A, amount: 12 };
 
 const commit = (i: { settlementId: string; from: string; to: string; amount: Money; network: string }) =>
@@ -40,7 +42,7 @@ describe("F15 — an empty balance response is NOT zero", () => {
   it("a funded account queried through the wrong host reads EMPTY, not 0", async () => {
     // This is the exact failure: the address IS funded on Moderato, the host
     // indexes mainnet, and it answers `{"data":[]}` — identically to a broke one.
-    const r = await new TempoBalanceReader(mainnetIndexedSource, "moderato").read("OUSD", FROM);
+    const r = await new TempoBalanceReader(mainnetIndexedSource, "moderato").read(A, FROM);
     expect(r.kind).toBe("EMPTY");
     expect(r).not.toEqual({ kind: "known", amount: 0n });
   });
@@ -54,13 +56,13 @@ describe("F15 — an empty balance response is NOT zero", () => {
 
   it("a real balance is reported as known", async () => {
     const src: TempoBalanceSource = { balances: async () => ({ data: [{ mint: MINT, amount: "5000000" }] }) };
-    const r = await new TempoBalanceReader(src, "moderato").read("OUSD", FROM);
+    const r = await new TempoBalanceReader(src, "moderato").read(A, FROM);
     expect(r).toEqual({ kind: "known", amount: 5000000n });
   });
 
   it("a failing source is an error, not a zero", async () => {
     const src: TempoBalanceSource = { balances: async () => { throw new Error("gateway timeout"); } };
-    const r = await new TempoBalanceReader(src, "moderato").read("OUSD", FROM);
+    const r = await new TempoBalanceReader(src, "moderato").read(A, FROM);
     expect(r.kind).toBe("error");
   });
 
@@ -75,9 +77,12 @@ describe("F12 — Tempo settles in TIP-20 only", () => {
 
   it("there is no native-balance path to fall into", () => {
     // The guard is structural: native ETH is simply not a settlement asset here,
-    // so the F12 constant can never be read as a balance.
-    expect(Object.keys(TEMPO_TOKENS)).toEqual(["OUSD", "pathUSD", "AlphaUSD", "BetaUSD", "ThetaUSD"]);
-    expect(() => Object.keys(TEMPO_TOKENS)).not.toThrow();
+    // so the F12 constant can never be read as a balance. The assertion is that no
+    // key is a native symbol — not a literal list of names, which is how the F39
+    // and F40 fabrications stayed invisible.
+    const keys = Object.keys(TEMPO_TOKENS);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const native of ["ETH", "WETH", "TEMPO"]) expect(keys).not.toContain(native);
   });
 
   it("a non-TIP-20 asset is refused", async () => {
@@ -86,11 +91,11 @@ describe("F12 — Tempo settles in TIP-20 only", () => {
   });
 
   it("the same four refusals as the other rails", async () => {
-    await expect(a.validateTarget({ asset: "OUSD", recipient: "nope", amount: 1 }))
+    await expect(a.validateTarget({ asset: A, recipient: "nope", amount: 1 }))
       .rejects.toThrow("INVALID_RECIPIENT_ADDRESS");
-    await expect(a.validateTarget({ asset: "OUSD", recipient: TO, amount: 0 }))
+    await expect(a.validateTarget({ asset: A, recipient: TO, amount: 0 }))
       .rejects.toThrow("INVALID_AMOUNT");
-    await expect(a.validateTarget({ asset: "OUSD", recipient: TO, amount: 0.0000004 }))
+    await expect(a.validateTarget({ asset: A, recipient: TO, amount: 0.0000004 }))
       .rejects.toThrow("AMOUNT_BELOW_ATOMIC_PRECISION");
   });
 });
@@ -140,43 +145,115 @@ describe("Tempo satisfies the same settlement contract as the other rails", () =
 });
 
 /**
- * The mints are PINNED, because the previous registry was fabricated.
+ * The mints were FABRICATED, then "corrected" into a DIFFERENT fabrication.
  *
- * The invented `USDC: 0x5dDF...` entry passed every test in this file: the tests
- * referenced `TEMPO_TOKENS.USDC`, so they validated the invention against itself.
- * A test that reads a constant out of the module under test cannot detect that the
- * constant is wrong.
+ * F39 introduced `USDC: 0x5dDF...`, which does not exist. Every test in this file
+ * passed because they referenced `TEMPO_TOKENS.USDC` — a test that reads a
+ * constant out of the module under test validates the invention against itself.
  *
- * These values are read from Moderato (1M units each, from Transfer logs). This
- * test cannot reach a node, so what it does is make the value a CLAIM that must be
- * re-verified deliberately: changing one of these is now a visible edit to a pinned
- * expectation rather than an invisible edit to a fixture.
+ * F40 found that F39's replacement was **also wrong on 4 of 5 entries**, because
+ * it was pinned by the same self-referential assertion:
+ *
+ *     F39 claimed            F40 read from Moderato
+ *     ──────────────         ────────────────────────
+ *     OUSD     @ 0x…0000    PathUSD  @ 0x…0000
+ *     pathUSD  @ 0x…0001    AlphaUSD @ 0x…0001
+ *     AlphaUSD @ 0x…0002    BetaUSD  @ 0x…0002
+ *     BetaUSD  @ 0x…6a37…   OpenUSD  @ 0x…6a37…
+ *     ThetaUSD @ 0x…0003    ThetaUSD @ 0x…0003   (right by luck)
+ *
+ * So the test below deliberately does NOT assert a hardcoded table. Asserting the
+ * same literal twice is what let two fabrications stand in a row. Instead it pins
+ * the properties that were actually verified against Moderato, and a live check
+ * (opt-in via TEMPO_LIVE=1) re-derives every name from a node so the constant can
+ * be contradicted by the outside world rather than only by a second copy of itself.
+ *
+ * Verified 2026-02-10 against https://rpc.moderato.tempo.xyz (chain id 42431).
  */
-describe("the TIP-20 registry is the real one", () => {
-  it("pins every mint read from Moderato", () => {
-    expect(TEMPO_TOKENS).toEqual({
-      OUSD: { symbol: "OUSD", mint: "0x20c0000000000000000000000000000000000000", decimals: 6 },
-      pathUSD: { symbol: "pathUSD", mint: "0x20c0000000000000000000000000000000000001", decimals: 6 },
-      AlphaUSD: { symbol: "AlphaUSD", mint: "0x20c0000000000000000000000000000000000002", decimals: 6 },
-      BetaUSD: { symbol: "BetaUSD", mint: "0x20c0000000000000000000006a37da5c996874be", decimals: 6 },
-      ThetaUSD: { symbol: "ThetaUSD", mint: "0x20c0000000000000000000000000000000000003", decimals: 6 },
-    });
+describe("the TIP-20 registry matches what Moderato actually says", () => {
+  const entries = Object.entries(TEMPO_TOKENS);
+
+  it("names the four indexed mints and OpenUSD, and invents no others", () => {
+    expect(entries.map(([k]) => k).sort()).toEqual([
+      "AlphaUSD", "BetaUSD", "OpenUSD", "PathUSD", "ThetaUSD",
+    ]);
   });
 
-  it("contains no USDC, because Tempo has none", () => {
-    // The symbol that was invented along with the invented mint.
+  it("contains no USDC and no OUSD, because Moderato has neither", () => {
+    // Both names were fabricated at some point in this file's history.
     expect(TEMPO_TOKENS["USDC"]).toBeUndefined();
+    expect(TEMPO_TOKENS["OUSD"]).toBeUndefined();
   });
 
   it("every mint is a distinct, well-formed address", () => {
-    const mints = Object.values(TEMPO_TOKENS).map((t) => t.mint.toLowerCase());
+    const mints = entries.map(([, t]) => t.mint.toLowerCase());
     expect(new Set(mints).size).toBe(mints.length);
     for (const m of mints) expect(m).toMatch(/^0x[0-9a-f]{40}$/);
   });
 
-  it("BetaUSD does not follow the index pattern, which is why it must be pinned", () => {
-    // Four of the five are 0x20c0... followed by an index. The fifth is not, so
-    // any code that INFERS the address pattern would silently miss it.
-    expect(TEMPO_TOKENS.BetaUSD.mint).toBe("0x20c0000000000000000000006a37da5c996874be");
+  it("each symbol equals its own registry key", () => {
+    // A symbol silently disagreeing with its key is how the F39 shift went unnoticed.
+    for (const [key, t] of entries) expect(t.symbol).toBe(key);
   });
+
+  it("OpenUSD is the one mint outside the 0x20c0…index scheme", () => {
+    // Derived rather than hand-counted: the indexed mints are `0x20c` + zeros +
+    // a one-digit index. A literal like `20c0{36}` depends on counting zeros by
+    // eye; getting it wrong makes the filter match NOTHING, and a filter that
+    // matches nothing still passes a `toEqual([...])` only by accident. Written as
+    // an explicit split so the two halves cannot silently disagree again.
+    const INDEX_PREFIX = "0x20c";
+    const isIndexed = (mint: string) => {
+      const hex = mint.slice(2);
+      if (hex.length !== 40) return false;
+      if (!hex.startsWith(INDEX_PREFIX.slice(2))) return false;
+      const rest = hex.slice(INDEX_PREFIX.length - 2); // everything after "20c"
+      return /^0+$/.test(rest.slice(0, rest.length - 1)); // all zeros but the index
+    };
+    const indexed = entries.filter(([, t]) => isIndexed(t.mint));
+    expect(indexed.map(([k]) => k).sort()).toEqual(["AlphaUSD", "BetaUSD", "PathUSD", "ThetaUSD"]);
+    expect(TEMPO_TOKENS.OpenUSD.mint).toBe("0x20c0000000000000000000006a37da5c996874be");
+    // So any code that INFERS addresses by pattern would miss OpenUSD entirely.
+  });
+
+  it("all decimals are 6, as read from each mint", () => {
+    for (const [key, t] of entries) expect(t.decimals, key).toBe(6);
+  });
+
+  /**
+   * The only assertion here that could have caught F39 or F40: it asks a NODE,
+   * not the module. Opt-in because the suite must not require the network; run it
+   * with TEMPO_LIVE=1 before trusting any change to this registry.
+   */
+  const liveIt = process.env.TEMPO_LIVE === "1" ? it : it.skip;
+  liveIt("re-derives every name from Moderato (TEMPO_LIVE=1)", async () => {
+    const { encodeFunctionData, parseAbi } = await import("viem");
+    const rpc = process.env.TEMPO_RPC ?? "https://rpc.moderato.tempo.xyz";
+    const abi = parseAbi(["function name() view returns (string)"]);
+    // Proper ABI decoding of a single `string` return: word0 = offset, word1 =
+    // length, then `length` bytes. An earlier version of this decoder read from
+    // char 2 and produced "\x07PathUSD" — the length word's first byte read as a
+    // leading control character. Decoding the offset and the length explicitly is
+    // what makes a wrong answer visible instead of nearly-right.
+    const readString = (data: string) => {
+      const hex = data.replace(/^0x/, "");
+      const offset = parseInt(hex.slice(0, 64), 16);
+      const length = parseInt(hex.slice(offset * 2, offset * 2 + 64), 16);
+      const start = offset * 2 + 64;
+      return Buffer.from(hex.slice(start, start + length * 2), "hex").toString("utf8");
+    };
+    for (const [key, t] of entries) {
+      const res = await fetch(rpc, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "eth_call",
+          params: [{ to: t.mint, data: encodeFunctionData({ abi, functionName: "name" }) }, "latest"],
+        }),
+      });
+      const body = await res.json() as { result?: string; error?: { message: string } };
+      expect(body.error, `${key} at ${t.mint} must be a live contract`).toBeUndefined();
+      expect(readString(body.result!), `${key} at ${t.mint}`).toBe(key);
+    }
+  }, 30_000);
 });

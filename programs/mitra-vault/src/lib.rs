@@ -311,11 +311,9 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progr
         return Err(ProgramError::InvalidArgument);
     }
     // `check_vault_account` proves the authority owns this vault; the only
-    // remaining question is whether there is enough to withdraw.
+    // remaining question is whether there is enough to withdraw. That question —
+    // and the freeze check — belongs to the state transition, not here.
     check_vault_account(vault_account, authority, program_id)?;
-    if amount > Vault::from_bytes(&vault_account.try_borrow_data()?)?.available {
-        return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
-    }
 
     let system_program = next_account_info(&mut it)?;
     if system_program.key != &solana_program::system_program::ID {
@@ -324,9 +322,9 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progr
 
     let mut data = vault_account.try_borrow_mut_data()?;
     let mut vault = Vault::from_bytes(&data)?;
-    vault.available -= amount;
-    vault.total -= amount;
-    vault.reconcile()?;
+    // Delegated to the state type. This used to be two inline subtractions with
+    // no freeze check, so a FROZEN vault could be drained — see F41.
+    vault.withdraw(amount)?;
     data.copy_from_slice(&vault.to_bytes());
     drop(data);
 

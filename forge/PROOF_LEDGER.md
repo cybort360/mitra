@@ -193,7 +193,7 @@ Program `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` · vault
 `5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T` ·
 [explorer](https://explorer.solana.com/address/5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T?cluster=devnet)
 
-| **Tempo Moderato funded** | `VERIFIED` | `node scripts/fund-tempo.mjs` — **1M each of 5 TIP-20 stablecoins** (OUSD, pathUSD, AlphaUSD, BetaUSD, ThetaUSD). Confirmed from Moderato `eth_getLogs` Transfer topics, not from the faucet response: `tempo_fundAddress` returns 5 txs, all `status 0x1`, each emitting a Transfer to our address for `0xe8d4a51000` = 1e12 = 1M units at 6dp |
+| **Tempo Moderato funded** | `VERIFIED` | `node scripts/fund-tempo.mjs` — 1M units each of the Moderato TIP-20 stablecoins. **CORRECTED by F40:** this line originally named them OUSD / pathUSD / AlphaUSD / BetaUSD / ThetaUSD, all four of which were wrong. Reading `name()` on the mints gives **PathUSD, AlphaUSD, BetaUSD, ThetaUSD** at indices 0–3 and **OpenUSD** at `0x20c0…6a37da5c996874be`. There is no OUSD and no pathUSD on Moderato. Balances confirmed via Transfer topics, not the faucet response |
 | Base Sepolia bridge configured and contracts verified | `VERIFIED` | `node scripts/bridge-sepolia.mjs` → L1StandardBridge 2,472B on Sepolia L1, L2StandardBridge 2,059B on Base Sepolia, and `messenger()` returns the documented `0xC34855F4…`. Note the guide the docs link to is archived and Goerli-pinned — see F16 |
 | **Base Sepolia L1 deposit accepted** | `VERIFIED` | `depositTransaction` on the OptimismPortal (`0x49f53e41…`, `version()` → 6.0.0) via `cast send`: `status 0x1`, tx `0xb681280536f994aef11736e6592de70a363ea00b5dfd1e6a3f1ecd03839c9b4c`, L1 block 11823822, canonical `TransactionDeposited` event, L1 balance debited 0.05 → 0.0398 ETH |
 | **Base Sepolia funded** | `VERIFIED` | **0.01 ETH arrived on L2.** Via `depositTransaction` on the OptimismPortal. The L2 balance is the evidence — read directly with `eth_getBalance` on `sepolia.base.org`, not inferred from the L1 receipt. A second 0.005 deposit was still deriving when last checked |
@@ -347,9 +347,11 @@ Recorded so a later reader does not assume silence means proof.
 | Not claimed | Why |
 |---|---|
 | Any testnet or mainnet execution | No on-chain program exists |
-| **Tempo balance semantics** | `eth_getBalance` returns a constant placeholder, not a balance — F12. TIP-20 `balanceOf` via `eth_call` was observed to *revert* on Moderato; only the Tempo API balances route is confirmed working. No Mitra code reads Tempo balances yet. |
+| **Tempo balance semantics** | `eth_getBalance` returns a constant placeholder, not a balance — F12. Re-verified live for F40 by comparing `owner` against `0xdead`: byte-identical. TIP-20 `balanceOf` via `eth_call` was observed to *revert* on Moderato (the mint's `eth_getCode` is the one-byte predeploy stub `0xef`); only the Tempo API balances route is confirmed working. No Mitra code reads Tempo balances yet. |
+| **Tempo native value** | Native value transfers are **refused** by the chain — `eth_sendRawTransaction` with `value: 1` returns `"value transfer not allowed"`. F40. So Tempo cannot pay in its native unit at all; settlement is TIP-20 only. |
+| **Tempo transfer fees** | A TIP-20 transfer levies a fee **in the transferred token**, separate from gas: a self-transfer of 1.000000 PathUSD emitted 0.000032 to `0xfeec…0000`. F40. Consequence for evidence: payment confirmation must come from decoded `Transfer` logs, **not** from a balance delta — a balance delta made a successful 1.000000 payment look like a failure. |
 | Production custody | Capital is a Postgres row, not an enforced account |
 | Confidential policy evaluation | `confidentialPolicy` is a type field with no enclave |
 | Settlement | `UnconfiguredAdapterError` throws by design |
 | Marketplace, A2A or x402 integration | Adapters are interfaces with a local stub |
-| Vault withdrawal safety | No withdrawal path exists, so nothing is proven either way |
+| Vault withdrawal safety | Withdrawal exists at `mitra-vault/src/lib.rs:304` and is now tested — **but a frozen vault could be drained until F41**, because the handler did its arithmetic inline and skipped the `is_frozen()` check `reserve` enforces. Fixed in `Vault::withdraw`. Still not claimed: `invoke_signed` and genuine lamport ownership, which need a chain |

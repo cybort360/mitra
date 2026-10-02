@@ -125,6 +125,41 @@ impl Vault {
         self.reconcile()
     }
 
+    /// Removes `amount` from `available` and `total` together — capital leaving
+    /// the vault.
+    ///
+    /// **Refused while frozen**, unlike `release`. The two are not symmetric and
+    /// the asymmetry is deliberate:
+    ///
+    /// - `release` moves `reserved -> available`. The capital stays inside the
+    ///   vault the whole time, and a freeze must not strand it or an emergency
+    ///   would trap in-flight obligations.
+    /// - `withdraw` moves capital *out* of the vault. A freeze exists precisely to
+    ///   stop value leaving during an incident, so permitting a withdrawal during
+    ///   one would make the switch advisory for the only operation it most needs to
+    ///   stop.
+    ///
+    /// This method did not exist until FR-VAULT-006 was tested. `withdraw` in
+    /// `lib.rs` previously did the arithmetic inline (`vault.available -= amount`),
+    /// which is why it had no state-level guard, could not be unit-tested, and
+    /// silently skipped the freeze check its sibling `reserve` enforces.
+    ///
+    /// The authority is re-derived from vault data by the caller; this method only
+    /// enforces the capital rules.
+    pub fn withdraw(&mut self, amount: u64) -> ProgramResult {
+        if self.is_frozen() {
+            return Err(err::custom(err::VAULT_FROZEN));
+        }
+        if amount > self.available {
+            return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
+        }
+        self.available = self.available.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.total = self.total.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.reconcile()
+    }
+
     /// Serializes to Anchor's on-chain layout: discriminator, then borsh fields.
     pub fn to_bytes(&self) -> [u8; VAULT_LEN] {
         let mut out = [0u8; VAULT_LEN];

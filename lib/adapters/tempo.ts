@@ -41,21 +41,48 @@ import type { EvidenceBundle } from "@/lib/evm/evidence";
  * the same failure as the asset registries ADR-0011 removed, except the invented
  * entry would have been the ONLY thing an adapter could resolve.
  *
- * The addresses below are read from Moderato itself (see PROOF_LEDGER: 1M units
- * each, confirmed from Transfer logs, not from the faucet response). They follow
- * Tempo's deterministic TIP-20 scheme, `0x20c0…` followed by an index — except
- * BetaUSD, which is `0x20c0…6a37da5c996874be` and would have been missed by any
- * pattern-matching. **Enumerate from chain; do not infer.**
+ * ## This registry was wrong TWICE, and the second error was found by reading the
+ * chain again rather than by reading the code that had corrected the first error.
  *
- * Decimals are 6 for all five, per the observed `0xe8d4a51000` = 1e12 = 1M units
- * transfer amounts.
+ * Error 1 (F39): a single fabricated entry —
+ *
+ *     USDC: 0x5dDFa3e0d2C9d0dF4D6b1C6bA9E1A0eD4C5f2B1
+ *
+ * That address does not exist, and there is no "USDC" on this chain at all.
+ *
+ * Error 2 (F40): the F39 "correction" was itself unverified, and got **4 of its 5
+ * entries wrong**. It asserted an `OUSD` at index 0 and treated
+ * `0x20c0…6a37da5c996874be` as BetaUSD. Reading `name()` on Moderato shows:
+ *
+ * | Address | Claimed in F39 | Actual `name()` on Moderato |
+ * |---|---|---|
+ * | `0x20c0…0000` | OUSD | **PathUSD** |
+ * | `0x20c0…0001` | pathUSD | **AlphaUSD** |
+ * | `0x20c0…0002` | AlphaUSD | **BetaUSD** |
+ * | `0x20c0…0003` | ThetaUSD | ThetaUSD (correct by luck) |
+ * | `0x20c0…6a37da5c996874be` | BetaUSD | **OpenUSD** |
+ *
+ * There is no OUSD on Moderato. The four indexed mints are PathUSD, AlphaUSD,
+ * BetaUSD, ThetaUSD, at indices 0–3, all with 6 decimals; indices 4–12 revert
+ * (no contract). `0x20c0…6a37da5c996874be` is a real mint named **OpenUSD** with
+ * supply 171,033.000000 — it is not in the index scheme and is not BetaUSD.
+ *
+ * **The lesson F39 missed:** replacing a fabrication with a different fabrication
+ * is not a fix. Reading a value off a node, once, is a *sample*, not a fact. A
+ * constant stays unverified until something can contradict it — a test that reads
+ * the chain, or a deliberate re-read after any upstream change. F39's registry was
+ * pinned by a test that asserted the same object it was correcting, so the second
+ * fabrication could not have been caught by anything in the repository.
+ *
+ * Enumerated with `scripts/_tempo-enumerate.mjs`. **Enumerate from chain; do not
+ * infer from a pattern, and do not infer from this comment.**
  */
 export const TEMPO_TOKENS: Record<string, { symbol: string; mint: `0x${string}`; decimals: number }> = {
-  OUSD: { symbol: "OUSD", mint: "0x20c0000000000000000000000000000000000000", decimals: 6 },
-  pathUSD: { symbol: "pathUSD", mint: "0x20c0000000000000000000000000000000000001", decimals: 6 },
-  AlphaUSD: { symbol: "AlphaUSD", mint: "0x20c0000000000000000000000000000000000002", decimals: 6 },
-  BetaUSD: { symbol: "BetaUSD", mint: "0x20c0000000000000000000006a37da5c996874be", decimals: 6 },
+  PathUSD: { symbol: "PathUSD", mint: "0x20c0000000000000000000000000000000000000", decimals: 6 },
+  AlphaUSD: { symbol: "AlphaUSD", mint: "0x20c0000000000000000000000000000000000001", decimals: 6 },
+  BetaUSD: { symbol: "BetaUSD", mint: "0x20c0000000000000000000000000000000000002", decimals: 6 },
   ThetaUSD: { symbol: "ThetaUSD", mint: "0x20c0000000000000000000000000000000000003", decimals: 6 },
+  OpenUSD: { symbol: "OpenUSD", mint: "0x20c0000000000000000000006a37da5c996874be", decimals: 6 },
 };
 
 

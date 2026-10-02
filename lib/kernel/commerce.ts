@@ -23,7 +23,7 @@
  * what consume them.
  */
 
-import type { Agreement, Deliverable, Money, Space } from "@/lib/domain/types";
+import type { Agreement, AgreementStatus, Deliverable, Money, Space } from "@/lib/domain/types";
 import { transition, nextStates, isTerminal } from "@/lib/kernel/machines";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; reason: string };
@@ -164,13 +164,81 @@ export function applyAgreementOp(
   // kernel's error surface uniform and prevents an exception escaping to a route.
   try {
     const nextAgreement = transition("agreement", agreement, to);
-    const nextSpace = op === "fund"
-      ? { ...space, committed: { ...space.committed, amount: space.committed.amount + agreement.price.amount }, version: space.version + 1 }
-      : space;
-    return pass({ space: nextSpace, agreement: nextAgreement });
+    const { space: nextSpace, released } = applyCapital(space, agreement, op);
+    // `released` is returned explicitly rather than inferred by comparing object
+    // identity. The first version used `nextSpace !== space`, which is true on
+    // `fund` as well — so it marked escrow released at the exact moment the
+    // capital was encumbered, and the guard in applyCapital then blocked the real
+    // release later. Identity comparison cannot distinguish "changed" from
+    // "changed in the way that matters".
+    return pass({
+      space: nextSpace,
+      agreement: released ? { ...nextAgreement, escrowReleased: true } : nextAgreement,
+    });
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * The states in which the price stops being encumbered and returns to the Space's
+ * available budget.
+ *
+ * Both are *settlement*: the client has paid (acceptance) or will not (refund).
+ * Everything before them — OPEN, FUNDED, EXECUTING, SUBMITTED — is still live
+ * capital the Space is on the hook for.
+ */
+const SETTLED: readonly AgreementStatus[] = ["ACCEPTED", "REFUNDED"];
+
+/**
+ * Moves `space.committed` to match the agreement's settlement state.
+ *
+ * **This function is F42's fix.** Before it, `committed` was incremented on `fund`
+ * and never decremented on anything, so `headroom = budget - committed` behaved as
+ * a *lifetime* expenditure cap rather than a concurrency limit: a Space with a 100
+ * budget could fund exactly ten 10-USDC agreements across all time, and the
+ * eleventh failed with `SPACE_BUDGET_EXCEEDED` even though all ten had been
+ * accepted and paid for. Nothing surfaced it, because every test drove a single
+ * agreement and never asked what the Space could do *next*.
+ *
+ * Two properties are load-bearing:
+ *
+ * 1. **Release happens exactly once.** `escrowReleased` guards it, because
+ *    `ACCEPTED -> REFUNDED` is a legal edge: without the flag, a chargeback would
+ *    return the budget twice and inflate headroom past the budget itself.
+ * 2. **A settlement does not decrement below zero.** The guard is not defensive
+ *    arithmetic — it is there because a double-decrement would be silent, and
+ *    silent is what this whole defect was.
+ */
+function applyCapital(
+  space: Space,
+  agreement: Agreement,
+  op: AgreementOp,
+): { space: Space; released: boolean } {
+  if (op === "fund") {
+    return {
+      space: {
+        ...space,
+        committed: { ...space.committed, amount: space.committed.amount + agreement.price.amount },
+        version: space.version + 1,
+      },
+      released: false,
+    };
+  }
+
+  const settles = SETTLED.includes(AGREEMENT_OPS[op] as AgreementStatus);
+  if (!settles) return { space, released: false };
+  if (agreement.escrowReleased) return { space, released: false }; // already returned; never twice
+  if (space.committed.amount < agreement.price.amount) return { space, released: false };
+
+  return {
+    space: {
+      ...space,
+      committed: { ...space.committed, amount: space.committed.amount - agreement.price.amount },
+      version: space.version + 1,
+    },
+    released: true,
+  };
 }
 
 /** States still reachable from here — for UI affordances and audit display. */

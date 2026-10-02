@@ -2,22 +2,30 @@ export type Chain = "solana" | "base" | "tempo";
 /**
  * Assets Mitra can name.
  *
- * **Widened for Tempo's TIP-20 tokens.** Tempo settles in OUSD / pathUSD /
- * AlphaUSD / BetaUSD / ThetaUSD and has NO USDC — the original enum could not
- * express a Tempo settlement at all, which is how `lib/adapters/tempo.ts` ended
- * up carrying a fabricated "USDC" mint to satisfy the type.
+ * **Widened for Tempo's TIP-20 tokens.** Tempo settles in PathUSD / AlphaUSD /
+ * BetaUSD / ThetaUSD / OpenUSD and has NO USDC and NO OUSD — the original enum
+ * could not express a Tempo settlement at all, which is how `lib/adapters/tempo.ts`
+ * ended up carrying a fabricated "USDC" mint to satisfy the type. F39 then widened
+ * it to include an equally fabricated "OUSD"; see F40.
  *
  * That is the real lesson: the type was the reason the invented address existed,
  * so widening it removes the pressure that produced the invention. A type that
- * cannot express the domain invites a fake to fill the gap.
+ * cannot express the domain invites a fake to fill the gap. The type must still be
+ * checked against the chain, because a widened type can be filled with a name that
+ * does not exist either — which is precisely what happened twice.
+ *
+ * Membership here says nothing about whether a symbol resolves on a given chain:
+ * `USDC` is still legal because it is real on Base and Solana. Admissibility is
+ * decided per Space from chain data (see `lib/kernel/space-assets.ts`), not by this
+ * union.
  *
  * The chain-specific addresses live in the adapters and, per ADR-0011 open item
  * 2, should ultimately be per-Space configuration resolved from chain.
  */
 export type AssetSymbol =
   | "USDC" | "USDT" | "SOL" | "ETH"
-  // Tempo TIP-20
-  | "OUSD" | "pathUSD" | "AlphaUSD" | "BetaUSD" | "ThetaUSD";
+  // Tempo TIP-20 (verified against Moderato, chain id 42431)
+  | "PathUSD" | "AlphaUSD" | "BetaUSD" | "ThetaUSD" | "OpenUSD";
 export type EvidenceLevel =
   | "DESIGN_ONLY"
   | "LOCAL_PASS"
@@ -345,6 +353,21 @@ export interface Agreement {
   escrowRef?: string;
   failurePolicy: string;
   status: AgreementStatus;
+  /**
+   * Whether this agreement's price has already been returned to the Space's
+   * available budget.
+   *
+   * Present because it is the only thing that makes PRD §13.4's "Funds must not be
+   * double-released" representable. Inferring it from `status` alone is not enough:
+   * the machine permits `ACCEPTED -> REFUNDED`, so a settled agreement has two
+   * distinct terminal-looking states and "is this still encumbered?" has no single
+   * answer without a flag. Set once, never unset, and asserted by
+   * `tests/commerce-escrow.test.ts`.
+   *
+   * Added with F42, which found that `space.committed` was incremented on `fund`
+   * and never decremented — so a Space could spend its budget exactly once over.
+   */
+  escrowReleased?: boolean;
   version: number;
 }
 

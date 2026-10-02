@@ -68,24 +68,44 @@ model.
 | FR-VAULT-005 | Execution validates the exact action digest approved by policy | §1.3 | `VERIFIED` | `tests/api-execution.test.ts` → *tampered action digest* |
 | FR-CORE-005 | Replay-sensitive actions carry nonce and expiry | §6.5 | `VERIFIED` | `*replayed nonce*` + `UNIQUE (vault_id, nonce)` survives restart |
 | — | An expired reservation cannot execute | §6.5 | `VERIFIED` | `*expired reservation*` → `RESERVATION_EXPIRED` |
-| FR-VAULT-006 | Agent authority does not imply principal withdrawal authority | §6.4 | `UNTESTED` | **No withdrawal path exists to test.** |
+| FR-VAULT-006 | Agent authority does not imply principal withdrawal authority | §6.4 | `VERIFIED` — on-chain path | `programs/mitra-vault/tests/withdraw.rs` (16 tests). Withdrawal is authority-only, re-derived from vault data, refuses reserved capital, and is refused while frozen. See F41 |
+| — | A FROZEN vault cannot be drained by withdrawal | §6.4 | `VERIFIED` | `withdraw.rs` → *a frozen vault refuses withdrawal* + *handler refuses withdrawal from a frozen vault*. This was **false before F41** |
 | FR-VAULT-008 | Confidential policy optional where not required, enforced where it is | §10 | `UNTESTED` | `confidentialPolicy` exists on the type; no enclave |
 | FR-VAULT-009 | Enclave decision bound to policy version, vault, mandate, digest, expiry, nonce | §10 | `UNTESTED` | PRD Phase 3 (Arcium) |
 
-**Reconciliation note — FR-VAULT-006.** This is the weakest link in the current
-build. The invariant holds by *absence*: there is no withdrawal route at all.
-That is true today, but it is not evidence, and the moment a withdrawal path is
-added nothing will stop it from being wrong. The PRD places this in Phase 3.
-Until then it stays `UNTESTED` — claiming `VERIFIED` would be precisely the
-"documented ≠ true" failure the Foundry exists to prevent.
+**Reconciliation note — FR-VAULT-006 (rewritten after F41).** This entry previously
+read:
+
+> The invariant holds by *absence*: there is no withdrawal route at all.
+
+**That was false.** `withdraw` has been in `programs/mitra-vault/src/lib.rs` the
+whole time; what was missing was a *test*, not a path. The note therefore described
+an absence that did not exist, which is worse than recording nothing — it
+discharged the invariant by asserting a state of the world that had never been
+checked.
+
+Testing it immediately found a real defect: `withdraw` performed its arithmetic
+inline in the handler and, unlike its sibling `reserve`, **did not check
+`is_frozen()`**. A frozen vault could be drained. The emergency control meant to
+stop value leaving did not stop the one operation it most needed to.
+
+The rules now live in `Vault::withdraw`, so they are state-level and cannot be
+bypassed by a handler doing its own arithmetic. Evidence
+(`evidence: VERIFIED, blocker: —`) rests on 16 tests, two of which drive the real
+`dispatch` with real `AccountInfo`s — because type tests alone left the entire
+suite green against a handler that bypassed the fix entirely (see F41).
+
+**Still not claimed:** `invoke_signed` and genuine lamport ownership are untested
+in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpart.
 
 ## III. Commerce and obligations
 
 | ID | Invariant | PRD | Status |
 |---|---|---|---|
-| FR-COM-001 | Commercial terms distinct from payment transport | §12 | `UNTESTED` |
-| FR-COM-002 | Escrow release depends on agreement/deliverable state | §12 | `UNTESTED` |
-| FR-COM-003 | Duplicate delivery/evaluation events cannot cause duplicate capital release | §12 | `UNTESTED` |
+| FR-COM-001 | Commercial terms distinct from payment transport | §12, §13 | `VERIFIED` | `tests/commerce-escrow.test.ts` → *terms are independent of transport*: an `Agreement` records no chain, rail or transport, and the same terms are admitted identically regardless of the Space's allowed rails |
+| FR-COM-002 | Escrow release depends on agreement/deliverable state | **§13.4** (was §12) | `VERIFIED` | `tests/commerce-escrow.test.ts` → *acceptance releases the committed amount*, *refund releases the committed amount*, *a Space can fund its budget repeatedly*. **Was false — see F42** |
+| FR-COM-003 | Duplicate delivery/evaluation events cannot cause duplicate capital release | **§13.4** (was §12) | `VERIFIED` | `tests/commerce-escrow.test.ts` → *a chargeback after acceptance does not return the budget twice*, plus replay and duplicate-evaluation cases. The chargeback test kills a guard-removal mutation; see F42 |
+| — | A Space's budget is a concurrency limit, not a lifetime cap | §13.1 | `VERIFIED` | 12 sequential accepted agreements against a 100 budget. **Was false — see F42** |
 | — | A rejected deliverable cannot trigger normal payment release | SECURITY.md | `UNTESTED` |
 | — | An agreement cannot settle against a different provider without reassignment | SECURITY.md | `UNTESTED` |
 
