@@ -12,19 +12,28 @@ record of how the work was actually sequenced.
 
 ## Status against the PRD roadmap
 
-| PRD Phase | Exit condition | Status |
-|---|---|---|
-| **0. Ground truth** | Every P0 object has a schema and state transition definition | ✅ Complete |
-| **1. Core** | Local end-to-end lifecycle passes | ✅ Complete |
-| **2. Solana kernel and vault** | **Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, settlement proof** | 🟡 Kernel done, **exit condition not met** |
-| **3. Authority and confidential policy** | Agent cannot execute an out-of-policy transaction | ⬜ Not started |
-| **4. Commerce** | Agreement → escrow → deliverable → acceptance moves funds correctly | ⬜ Not started |
-| **5. Agent ecosystem** | Discovery, identity resolution, capability manifest | ⬜ Not started |
-| **6. Recovery** | Saga recovery executes and final state is visible | ⬜ Not started |
-| **7. Clearing** | Deterministic clearing with challenge | 🟡 Local netting works; no epoch/challenge flow |
-| **8. Base** | Base adapter | ⬜ |
-| **9. Tempo** | Tempo adapter or verified test evidence | ⬜ |
-| **10. Production tooling** | A pilot can operate without reading protocol logs | 🟡 Console exists; it is a mockup |
+| PRD Phase | Exit condition | Build | Evidence | Blocker |
+|---|---|---|---|---|
+| **0. Ground truth** | Every P0 object has a schema and state transition definition | ✅ schemas, ADRs, machines | `INTEGRATED` | `PARTIAL` — Space was never frozen in `p0-registry.ts` (ADR-0010) |
+| **1. Core** | Local end-to-end lifecycle passes | ✅ full lifecycle | `E2E_VERIFIED` | — |
+| **2. Solana kernel and vault** | Real devnet vault creation, funding, reservation, guarded spend, release/refund, settlement | ✅ raw SBF program | `LIVE_DEMONSTRATED` | — |
+| **3. Authority and confidential policy** | Agent cannot execute an out-of-policy transaction | ✅ mandate, authorization, consume-on-spend, amendment, revocation, policy seam, signer abstraction | `LIVE_DEMONSTRATED` (spend leg) | `DEFERRED` — Arcium circuit COMPILES but has not run on an MPC cluster (F31 removed the false blocker; the real one is unexecuted) |
+| **4. Commerce** | Real job opened, funded, submitted, accepted, rejected, refunded | ✅ Space + lifecycle + routes | `TESTED` | `PARTIAL` — ERC-8183 not implemented; Space covers 4 of 10 §13.1 contents (ADR-0010) |
+| **5. Agent ecosystem** | External agent participates without becoming Mitra-native | ✅ MCP surface + A2A lifecycle | `TESTED` | `BLOCKED_EXTERNAL` — no live MCP transport; ERC-8004 and marketplace adapter not built |
+| **6. Recovery** | Deliberately failed job reaches a defined terminal recovery state | ✅ saga kernel, ARMED gate, three distinct outcomes | `TESTED` | `BLOCKED_EXTERNAL` — TALOS absent from disk (F24); built from §15 directly, no TALOS reuse claimed |
+| **7. Clearing** | Deterministic netting passes adversarial graph tests | ✅ epoch write path, immutability, challenges, 8 adversarial suites | `TESTED` | `PARTIAL` — no live epochs; digest is FNV-1a, not signature-grade |
+| **8. Base** | Same economic intent executes on Base through the common API | ✅ Base + Solana adapters, one interface | `TESTED` | `DEFERRED` — no transport wired; deployment is the closing phase |
+| **9. Tempo** | A Mitra obligation can target Tempo settlement through the same interface | ✅ Tempo adapter, F12/F15 encoded | `TESTED` | `DEFERRED` — no transport wired; TIP-20 mints are constants, not read from chain |
+| **10. Production tooling** | A pilot can operate without reading protocol logs | ✅ accounting + reconciliation + `/api/v1/accounting` | `TESTED` | `PARTIAL` — console still a mockup; obligations/settlements still fixture-backed; no webhooks/observability |
+
+**Reading this table.** `Build` is what exists. `Evidence` is what has been
+demonstrated, and for Phases 3–10 that is deliberately `TESTED`, not
+`LIVE_DEMONSTRATED`: the local suites are mutation-audited, but nothing in Phases
+3–10 has been deployed. Phase 2 is the only phase with on-chain proof.
+
+**Deployment is the closing phase**, deliberately. Every adapter without a
+transport throws rather than fabricating, so the code is safe to ship and the
+gap is visible rather than hidden.
 
 ## The honest position on Phase 2
 

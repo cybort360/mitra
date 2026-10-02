@@ -26,22 +26,28 @@
       "LIVE_PUBLIC_PASS",
       "PRODUCTION_PASS"
     ],
-    "claim_statuses": ["UNTESTED", "PARTIAL", "FAILED", "VERIFIED", "REGRESSED"],
+    "claim_statuses": [
+      "UNTESTED",
+      "PARTIAL",
+      "FAILED",
+      "VERIFIED",
+      "REGRESSED"
+    ],
     "onchain_program_exists": false,
     "testnet_execution_evidence": false
   },
   "prd_phases": {
-    "0_ground_truth": "complete",
-    "1_core": "complete",
-    "2_solana_kernel_and_vault": "in_progress_kernel_only_exit_condition_not_met",
-    "3_authority_and_confidential_policy": "not_started",
-    "4_commerce": "not_started",
-    "5_agent_ecosystem": "not_started",
-    "6_recovery": "not_started",
-    "7_clearing": "in_progress_local_netting_only",
-    "8_base": "not_started",
-    "9_tempo": "not_started",
-    "10_production_tooling": "in_progress_console_is_a_mockup"
+    "0_ground_truth": "integrated_partial_space_not_frozen_in_p0_registry",
+    "1_core": "e2e_verified",
+    "2_solana_kernel_and_vault": "live_demonstrated_devnet",
+    "3_authority_and_confidential_policy": "live_demonstrated_spend_leg__arcium_circuit_compiles_unexecuted",
+    "4_commerce": "tested__space_and_lifecycle_erc8183_absent",
+    "5_agent_ecosystem": "tested__mcp_surface_and_a2a_lifecycle_no_transport",
+    "6_recovery": "tested__saga_kernel_built_from_prd15_talos_absent",
+    "7_clearing": "tested__epoch_write_path_and_adversarial_suites_no_live_epoch",
+    "8_base": "tested__adapter_no_transport",
+    "9_tempo": "tested__adapter_no_transport",
+    "10_production_tooling": "tested_partial__accounting_only_console_is_a_mockup"
   },
   "control_plane_files": {
     "PRODUCT": "forge/PRODUCT.md",
@@ -52,15 +58,33 @@
     "STANDARDS": "forge/standards/"
   },
   "verification_commands": {
-    "typecheck": "npx tsc --noEmit",
-    "tests": "npx vitest run",
-    "build": "npm run build",
-    "persistence": "DATABASE_URL=... npx vitest run tests/persistence.test.ts",
-    "context_audit": "node shared-context-mcp/dist/cli.js audit --db .shared-context/context.db"
+    "typescript": "npx vitest run",
+    "typescript_typecheck": "npx tsc --noEmit",
+    "rust": "cargo test --manifest-path programs/mitra-vault/Cargo.toml",
+    "devnet_phase3": "PHASE3_AGENT=<fresh> PHASE3_RUN=<fresh> node scripts/authority-devnet.mjs",
+    "verify_phase3": "node scripts/verify-phase3.mjs <phase3-run-id>",
+    "note": "Local suites are mutation-audited per wave. Phase 3 mutations: 6/6, Phase 4: 6/6, Phase 5: 5/5, Phase 6: 6/6, Phase 7: 8/8, Phase 8: 6/6, Phase 9: 5/5, Phase 10: 5/5."
   },
   "hard_requirements": {
     "node": ">=22.5.0",
     "database": "PostgreSQL (DATABASE_URL required for persistence; no default by design)",
     "reason_for_no_default": "A silent fallback would let a run report success against developer state that does not exist in production."
+  },
+  "deployment": {
+    "status": "DEFERRED_TO_CLOSING_PHASE",
+    "rationale": "Every settlement adapter without a transport throws rather than fabricating a txHash, so the gap is visible rather than silent. Phases 3-10 are TESTED, never LIVE_DEMONSTRATED, until deployed.",
+    "on_chain_proven": [
+      "2_solana_kernel_and_vault"
+    ],
+    "queued": [
+      "phase3_arcium_mpc_cluster",
+      "phase8_base_sepolia",
+      "phase9_tempo_moderato"
+    ],
+    "known_environment_risks": [
+      "Base Sepolia was bridged but gas has not been re-verified",
+      "Tempo Moderato is funded with 5 TIP-20; mints in the adapter are constants, not read from chain (F12/F15)",
+      "Solana devnet vault has been drained to near-rent by repeated harness runs"
+    ]
   }
 }
