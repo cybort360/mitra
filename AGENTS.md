@@ -51,7 +51,7 @@ PROOF_LEDGER · FAILURES` — plus [`forge/forge.json`](forge/forge.json)
 
 Standards this plane implements are in [`forge/standards/`](forge/standards/):
 `BUILD_FOUNDRY.md` (verification and evidence discipline) and
-`Repository_Starter_Virtuous_Build_Cycle.md` (repository construction).
+`Repository-Starter-Virtuous-Build-Cycle.md` (repository construction).
 
 ## Working agreement between agents and people
 

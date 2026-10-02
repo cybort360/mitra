@@ -652,6 +652,75 @@ bugs are visible.
 tests that matter are the ones that run where the account, the runtime and the
 signer actually exist.
 
+## F20 — the evidence vocabulary in AGENTS.md conflicts with BUILD_FOUNDRY
+
+**Found** 2026-01-10, reading both standards before a phase audit.
+
+`AGENTS.md` states the permitted statuses are:
+
+> Use only these statuses: `UNTESTED · PARTIAL · FAILED · VERIFIED · REGRESSED`.
+
+`forge/standards/BUILD_FOUNDRY.md` §2 defines **fourteen**:
+
+> `PROPOSED` `IMPLEMENTED` `TESTED` `INTEGRATED` `E2E_VERIFIED` `LIVE_DEMONSTRATED`
+> `LIVE` `MONITORED` `PARTIAL` `BLOCKED_EXTERNAL` `BLOCKED_INTERNAL` `DEFERRED`
+> `REJECTED` `FUTURE`
+
+Only `PARTIAL` is common to both. Everything else is either forbidden by
+AGENTS.md or unavailable under it — most importantly `BLOCKED_EXTERNAL` and
+`BLOCKED_INTERNAL`, which are the two distinctions that make a blocker
+*actionable*, and which this repository most needs now that eight phases remain.
+
+The conflict is not academic. It already produced a concrete loss: Phase 2's
+devnet work would, under BUILD_FOUNDRY, be `LIVE_DEMONSTRATED` (executed at least
+once against a live substrate). Under AGENTS.md the nearest true value is
+`VERIFIED`, which is coarser and loses "demonstrated against a real chain". The
+distinction is the one ADR-0004 exists to protect.
+
+**Decision taken, and why.** AGENTS.md governs until an ADR supersedes it — it
+is the root directive and says so. So the ledger stays on the five-state
+vocabulary, and this record exists so the loss is *visible* rather than silent.
+Adopting the full BUILD_FOUNDRY set requires an ADR, and the honest ADR would
+have to state whether AGENTS.md is amended or the ledger carries two columns.
+Until then, this mapping is the working equivalence:
+
+| BUILD_FOUNDRY | reported here as |
+|---|---|
+| `PROPOSED` / `IMPLEMENTED` | `UNTESTED` |
+| `TESTED` / `INTEGRATED` | `PARTIAL` |
+| `E2E_VERIFIED` | `PARTIAL` — local suites only |
+| `LIVE_DEMONSTRATED` / `LIVE` | `VERIFIED` |
+| `BLOCKED_EXTERNAL` / `BLOCKED_INTERNAL` | `PARTIAL` + the blocker named in prose |
+| `REGRESSED` / `FAILED` | `FAILED` / `REGRESSED` |
+
+**Rule.** When two governing documents disagree, record the disagreement and the
+mapping rather than silently picking one. Silently picking one is how a
+repository loses a distinction without noticing it lost one.
+
+## F21 — AGENTS.md links a standards file under a name that does not exist
+
+**Found** 2026-01-10, same audit.
+
+`AGENTS.md` refers to the standards as:
+
+> `Repository_Starter_Virtuous_Build_Cycle.md`
+
+The file on disk is:
+
+```
+forge/standards/Repository-Starter-Virtuous-Build-Cycle.md
+```
+
+Hyphens, not underscores. A reader following the link exactly — which is the
+whole point of a link — gets a 404, and the document governing repository
+construction is one of the two the root directive names.
+
+Small, but it is the same class as F9 and F10: a reference that asserts
+compatibility with something nobody checked. Fixed in `AGENTS.md` to the real
+filename.
+
+**Rule.** A reference is a claim. Check that it resolves.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
@@ -659,6 +728,6 @@ signer actually exist.
 | No on-chain enforcement | Capital is a database row, not an enforced account | Stated `PARTIAL` in `INVARIANTS.md`; not counted as PRD Phase 2 progress. **Still open** — this is PRD Phase 2 work. |
 | No withdrawal path exists | `FR-VAULT-006` holds by absence, not enforcement | Recorded `UNTESTED`, not `VERIFIED`. **Still open.** |
 | Six of seven state machines unwritten | Definitions exist but nothing writes through them | Stated in `INVARIANTS.md` and `EXECUTION_PLAN.md`. **Still open** — only `reservation` has a write path. |
-| No on-chain program | Capital is a database row, not an enforced account | **Toolchain now `VERIFIED`** (ADR-0007): CLI 4.3.0, `cargo-build-sbf` compiled a real eBPF ELF, 5 SOL on devnet. The gap is now a build, not a blocker — but still no program, so still open. |
+| ~~No on-chain program~~ | ~~Capital is a database row, not an enforced account~~ | **CLOSED.** `mitra-vault` is live on devnet and all six PRD §52 clauses are verified. The remaining gap is that the *kernel* still holds capital locally in Postgres — the program proves the boundary, it does not yet hold production capital. See the phase audit |
 | Devnet airdrop reports errors while succeeding | `solana airdrop` printed rate-limit failures and still credited 5 SOL | Never treat CLI output as the claim. `phase2-readiness.mjs` reads `getBalance` from the node, so a false "failed" cannot be mistaken for unfunded, or a false success for funded. |
 | ~~Ledger is process-local on the kernel path~~ **RESOLVED** | Routes now go through `getStore()`; `InMemoryRepository` / `PostgresRepository` behind one interface | `tests/persistence.test.ts` — "routes served by postgres", incl. nonce surviving a simulated restart |

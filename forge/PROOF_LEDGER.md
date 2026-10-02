@@ -186,7 +186,12 @@ node scripts/phase2-readiness.mjs   # preconditions as commands
 | **Guarded spend — over-reserve rejected** | `VERIFIED` | `reserve(available + 1)` rejected with `0x1775` (INSUFFICIENT_AVAILABLE); vault bytes byte-identical afterwards |
 | **Guarded spend — over-withdraw rejected** | `VERIFIED` | `withdraw(available + 1)` rejected with `0x1775`; vault unchanged |
 | **Execution guard — non-authority cannot move capital** | `VERIFIED` | A freshly generated keypair's `withdraw` rejected: `Provided seeds do not result in a valid address`. Total unchanged at 124,665,993 |
-| Devnet settlement (authority withdraw) | `PARTIAL` | The last outstanding step. Correctly **rejected** by the runtime (`signer privilege escalated`) because `withdraw` used `invoke` for a PDA transfer; fixed to `invoke_signed` with the vault's seeds, rebuilt, 18/18 Rust tests pass — but the devnet **upgrade could not be paid for** (0.10 SOL left, upgrade costs ~0.43). Closing command: `solana program deploy --url devnet …` once the faucet funds the account |
+| **Devnet settlement (authority withdraw)** | `VERIFIED` | `withdraw` of 40% of available succeeded: total 2,000,000 → 1,200,000, available likewise. lamports `2,383,640 == 1,200,000 capital + 1,183,640 rent`. Fixed by moving lamports by direct mutation rather than a system-program CPI — `transfer` rejects any source carrying data ("invalid program argument"), and the vault holds 105 bytes |
+| **PRD §52 Phase 2 exit condition** | `VERIFIED` | All six clauses demonstrated on devnet by `scripts/vault-devnet.mjs`: vault creation, funding, reservation, guarded spend (over-reserve and over-withdraw both rejected, vault byte-identical), release/refund, and settlement. Run twice with identical results, so the harness is idempotent rather than a one-shot script |
+
+Program `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` · vault
+`5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T` ·
+[explorer](https://explorer.solana.com/address/5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T?cluster=devnet)
 
 | **Tempo Moderato funded** | `VERIFIED` | `node scripts/fund-tempo.mjs` — **1M each of 5 TIP-20 stablecoins** (OUSD, pathUSD, AlphaUSD, BetaUSD, ThetaUSD). Confirmed from Moderato `eth_getLogs` Transfer topics, not from the faucet response: `tempo_fundAddress` returns 5 txs, all `status 0x1`, each emitting a Transfer to our address for `0xe8d4a51000` = 1e12 = 1M units at 6dp |
 | Base Sepolia bridge configured and contracts verified | `VERIFIED` | `node scripts/bridge-sepolia.mjs` → L1StandardBridge 2,472B on Sepolia L1, L2StandardBridge 2,059B on Base Sepolia, and `messenger()` returns the documented `0xC34855F4…`. Note the guide the docs link to is archived and Goerli-pinned — see F16 |
@@ -211,6 +216,48 @@ node shared-context-mcp/dist/cli.js audit --db .shared-context/context.db
 |---|---|---|
 | The context log is tamper-evident | `VERIFIED` | 19 entries, `audit ok=true` |
 | Context survives loss of the working directory | `VERIFIED` | Rebuilt from committed sync bundles after the directory was emptied |
+
+---
+
+## Phase audit — 2026-01-10
+
+Conducted against `docs/product/MITRA_PRD.md` §52, `forge/standards/BUILD_FOUNDRY.md`
+and `Repository-Starter-Virtuous-Build-Cycle.md`. Statuses use the five-state
+vocabulary AGENTS.md mandates (see F20 for the conflict with BUILD_FOUNDRY).
+
+| Phase | Exit condition (PRD, verbatim) | Status | Blocker |
+|---|---|---|---|
+| 0 Ground truth | "Every P0 object has a schema and state transition definition." | `PARTIAL` | 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
+| 1 Core | "Purely local end-to-end lifecycle passes." | `VERIFIED` | None. 150/150 local tests; the lifecycle runs without any network |
+| 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | **`VERIFIED`** | None. All six clauses demonstrated on devnet — `scripts/vault-devnet.mjs`, idempotent across runs |
+| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `UNTESTED` | **No implementation.** Engraving, signer abstraction and the Arcium path are absent. `confidentialPolicy` is a type field with no enclave |
+| 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `UNTESTED` | **No implementation.** No Space, evaluator, deliverable or acceptance objects |
+| 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `PARTIAL` | Adapters are interfaces plus one `local` stub. No A2A, MCP server, ERC-8004, marketplace or x402 |
+| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `UNTESTED` | **No implementation.** Saga recovery is undefined in code; `EXECUTION_PLAN` records it as not started |
+| 7 Clearing | "Deterministic netting passes adversarial graph tests." | `PARTIAL` | Netting works locally; there is no epoch model, challenge process, or adversarial graph suite |
+| 8 Base | "Same economic intent executes on Base through the common API." | `UNTESTED` | **No implementation.** No ERC-8004/8183/4337/1271, no EIP-712 path |
+| 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `PARTIAL` | Balances and settlement adapter absent. The *environment* is ready and verified (Moderato funded, 2M × 5 TIP-20), but no adapter reads it |
+| 10 Tooling | "A pilot organization can operate the system without reading protocol logs." | `UNTESTED` | Console exists but is a mockup; no accounting, webhooks, or observability |
+
+### What is genuinely blocked, and on what
+
+**Nothing is blocked externally.** Every prerequisite for Phases 3–10 is in place:
+all three chains are funded and reachable, the Solana toolchain builds and deploys,
+the program is live on devnet, and the local kernel is green. The remaining eight
+phases are **unbuilt**, not blocked. Per BUILD_FOUNDRY that is
+`BLOCKED_INTERNAL` (a repository gap), not `BLOCKED_EXTERNAL` — and this
+repository does not yet have a status for that distinction (F20).
+
+### The honest sequencing finding
+
+Phase 2 is the last phase whose exit condition is satisfiable with what exists.
+Phase 3 (authority) is the next one, and it is the phase that decides whether
+Mitra's central claim is enforceable rather than merely modelled: "an `ALLOW` is
+never permission to move value" is already proven *on-chain* for the vault, but
+there is no signer abstraction or out-of-policy path to prove it against.
+
+Phases 8 and 9 are the reverse — both environments are fully funded and verified
+(F15, F16, the Moderato funding) and neither has a line of adapter code.
 
 ---
 
