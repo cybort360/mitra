@@ -87,12 +87,15 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
   // the Postgres backend had never been given any. Two backends serving different
   // worlds is worse than one serving an honest empty store, because the tests
   // looked green whenever DATABASE_URL was unset.
+  // NOTE: with DO UPDATE, `rowCount` counts only rows whose values CHANGED, so it
+  // is a statement about this call rather than about the store. The returned
+  // counts are queried with `count()` below for exactly that reason.
   let spaceCount = 0;
   for (const sp of spaces) {
     const res = await pool.query(
       `INSERT INTO mitra.spaces (space_id, owner, status, document)
        VALUES ($1,$2,$3,$4::jsonb)
-       ON CONFLICT (space_id) DO NOTHING`,
+       ON CONFLICT (space_id) DO UPDATE SET owner=EXCLUDED.owner, status=EXCLUDED.status, document=EXCLUDED.document`,
       [sp.spaceId, sp.owner, sp.status, JSON.stringify(sp)],
     );
     spaceCount += res.rowCount ?? 0;
@@ -103,7 +106,7 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
     const res = await pool.query(
       `INSERT INTO mitra.agreements (agreement_id, space_id, status, document)
        VALUES ($1,$2,$3,$4::jsonb)
-       ON CONFLICT (agreement_id) DO NOTHING`,
+       ON CONFLICT (agreement_id) DO UPDATE SET space_id=EXCLUDED.space_id, status=EXCLUDED.status, document=EXCLUDED.document`,
       [a.agreementId, a.spaceId, a.status, JSON.stringify(a)],
     );
     agreementCount += res.rowCount ?? 0;
@@ -116,28 +119,28 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
   for (const o of obligations) {
     await pool.query(
       `INSERT INTO mitra.obligations (obligation_id, debtor, creditor, asset, amount, status, document)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT (obligation_id) DO NOTHING`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT (obligation_id) DO UPDATE SET status=EXCLUDED.status, document=EXCLUDED.document`,
       [o.obligationId, o.debtor, o.creditor, o.amount.asset, o.amount.amount, o.status, JSON.stringify(o)],
     );
   }
   for (const st of settlements) {
     await pool.query(
       `INSERT INTO mitra.settlements (settlement_id, chain, asset, amount, status, document)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT (settlement_id) DO NOTHING`,
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT (settlement_id) DO UPDATE SET status=EXCLUDED.status, document=EXCLUDED.document`,
       [st.settlementId, st.chain, st.asset, st.amount, st.status, JSON.stringify(st)],
     );
   }
   for (const r of runs) {
     await pool.query(
       `INSERT INTO mitra.runs (run_id, status, document)
-       VALUES ($1,$2,$3::jsonb) ON CONFLICT (run_id) DO NOTHING`,
+       VALUES ($1,$2,$3::jsonb) ON CONFLICT (run_id) DO UPDATE SET status=EXCLUDED.status, document=EXCLUDED.document`,
       [r.runId, r.status, JSON.stringify(r)],
     );
   }
   for (const d of deliverables) {
     await pool.query(
       `INSERT INTO mitra.deliverables (deliverable_id, agreement_id, accepted, document)
-       VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT (deliverable_id) DO NOTHING`,
+       VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT (deliverable_id) DO UPDATE SET accepted=EXCLUDED.accepted, document=EXCLUDED.document`,
       [d.deliverableId, d.agreementId, d.accepted, JSON.stringify(d)],
     );
   }

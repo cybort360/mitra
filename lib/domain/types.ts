@@ -126,10 +126,75 @@ export interface Mandate {
  */
 export type SpaceStatus = "ACTIVE" | "SUSPENDED" | "CLOSED";
 
+/**
+ * How a Space takes binding decisions.
+ *
+ * **The mode is not a Mitra setting.** It is what the Space's own participants
+ * agreed to, recorded in the Space. `ADMIN` is a deliberate, small, fast
+ * arrangement — an operator acting alone, chosen by people who could have chosen
+ * quorum. `QUORUM` means no single participant can bind or freeze the others.
+ *
+ * Both are legitimate. What was illegitimate was shipping only one and letting a
+ * single `owner` freeze a context other agents were party to — see ADR-0011.
+ */
+export type SpaceGovernanceMode = "ADMIN" | "QUORUM";
+
+export interface SpaceGovernance {
+  mode: SpaceGovernanceMode;
+  /** Participants who may act alone. Only consulted in ADMIN mode. */
+  admins: string[];
+  /** Participants who may vote. In ADMIN mode this is the full membership. */
+  governors: string[];
+  /**
+   * Distinct governors required for a binding decision.
+   *
+   * In ADMIN mode this is 1 (one admin suffices). In QUORUM mode it is the
+   * quorum the participants agreed, and it MUST be at least 2 — a "quorum" of one
+   * is an admin wearing a quorum's name, and is refused rather than honoured.
+   */
+  threshold: number;
+}
+
+/**
+ * Where a Space's rules come from.
+ *
+ * Marketplaces have their own rules. Re-implementing them inside Mitra would make
+ * Mitra the authority on someone else's marketplace, which is exactly the
+ * centralisation this design exists to remove. So an external rule set is
+ * referenced **by identity and content hash**, and Mitra does not need to
+ * understand it in order to comply with it.
+ *
+ * That is what makes integration without absorption possible: Mitra binds itself
+ * to a digest, and a marketplace changing its rules becomes *detectable* rather
+ * than silently ignored.
+ */
+export interface SpaceRules {
+  source: "mitra" | "external";
+  /** For `external`: the marketplace's rule set identity, e.g. "virtuals:acp:v1". */
+  ruleSetRef?: string;
+  /**
+   * Content hash of the rule set in force. Recorded so a later change is visible.
+   * An external rule set whose digest differs from the recorded one is a CHANGE,
+   * and must be surfaced rather than silently applied.
+   */
+  digest: string;
+}
+
 export interface Space {
   spaceId: string;
-  /** Owning agent or organisation. The only party that may amend the rules. */
+  /**
+   * Nominally owning agent. **NOT an authority.**
+   *
+   * Retained because a Space usually has an initiator, but binding decisions run
+   * through `governance`, and `owner` cannot suspend, amend or close anything by
+   * itself. A single field that *looks* like an authority is how the previous
+   * design failed review.
+   */
   owner: string;
+  /** Who may bind the Space, and by what threshold. See ADR-0011. */
+  governance: SpaceGovernance;
+  /** Where this Space's rules come from. See `SpaceRules`. */
+  rules: SpaceRules;
   status: SpaceStatus;
   /** Agents permitted inside this context. Membership is the containment check. */
   participants: string[];

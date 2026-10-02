@@ -290,6 +290,11 @@ export const spaces: Space[] = [
   {
     spaceId: "space_research_1",
     owner: "agent_buyer_07",
+    // ADMIN mode: two participants, either may bind alone. Chosen BY the
+    // participants - ADR-0011 records that neither mode is the default.
+    governance: { mode: "ADMIN", admins: ["agent_buyer_07", "mech-research-backup-04"],
+      governors: ["agent_buyer_07", "mech-research-backup-04", "agent_eval_02"], threshold: 1 },
+    rules: { source: "mitra", digest: "mitra-rules-v1" },
     status: "ACTIVE",
     participants: ["agent_buyer_07", "mech-research-backup-04", "agent_eval_02"],
     allowedCapabilities: ["research", "deliverable_evaluation", "payment"],
@@ -302,6 +307,10 @@ export const spaces: Space[] = [
   {
     spaceId: "space_data_1",
     owner: "agent_data_03",
+    // QUORUM mode: two of three must agree. Neither party can freeze the other.
+    governance: { mode: "QUORUM", admins: [],
+      governors: ["agent_data_03", "x402-data-provider-8", "agent_observer_3"], threshold: 2 },
+    rules: { source: "mitra", digest: "mitra-rules-v1" },
     status: "ACTIVE",
     participants: ["agent_data_03", "x402-data-provider-8"],
     allowedCapabilities: ["market_data", "payment"],
@@ -314,6 +323,12 @@ export const spaces: Space[] = [
   {
     spaceId: "space_base_ops_1",
     owner: "agent_buyer_07",
+    // EXTERNAL rules: this Space operates under a marketplace rule set it does
+    // not own. Referenced by digest, so a change there becomes detectable rather
+    // than silently applied.
+    governance: { mode: "QUORUM", admins: [],
+      governors: ["agent_buyer_07", "erc8183:provider-3", "agent_eval_02"], threshold: 2 },
+    rules: { source: "external", ruleSetRef: "erc8183:job-lifecycle:v1", digest: "sha256:rules-8183-v1" },
     status: "ACTIVE",
     participants: ["agent_buyer_07", "erc8183:provider-3", "agent_eval_02"],
     allowedCapabilities: ["erc8183_job", "deliverable_evaluation", "payment"],

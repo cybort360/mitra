@@ -28,10 +28,18 @@ import {
 
 const USDC = (amount: number): Money => ({ asset: "USDC", amount });
 
+/** A QUORUM Space by default: two of three must agree. Neither can freeze the other. */
 function space(over: Partial<Space> = {}): Space {
   return {
     spaceId: "space_1",
     owner: "buyer_1",
+    governance: {
+      mode: "QUORUM",
+      admins: [],
+      governors: ["buyer_1", "provider_1", "eval_1"],
+      threshold: 2,
+    },
+    rules: { source: "mitra", digest: "mitra-rules-v1" },
     status: "ACTIVE",
     participants: ["buyer_1", "provider_1", "eval_1"],
     allowedCapabilities: ["research", "payment"],
