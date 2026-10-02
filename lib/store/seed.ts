@@ -338,6 +338,35 @@ export const spaces: Space[] = [
     version: 1,
     createdAt: "2026-09-30T12:00:00Z",
   },
+
+  /**
+   * **DELIBERATELY INVALID GOVERNANCE — a fixture, not a mistake.**
+   *
+   * `mode: "QUORUM"` with `threshold: 1` is an admin wearing a quorum's name, and
+   * `validateGovernance` refuses it: the Space cannot bind anything, because
+   * `decide()` rejects every action against an invalid configuration.
+   *
+   * It is here so the `spaces` route is proven to PUBLISH that fact. Mutation
+   * audit caught the route reporting `valid: governance.ok` while every seeded
+   * Space was valid, so replacing the call with `true` broke nothing. Without an
+   * invalid Space in the fixtures, "the route reports governance validity" is
+   * untested — a guard that is never observed failing is a guard that has never
+   * been exercised.
+   */
+  {
+    spaceId: "space_misconfigured_1",
+    owner: "agent_buyer_07",
+    governance: { mode: "QUORUM", admins: [], governors: ["agent_buyer_07", "agent_eval_02"], threshold: 1 },
+    rules: { source: "mitra", digest: "mitra-rules-v1" },
+    status: "ACTIVE",
+    participants: ["agent_buyer_07", "agent_eval_02"],
+    allowedCapabilities: ["payment"],
+    settlementChains: ["solana"],
+    budget: { asset: "USDC", amount: 10 },
+    committed: { asset: "USDC", amount: 0 },
+    version: 1,
+    createdAt: "2026-10-02T00:00:00Z",
+  },
 ];
 
 export const agreements: Agreement[] = [

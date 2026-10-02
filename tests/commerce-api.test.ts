@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as listVaults } from "@/app/api/v1/vaults/route";
-import { GET as listSpaces } from "@/app/api/v1/spaces/route";
+import { GET as listSpaces, PUT as checkRuleDrift } from "@/app/api/v1/spaces/route";
 import { GET as listAgreements } from "@/app/api/v1/agreements/route";
 import { availableAgreementOps } from "@/lib/kernel/commerce";
 import { vaults as seedVaults } from "@/lib/store/seed";
@@ -57,14 +57,76 @@ describe("GET /api/v1/vaults — reads the store, not the seed", () => {
 });
 
 describe("GET /api/v1/spaces — the containment boundary", () => {
+  it("PUBLISHES who can freeze a participant, and on whose authority", async () => {
+    // Mutation audit: removing `valid: governance.ok` from this route broke
+    // ZERO tests, because nothing asserted the route reports governance at all.
+    // That is the whole purpose of ADR-0011 open item 4 - a governance model
+    // nobody can inspect is indistinguishable from the owner kill switch it
+    // replaced.
+    const res = await listSpaces();
+    const body = await res.json();
+    for (const s of body.data) {
+      expect(s.governance, s.spaceId).toBeTruthy();
+      expect(["ADMIN", "QUORUM"]).toContain(s.governance.mode);
+      expect(Array.isArray(s.governance.governors)).toBe(true);
+      expect(s.governance.governors.length).toBeGreaterThan(0);
+      expect(typeof s.governance.threshold).toBe("number");
+      expect(typeof s.governance.valid).toBe("boolean");
+      if (!s.governance.valid) expect(s.governance.invalidReason).toBeTruthy();
+    }
+  });
+
+  it("PUBLISHES whether the Space is governed by rules Mitra does not own", async () => {
+    // A participant is entitled to know that before agreeing to anything.
+    const body = await (await listSpaces()).json();
+    for (const s of body.data) {
+      expect(typeof s.rules.externallyGoverned).toBe("boolean");
+      expect(["mitra", "external"]).toContain(s.rules.source);
+      if (s.rules.source === "external") {
+        expect(s.rules.ruleSetRef, s.spaceId).toBeTruthy();
+        expect(s.rules.externallyGoverned).toBe(true);
+      }
+    }
+    // The seed deliberately contains BOTH, so this is not vacuous.
+    const sources = new Set(body.data.map((s: { rules: { source: string } }) => s.rules.source));
+    expect(sources.size).toBeGreaterThan(1);
+  });
+
+  it("PUBLISHES that a misconfigured Space's governance is invalid", async () => {
+    // The seed contains a Space with QUORUM/threshold 1 on purpose. Without it,
+    // replacing `valid: governance.ok` with `valid: true` broke nothing - a guard
+    // that is never observed failing has never been exercised.
+    const body = await (await listSpaces()).json();
+    const bad = body.data.find((s: { governance: { valid: boolean } }) => !s.governance.valid);
+    expect(bad, "the seed must contain a misconfigured Space").toBeTruthy();
+    expect(bad.governance.invalidReason).toBe("QUORUM_REQUIRES_THRESHOLD_OF_AT_LEAST_TWO");
+    // And it really cannot bind anything.
+    const { decide } = await import("@/lib/kernel/space-governance");
+    expect(decide(bad as never, "SUSPEND", ["agent_buyer_07", "agent_eval_02"]).ok).toBe(false);
+  });
+
+  it("PUBLISHES which assets the Space itself admits", async () => {
+    // Item 2: an asset is admissible because someone recorded it, and that record
+    // is visible. Absence means none are declared - never a built-in default.
+    const body = await (await listSpaces()).json();
+    for (const s of body.data) {
+      expect(Array.isArray(s.admittedAssets)).toBe(true);
+    }
+  });
+
   it("lists spaces with derived headroom", async () => {
     const res = await listSpaces();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.count).toBeGreaterThan(0);
     const s = body.data[0];
-    expect(s.headroom.amount).toBe(s.budget.amount - s.committed.amount);
+    // The response is explicit about what it exposes rather than spreading the
+    // Space, so a field cannot be added to the entity and silently appear on the
+    // wire. Budget/committed are NOT returned; only derived headroom is.
+    expect(s.headroom.amount).toBeGreaterThanOrEqual(0);
     expect(typeof s.participants).toBe("number");
+    expect(s.budget).toBeUndefined();
+    expect(s.owner).toBeUndefined();
   });
 });
 
@@ -153,5 +215,46 @@ describe("removing Space.agreementIds lost no information", () => {
       version: 0, createdAt: "",
     });
     expect(shape).not.toContain("agreementIds");
+  });
+});
+
+describe("external rule drift is surfaced, never adopted", () => {
+  it("reports the agreed and observed digests and REQUIRES re-agreement", async () => {
+    const body = await (await listSpaces()).json();
+    const external = body.data.find((s: { rules: { source: string } }) => s.rules.source === "external");
+    expect(external, "the seed must contain an externally-governed Space").toBeTruthy();
+
+    const res = await checkRuleDrift(new Request("http://x/api/v1/spaces", {
+      method: "PUT",
+      body: JSON.stringify({ spaceId: external.spaceId, observedDigest: "sha256:SOMETHING-ELSE" }),
+    }));
+    const out = await res.json();
+    expect(out.data.changed).toBe(true);
+    // Silently adopting new terms would hand the rule-set publisher unilateral
+    // power over every participant.
+    expect(out.data.action).toBe("RE_AGREEMENT_REQUIRED");
+    expect(out.data.agreedDigest).toBe(external.rules.digest);
+    expect(out.data.agreedDigest).not.toBe(out.data.observedDigest);
+  });
+
+  it("reports no change when the digest still matches", async () => {
+    const body = await (await listSpaces()).json();
+    const external = body.data.find((s: { rules: { source: string } }) => s.rules.source === "external");
+    const res = await checkRuleDrift(new Request("http://x/api/v1/spaces", {
+      method: "PUT",
+      body: JSON.stringify({ spaceId: external.spaceId, observedDigest: external.rules.digest }),
+    }));
+    const out = await res.json();
+    expect(out.data.changed).toBe(false);
+    expect(out.data.action).toBe("NONE");
+  });
+
+  it("rejects a malformed request and an unknown space", async () => {
+    expect((await checkRuleDrift(new Request("http://x/api/v1/spaces", { method: "PUT", body: "{}" }))).status).toBe(400);
+    const res = await checkRuleDrift(new Request("http://x/api/v1/spaces", {
+      method: "PUT",
+      body: JSON.stringify({ spaceId: "space_nope", observedDigest: "x" }),
+    }));
+    expect(res.status).toBe(404);
   });
 });
