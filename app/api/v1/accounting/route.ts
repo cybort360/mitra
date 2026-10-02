@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/lib/store/provider";
 import { buildAccountingReport } from "@/lib/kernel/accounting";
-import { agreements, deliverables, obligations, runs, spaces, vaults } from "@/lib/store/seed";
 
 /**
  * The operator's view (PRD Phase 10): "a pilot organization can operate the
@@ -19,17 +18,22 @@ import { agreements, deliverables, obligations, runs, spaces, vaults } from "@/l
  */
 export async function GET(req: Request) {
   const asOf = new URL(req.url).searchParams.get("asOf") ?? new Date().toISOString();
-  const { backend } = await getStore();
+  // Everything comes through the store. This route previously imported six arrays
+  // from `seed.ts`, so under the in-memory backend it reported a fixed world and
+  // under Postgres it reported an empty one — a reconciliation view that looks
+  // authoritative either way. (F36)
+  const { repo, backend } = await getStore();
+  const [vaults, obligations, settlements, runs, agreements, deliverables, spaces] = await Promise.all([
+    repo.listVaults(),
+    repo.listObligations(),
+    repo.listSettlements(),
+    repo.listRuns(),
+    repo.listAgreements(),
+    repo.listDeliverables(),
+    repo.listSpaces(),
+  ]);
 
-  const report = buildAccountingReport({
-    // Vaults come from the ledger via the repository where available; the
-    // obligations and settlements below are fixtures until W6 gives them a
-    // repository surface, and this route says so rather than implying otherwise.
-    vaults,
-    obligations,
-    settlements: [],
-    asOf,
-  });
+  const report = buildAccountingReport({ vaults, obligations, settlements, asOf });
 
   const blocking = report.findings.filter((f) => f.severity === "BLOCKING");
   return NextResponse.json(
@@ -50,7 +54,6 @@ export async function GET(req: Request) {
       },
       backend,
       evidenceLevel: "LOCAL_PASS",
-      dataSource: "obligations and settlements are fixtures; see forge/PROOF_LEDGER.md",
     },
     { status: blocking.length ? 409 : 200 },
   );

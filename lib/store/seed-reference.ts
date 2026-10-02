@@ -21,11 +21,15 @@
  * real data.
  */
 import type { Pool } from "pg";
-import { agreements, mandates, reservations, spaces, vaults } from "@/lib/store/seed";
+import {
+  agreements, deliverables, mandates, obligations, reservations, runs, settlements,
+  spaces, vaults,
+} from "@/lib/store/seed";
 
 export interface SeedCounts {
   vaults: number; mandates: number; reservations: number;
   spaces: number; agreements: number;
+  obligations: number; settlements: number; runs: number; deliverables: number;
 }
 
 export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
@@ -105,11 +109,48 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
     agreementCount += res.rowCount ?? 0;
   }
 
+  // The remaining economic entities. Same reason as spaces/agreements: the
+  // Postgres backend must describe the same world as the in-memory one, or a
+  // route that goes through the store returns different data depending on
+  // whether DATABASE_URL happens to be set.
+  for (const o of obligations) {
+    await pool.query(
+      `INSERT INTO mitra.obligations (obligation_id, debtor, creditor, asset, amount, status, document)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT (obligation_id) DO NOTHING`,
+      [o.obligationId, o.debtor, o.creditor, o.amount.asset, o.amount.amount, o.status, JSON.stringify(o)],
+    );
+  }
+  for (const st of settlements) {
+    await pool.query(
+      `INSERT INTO mitra.settlements (settlement_id, chain, asset, amount, status, document)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT (settlement_id) DO NOTHING`,
+      [st.settlementId, st.chain, st.asset, st.amount, st.status, JSON.stringify(st)],
+    );
+  }
+  for (const r of runs) {
+    await pool.query(
+      `INSERT INTO mitra.runs (run_id, status, document)
+       VALUES ($1,$2,$3::jsonb) ON CONFLICT (run_id) DO NOTHING`,
+      [r.runId, r.status, JSON.stringify(r)],
+    );
+  }
+  for (const d of deliverables) {
+    await pool.query(
+      `INSERT INTO mitra.deliverables (deliverable_id, agreement_id, accepted, document)
+       VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT (deliverable_id) DO NOTHING`,
+      [d.deliverableId, d.agreementId, d.accepted, JSON.stringify(d)],
+    );
+  }
+
   return {
     vaults: vaults.length,
     mandates: mandates.length,
     reservations: reservationCount,
     spaces: spaceCount,
     agreements: agreementCount,
+    obligations: obligations.length,
+    settlements: settlements.length,
+    runs: runs.length,
+    deliverables: deliverables.length,
   };
 }

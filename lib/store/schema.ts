@@ -159,5 +159,49 @@ export const MIGRATIONS: string[] = [
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_agreement_space ON mitra.agreements(space_id);
+
+  CREATE TABLE IF NOT EXISTS mitra.obligations (
+    obligation_id TEXT PRIMARY KEY,
+    debtor       TEXT NOT NULL,
+    creditor     TEXT NOT NULL,
+    asset        TEXT NOT NULL,
+    amount       NUMERIC(20,6) NOT NULL CHECK (amount >= 0),
+    status       TEXT NOT NULL,
+    document     JSONB NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_obligation_status ON mitra.obligations(status);
+  CREATE INDEX IF NOT EXISTS idx_obligation_party ON mitra.obligations(debtor, creditor);
+
+  -- Settlements carry their own lifecycle (PENDING -> SUBMITTED -> CONFIRMED,
+  -- plus FAILED and REVERSED). CONFIRMED is the terminal success state and there
+  -- is no SETTLED member - an accounting view that assumed one would report zero
+  -- settled forever (see F37).
+  CREATE TABLE IF NOT EXISTS mitra.settlements (
+    settlement_id TEXT PRIMARY KEY,
+    chain         TEXT NOT NULL,
+    asset         TEXT NOT NULL,
+    amount        NUMERIC(20,6) NOT NULL CHECK (amount >= 0),
+    status        TEXT NOT NULL,
+    document      JSONB NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_settlement_status ON mitra.settlements(status);
+
+  CREATE TABLE IF NOT EXISTS mitra.runs (
+    run_id     TEXT PRIMARY KEY,
+    status     TEXT NOT NULL,
+    document   JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE IF NOT EXISTS mitra.deliverables (
+    deliverable_id TEXT PRIMARY KEY,
+    agreement_id   TEXT NOT NULL,
+    accepted       BOOLEAN NOT NULL DEFAULT FALSE,
+    document       JSONB NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_deliverable_agreement ON mitra.deliverables(agreement_id);
   `,
 ];

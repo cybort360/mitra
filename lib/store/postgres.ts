@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
-import type { Agreement, Authorization, Mandate, Reservation, RunEvent, Space, Vault } from "@/lib/domain/types";
+import type {
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
+  Settlement, Space, Vault,
+} from "@/lib/domain/types";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
 const num = (v: unknown): number => Number(v);
@@ -63,6 +66,26 @@ export class PostgresRepository implements EconomicRepository {
    * constrained, and the mapping prefers the document so a shape change does not
    * silently drop a field the column list does not know about.
    */
+  async listObligations(): Promise<Obligation[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.obligations ORDER BY created_at DESC");
+    return rows.map((r) => r.document as Obligation);
+  }
+
+  async listSettlements(): Promise<Settlement[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.settlements ORDER BY created_at DESC");
+    return rows.map((r) => r.document as Settlement);
+  }
+
+  async listRuns(): Promise<Run[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.runs ORDER BY created_at DESC");
+    return rows.map((r) => r.document as Run);
+  }
+
+  async listDeliverables(): Promise<Deliverable[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.deliverables ORDER BY created_at DESC");
+    return rows.map((r) => r.document as Deliverable);
+  }
+
   async listSpaces(): Promise<Space[]> {
     const { rows } = await this.pool.query(
       "SELECT document FROM mitra.spaces ORDER BY space_id",

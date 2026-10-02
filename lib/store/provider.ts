@@ -43,7 +43,8 @@
 // already enforced by the fact that only app/api routes import this module.
 import type { Pool } from "pg";
 import type {
-  Agreement, Authorization, Mandate, Reservation, RunEvent, Space, Vault,
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
+  Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import type {
   CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts,
@@ -51,7 +52,9 @@ import type {
 import { createPool } from "@/lib/store/db";
 import { PostgresRepository } from "@/lib/store/postgres";
 import { CapitalLedger, getLedger } from "@/lib/store/ledger";
-import { agreements, mandates, spaces } from "@/lib/store/seed";
+import {
+  agreements, deliverables, mandates, obligations, runs, settlements, spaces,
+} from "@/lib/store/seed";
 
 /** Which store served a request. Surfaced in API responses; never inferred. */
 export type Backend = "postgres" | "memory";
@@ -113,6 +116,31 @@ export class InMemoryRepository implements EconomicRepository {
     return agreements
       .filter((a) => !spaceId || a.spaceId === spaceId)
       .map((a) => ({ ...a }));
+  }
+
+  /**
+   * The remaining economic entities, from the reference arrays.
+   *
+   * These exist so the routes can go through the store instead of importing
+   * `seed.ts` and serving fixtures. The two backends now describe the same world
+   * (F36); before this, `/clearing`, `/obligations`, `/runs` and `/accounting`
+   * returned seed data under the in-memory backend and an EMPTY world under
+   * Postgres, and nothing detected it because `DATABASE_URL` is unset by default.
+   */
+  async listObligations(): Promise<Obligation[]> {
+    return obligations.map((o) => ({ ...o }));
+  }
+
+  async listSettlements(): Promise<Settlement[]> {
+    return settlements.map((s2) => ({ ...s2 }));
+  }
+
+  async listRuns(): Promise<Run[]> {
+    return runs.map((r) => ({ ...r }));
+  }
+
+  async listDeliverables(): Promise<Deliverable[]> {
+    return deliverables.map((d) => ({ ...d }));
   }
 
   async listReservations(vaultId?: string): Promise<Reservation[]> {

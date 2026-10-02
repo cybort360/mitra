@@ -25,7 +25,8 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agreement, Authorization, Mandate, Obligation, Reservation, RunEvent, Space, Vault,
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
+  Settlement, Space, Vault,
 } from "@/lib/domain/types";
 
 /** Counts reported by seeding. Widened when spaces and agreements were added. */
@@ -107,6 +108,20 @@ export interface EconomicRepository {
    */
   listSpaces(): Promise<Space[]>;
   listAgreements(spaceId?: string): Promise<Agreement[]>;
+
+  /**
+   * The remaining economic entities.
+   *
+   * Added because four routes were importing `seed.ts` directly and serving
+   * FIXTURES — the same defect `/api/v1/vaults` had. With `DATABASE_URL` unset
+   * they looked correct, and with it set they returned an empty world, so the
+   * two backends disagreed (F36). A store that cannot enumerate what it holds
+   * invites its callers to go around it.
+   */
+  listObligations(): Promise<Obligation[]>;
+  listSettlements(): Promise<Settlement[]>;
+  listRuns(): Promise<Run[]>;
+  listDeliverables(): Promise<Deliverable[]>;
 
   /**
    * Load the reference fixtures into this store.
