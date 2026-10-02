@@ -1029,6 +1029,57 @@ precisely the check a one-digit typo survives. The repo now has a real
 assertion to make it pass is how a real guard gets deleted; reaching for the
 fixture instead is how the suite keeps its meaning.
 
+## F30 — three harness faults that surfaced as policy refusals, and a slice that destroyed the file
+
+**Found** 2026-10-02, running Phase 3b against devnet.
+
+F27 established that a harness bug can print like a correct rejection. Phase 3b hit
+the same class **three more times**, each one costing a debugging round because
+the symptom was a program error code:
+
+| Harness fault | Printed as | Reality |
+|---|---|---|
+| Agent funded for exactly one account's rent | `0x177b` (6010 EXCEEDS_MANDATE_CEILING) | needs to also pay the transaction fee |
+| Engine funded for one permit only | `0x177b` (6010) / system program `0x1` | the engine pays rent for *every* `authorize` |
+| Mandate expired hours earlier | `0x177b` (6010) | really 6011 MANDATE_EXPIRED |
+
+The third is the instructive one. `EXCEEDS_MANDATE_CEILING` for an **expired**
+mandate is not a plausible reading, and it appeared only because nobody asked what
+the on-chain `expires_at` said. A stale mandate silently poisoned several runs,
+each reporting a *ceiling* problem that did not exist.
+
+Fixed by checking preconditions where they arise and **naming** them:
+
+| Exit | Meaning |
+|---|---|
+| 2 | cannot fund a signer — every later check would be meaningless |
+| 3 | this action's permit was already spent; steps 4-9 did not run |
+| 4 | the mandate is revoked or expired — terminal, re-run with a new agent |
+
+Exit 3 matters on its own. The harness used to `process.exit(0)` with
+"ALL CHECKS PASSED" after skipping half the run, which is F27 one level up: a
+green result manufactured by a short circuit.
+
+### The slice that ate the file
+
+While adding retry-on-429, a Python `s.replace(old, new)` used a slice anchored on
+`/** The one-line reason a transaction failed */` — but the same comment text
+appeared earlier in the file, so the replacement consumed **348 lines**,
+including every `process.exit` and steps 8-9. The script then exited 0 immediately
+after printing its header, with no error.
+
+Recovered with `git checkout scripts/authority-devnet.mjs`, then reapplied the
+retry with a precise editor replacement and a `node --check` gate. The uncommitted
+steps 8-9 were lost; they are reimplemented in Rust instead, where `amend_mandate`
+is covered against the real handler by `amend_integration.rs`.
+
+**Rules.**
+- A `str.replace` whose `old` was located by `find()` must assert the match is
+  unique. `assert old in s` catches "not found" and not "found twice".
+- After any bulk edit of a script, run it and check it *produces output*, not just
+  that it parses. A 486-line harness that prints a header and exits 0 is a silent
+  deletion, and `node --check` reported it as valid.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

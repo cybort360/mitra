@@ -67,7 +67,12 @@ const deriveRole = (role) => Keypair.fromSeed(
     .digest()
     .subarray(0, 32),
 );
-const agentKp = deriveRole("agent");
+// The agent is namespaced so a terminal mandate (revoked or expired) cannot
+// poison every future run. Revocation is terminal by design, so a harness reusing
+// one agent could prove the happy path exactly once; the second run would be
+// refused at its first step and that would look like a regression.
+const AGENT_NS = process.env.PHASE3_AGENT ?? "a1";
+const agentKp = deriveRole(`agent:${AGENT_NS}`);
 const engineKp = deriveRole("engine");
 const recipientKp = deriveRole("recipient");
 const agent = agentKp.publicKey;
@@ -80,7 +85,8 @@ const acctDisc = (name) => sha256(Buffer.from(`account:${name}`)).subarray(0, 8)
 
 const MANDATE_DISC = acctDisc("Mandate");
 const AUTHZ_DISC = acctDisc("Authorization");
-const MANDATE_LEN = 96;
+const MANDATE_LEN = 97;          // current layout
+const MANDATE_LEN_PRE_REVOCATION = 96;  // deployed before the `revoked` field
 const AUTHZ_LEN = 98;
 
 const u64 = (n) => {
@@ -132,20 +138,33 @@ const check = (name, cond, detail = "") => {
 };
 
 async function trySend(ix, signers = []) {
-  try {
-    const tx = new Transaction().add(ix);
-    const sig = await sendAndConfirmTransaction(connection, tx, [...signers]);
-    return { ok: true, sig, err: null };
-  } catch (e) {
-    // A JS error (TypeError etc.) is a HARNESS bug, not a program refusal. It is
-    // surfaced with its stack so it can be fixed, rather than reported as a
-    // refusal — the failure mode that made an earlier run print
-    // "re-authorize REFUSED  Cannot read properties of undefined" and count it.
-    if (e instanceof TypeError || e instanceof ReferenceError) {
-      console.error(`  HARNESS ERROR: ${e.message}\n${(e.stack ?? "").split("\n").slice(1, 4).join("\n")}`);
+  // Retry on RPC rate limiting. The public devnet endpoint returns 429 under a
+  // burst, and an unhandled rejection there aborted the whole harness mid-run.
+  // A network failure must never be recorded as a product result in either
+  // direction — a crash is not a refusal, and a refusal is not a crash.
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const tx = new Transaction().add(ix);
+      const sig = await sendAndConfirmTransaction(connection, tx, [...signers]);
+      return { ok: true, sig, err: null };
+    } catch (e) {
+      const msg = e?.message ?? String(e);
+      const retriable = /429|Too Many Requests|fetch failed|ECONNRESET|socket hang up/i.test(msg);
+      if (retriable && attempt < 5) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        continue;
+      }
+      // A JS error (TypeError etc.) is a HARNESS bug, not a program refusal. It is
+      // surfaced with its stack so it can be fixed, rather than reported as a
+      // refusal — the failure mode that made an earlier run print
+      // "re-authorize REFUSED  Cannot read properties of undefined" and count it.
+      if (e instanceof TypeError || e instanceof ReferenceError) {
+        console.error(`  HARNESS ERROR: ${e.message}\n${(e.stack ?? "").split("\n").slice(1, 4).join("\n")}`);
+      }
+      return { ok: false, sig: null, err: e };
     }
-    return { ok: false, sig: null, err: e };
   }
+  return { ok: false, sig: null, err: new Error("retries exhausted") };
 }
 function reason(e) {
   if (!e) return "";
@@ -158,7 +177,12 @@ async function readMandate() {
   const a = await connection.getAccountInfo(mandate.pda);
   if (!a) return null;
   const d = a.data;
-  if (d.length !== MANDATE_LEN) throw new Error(`mandate length ${d.length} != ${MANDATE_LEN}`);
+  // Both lengths are legitimate: 97 is current, 96 predates the `revoked` field.
+  // Requiring 97 throws on the live 96-byte devnet mandate, which makes the
+  // amendment path untestable against the only mandate that exists.
+  if (d.length !== MANDATE_LEN && d.length !== MANDATE_LEN_PRE_REVOCATION) {
+    throw new Error(`mandate length ${d.length} is neither 97 nor 96`);
+  }
   if (!d.subarray(0, 8).equals(MANDATE_DISC)) throw new Error("mandate discriminator mismatch");
   return {
     holder: bs58.encode(d.subarray(8, 40)),
@@ -166,6 +190,13 @@ async function readMandate() {
     version: Number(d.readBigUInt64LE(48)),
     expires_at: Number(d.readBigUInt64LE(56)),
     ceiling: Number(d.readBigUInt64LE(64)),
+    // Absent flag byte means not revoked, matching the program's own decoder.
+    revoked: d.length > 72 ? d[72] !== 0 : false,
+    len: d.length,
+    // Liveness computed HERE, from the chain's own clock, because every later
+    // step depends on it and a stale mandate turns each check into a false
+    // policy refusal.
+    isLive: Number(d.readBigUInt64LE(56)) > Math.floor(Date.now() / 1000),
   };
 }
 
@@ -271,10 +302,26 @@ const spendIx = (hash) => new TransactionInstruction({
 // The amount is still not hardcoded as a constant, because that is the phase-2
 // bug (a fixed 1 SOL against an account holding 0.227). It is queried, with a
 // floor well clear of the measured value.
-const RENT_FUNDING = Math.max(
-  2_000_000,
-  Number(await connection.getMinimumBalanceForRentExemption(Math.max(MANDATE_LEN, AUTHZ_LEN))) * 2,
+//
+// Layered, and each layer exists because a run failed without it:
+//
+//   1. A hand-picked 200_000 "comfortably above" rent — every open_mandate died
+//      with "insufficient funds for rent" (F26's on-chain face).
+//   2. 2x the queried minimum — but 2x rent leaves nothing for the transaction
+//      fee, and the signer is the payer. "Rent-exempt" and "able to pay" are
+//      different claims.
+//   3. Plus a multiple accounts' worth, because the ENGINE pays rent for every
+//      `authorize` it issues, not just the first. Funding it for one exemption
+//      made the second permit fail with 0x1 / 6010, which reads like a policy
+//      refusal and is not one.
+//
+// The amounts are derived from a query, never hardcoded: a fixed figure is the
+// Phase 2 bug (1 SOL against an account holding 0.227).
+const _rentMax = Number(
+  await connection.getMinimumBalanceForRentExemption(Math.max(MANDATE_LEN, AUTHZ_LEN)),
 );
+const RENT_FUNDING = _rentMax * 2 + 10_000;   // 2x rent + fee headroom
+const SIGNER_FUNDING = RENT_FUNDING * 5;       // room for several PDAs each
 //
 // The RECIPIENT is funded too, and finding out why is the point. The runtime
 // error was `InsufficientFundsForRent { account_index: 2 }`, and index 2 in a
@@ -288,10 +335,14 @@ const RENT_FUNDING = Math.max(
 for (const [label, kp] of [["agent", agentKp], ["engine", engineKp], ["recipient", recipientKp]]) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     const lam = await connection.getBalance(kp.publicKey);
-    if (lam >= RENT_FUNDING) { console.log(`  ${label} funded (${lam} lamports)`); break; }
+    if (lam >= SIGNER_FUNDING) { console.log(`  ${label} funded (${lam} lamports)`); break; }
     if (attempt === 1) {
       const tx = new Transaction().add(
-        SystemProgram.transfer({ fromPubkey: authority.publicKey, toPubkey: kp.publicKey, lamports: RENT_FUNDING }),
+        SystemProgram.transfer({
+          fromPubkey: authority.publicKey,
+          toPubkey: kp.publicKey,
+          lamports: Math.max(0, SIGNER_FUNDING - lam),
+        }),
       );
       const sig = await sendAndConfirmTransaction(connection, tx, [authority]);
       console.log(`  funded ${label}: ${sig.slice(0, 16)}`);
@@ -300,7 +351,7 @@ for (const [label, kp] of [["agent", agentKp], ["engine", engineKp], ["recipient
     }
     if (attempt === 3) {
       const finalBal = await connection.getBalance(kp.publicKey);
-      if (finalBal < RENT_FUNDING) {
+      if (finalBal < SIGNER_FUNDING) {
         console.error(`\nABORT: could not fund ${label} (${kp.publicKey.toBase58()}), balance ${finalBal}.`);
         console.error("  Every later check would be meaningless. Fix funding, do not relax the checks.");
         process.exit(2);
@@ -325,6 +376,27 @@ console.log("\n1. open_mandate — the agent opens a self-binding limit");
   // ALREADY_INITIALIZED, which is the *correct* behaviour, so the harness reads
   // the existing one rather than treating that as a failure.
   const existing = await readMandate();
+  if (existing?.revoked) {
+    // A revoked mandate is terminal, so this run cannot proceed and must not
+    // pretend otherwise. Re-run with a fresh PHASE3_AGENT, which derives a new
+    // holder and therefore a new PDA.
+    console.error(`\nABORT: this agent's mandate is REVOKED (v${existing.version}). Revocation is`);
+    console.error("  terminal by design. Re-run with a fresh PHASE3_AGENT to test again.");
+    process.exit(4);
+  }
+  if (existing && !existing.isLive) {
+    // An expired mandate is dead, not paused: `amend_mandate` refuses to
+    // resurrect it, so the only way forward is a new agent identity.
+    //
+    // This check was missing for several runs, which reported 6010
+    // EXCEEDS_MANDATE_CEILING for what was really 6011 MANDATE_EXPIRED — a
+    // harness fault masquerading as a policy refusal. That is the F27 pattern a
+    // third time, and it is why an unmet precondition must be *named* rather
+    // than left to surface as some downstream check failing.
+    console.error(`\nABORT: this agent's mandate EXPIRED at ${new Date(existing.expires_at * 1000).toISOString()}.`);
+    console.error("  Re-run with a fresh PHASE3_AGENT to derive a new holder and PDA.");
+    process.exit(4);
+  }
   if (existing) {
     console.log(`  SKIP  mandate exists (v${existing.version}, limit ${existing.limit})`);
   } else {

@@ -230,7 +230,47 @@ from [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md).
 | 0 Ground truth | "Every P0 object has a schema and state transition definition." | `INTEGRATED` | `BLOCKED_INTERNAL` — 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
 | 1 Core | "Purely local end-to-end lifecycle passes." | `E2E_VERIFIED` | — |
 | 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | `LIVE_DEMONSTRATED` | — |
-| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `LIVE_DEMONSTRATED` | `DEFERRED` — the mandate→authorization→consume-on-spend path is live on devnet and the replay is refused on-chain, but **mandate revision/revocation and the privacy path are unbuilt** (Phase 3b, 3d). The cited exit condition is met for the *spend* leg only |
+| 3 Authority | "Agent cannot execute an out-of-policy transaction." | `LIVE_DEMONSTRATED` | `DEFERRED` — mandate→authorization→consume-on-spend is live on devnet, replay is refused on-chain, and **amendment + terminal revocation are deployed and exercised** (the 96→97 realloc ran on a live account). Remaining: the privacy path (Arcium, Phase 3d) and any signature-abstraction layer |
+
+**Phase 3b evidence — 2026-10-02, Solana devnet.** Redeploy carrying `revoked`,
+the 97-byte layout, and the `MANDATE_REVOKED` (6014) code.
+
+- Program: `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY`
+- Agent: `Bcv2z6GRfqcU164uJCK3au5UaD33aZ1pf2vCzDt3xQTN` · Mandate: `8nB4AjZEs5t3cLfSrXr3if7ai6u5oCVLLdADye73VNZz`
+- Vault: `5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T` (98 B authz, 97 B mandate on chain)
+
+```bash
+cargo test --manifest-path programs/mitra-vault/Cargo.toml   # 72/72
+PHASE3_AGENT=fin2 PHASE3_RUN=f2 node scripts/authority-devnet.mjs   # ALL CHECKS PASSED
+```
+
+| Claim | Evidence |
+|---|---|
+| A mandate is opened and is the holder's own | `holder == agent`, v1, limit 100000 |
+| A permit is derived and version-cited | permit on chain at v1, unused |
+| A permit cannot be re-issued | `0x1779` (6009) |
+| A permit is bound to one action | `0x177d` (6013) |
+| A permit is single-use; replay moves nothing | `0x177c` (6012); vault `2383640 → 2383640` |
+
+Amendment and revocation were exercised against a **live 96-byte mandate**, so
+the `realloc` 96→97 path is proven on-chain, not merely compiled: the account grew
+mid-transaction, kept every field, and became 97 bytes with `revoked = false`.
+
+### Known harness limits (recorded, not hidden)
+
+The Phase 3b amendment/revocation *steps* are implemented in the Rust program and
+covered by `amend_integration.rs` against the real handler, but the devnet run that
+produced the table above executed steps 1–7 on a fresh agent. Steps 8–9 passed
+on-chain in an earlier run (agent `Fmzk9qaGaFV7yvjdRbYJHxd3nQqJL3LfNbS3UJfv1BCt`,
+"permit issued BEFORE the tightening is still spendable", mandate `v3 → v4`,
+len 96 → 97) but that run then revoked its agent, which is why re-running it now
+aborts by design. Both outcomes are in the transcript; neither is claimed as a
+single clean full-harness pass.
+
+The harness now aborts with a **named** exit code rather than proceeding when a
+precondition is unmet (4 = revoked/expired mandate, 3 = action already spent, 2 =
+cannot fund), because three separate harness faults had been surfacing as
+downstream policy refusals — see F30.
 
 **Phase 3 evidence — 2026-01-10, Solana devnet.**
 
