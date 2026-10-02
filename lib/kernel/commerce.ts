@@ -92,13 +92,11 @@ export function openAgreement(
 
   const agreement: Agreement = { ...draft, spaceId: space.spaceId, status: "OPEN", version: 1 };
 
-  // The Space records the agreement as soon as it exists, and the version bumps,
-  // so a change to a Space is observable in the same place its rules are read.
-  const nextSpace: Space = {
-    ...space,
-    agreementIds: [...space.agreementIds, agreement.agreementId],
-    version: space.version + 1,
-  };
+  // The Space version bumps on every change, so a change to a Space is observable
+  // in the same place its rules are read. It does NOT record which agreements it
+  // contains: `Agreement.spaceId` plus a query is the whole relationship, and a
+  // second copy here is a second thing that can drift.
+  const nextSpace: Space = { ...space, version: space.version + 1 };
   return pass({ space: nextSpace, agreement });
 }
 
@@ -160,7 +158,7 @@ export function applyAgreementOp(
   try {
     const nextAgreement = transition("agreement", agreement, to);
     const nextSpace = op === "fund"
-      ? { ...space, committed: { ...space.committed, amount: space.committed.amount + agreement.price.amount }, agreementIds: [...space.agreementIds, agreement.agreementId], version: space.version + 1 }
+      ? { ...space, committed: { ...space.committed, amount: space.committed.amount + agreement.price.amount }, version: space.version + 1 }
       : space;
     return pass({ space: nextSpace, agreement: nextAgreement });
   } catch (e) {

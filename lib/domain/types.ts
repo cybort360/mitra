@@ -122,8 +122,21 @@ export interface Space {
   allowedCapabilities: string[];
   /** Chains this Space may settle on. */
   settlementChains: string[];
-  /** Agreements opened inside this Space. */
-  agreementIds: string[];
+  /**
+   * ~~Agreements opened inside this Space.~~ REMOVED.
+   *
+   * This field duplicated `Agreement.spaceId` in the opposite direction, and only
+   * ONE of the two was enforced: the database has a real foreign key from
+   * `agreements.space_id` to `spaces.space_id`, so an agreement must name a Space
+   * that exists — but nothing ever checked this list. It could name an agreement
+   * that does not exist, one belonging to a *different* Space, or a stale entry
+   * after a move, and no test, query or constraint would notice.
+   *
+   * The reverse question is answered by query, not by a second copy:
+   * `SELECT * FROM mitra.agreements WHERE space_id = $1`. Removing the list takes
+   * the drift risk to zero rather than trading it for a consistency check nobody
+   * would remember to write.
+   */
   /** Maximum capital this Space may encumber in total — a treasury ceiling. */
   budget: Money;
   /** Encumbered so far against live agreements. */

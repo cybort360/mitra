@@ -36,7 +36,6 @@ function space(over: Partial<Space> = {}): Space {
     participants: ["buyer_1", "provider_1", "eval_1"],
     allowedCapabilities: ["research", "payment"],
     settlementChains: ["solana"],
-    agreementIds: [],
     budget: USDC(100),
     committed: USDC(0),
     version: 1,
@@ -96,7 +95,9 @@ describe("the Phase 4 exit condition, end to end", () => {
   it("a new agreement is born OPEN and bumps the Space version", () => {
     const { space: s, agreement: a } = opened();
     expect(a.status).toBe("OPEN");
-    expect(s.agreementIds).toContain("ag_1");
+    // The Space does NOT carry a list of its agreements. `Agreement.spaceId` plus
+    // a query is the relationship; a second copy would be a second thing to drift.
+    expect(a.spaceId).toBe("space_1");
     expect(s.version).toBe(2);
   });
 });

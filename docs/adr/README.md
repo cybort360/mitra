@@ -18,6 +18,7 @@ part that was hard to recover.
 | [0007](0007-phase2-builds-a-real-solana-program.md) | Phase 2 builds a real Solana program; capital is six positions (ADR-0002), not a status | Accepted |
 | [0008](0008-evidence-two-fields-union-vocabulary.md) | Evidence is two fields (`evidence` + `blocker`); the union of both vocabularies supersedes ADR-0005 | Accepted |
 | [0009](0009-mandate-semantics-reuse-engraving.md) | Mandate semantics reuse Engraving's model; refuse COTI and its status machine | Accepted |
+| [0010](0010-space-is-a-scope-not-a-container.md) | Space is a scope entities reference, not a container that stores them; `Space.agreementIds` removed as unenforced duplication | Accepted |
 
 ## Format
 

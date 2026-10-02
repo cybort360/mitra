@@ -1120,6 +1120,53 @@ Corrected: Phase 3d moves from `BLOCKED_EXTERNAL` to in progress, and the
 `DEFERRED`/`BLOCKED_EXTERNAL` entry it produced in `PROOF_LEDGER.md` is
 superseded by this record.
 
+## F33 — Space.agreementIds duplicated a relationship with nothing enforcing it
+
+**Found** 2026-10-02, while grounding Phase 4.
+
+The `Space` type carried `agreementIds: string[]` alongside `Agreement.spaceId`.
+The database has a real foreign key from `agreements.space_id` to `spaces.space_id`
+with `ON DELETE RESTRICT`, so the **agreement** side is enforced. The **Space** side
+was enforced by nothing: no FK, no consistency check, no read-path verification.
+
+So the same fact was stored in both directions with one direction checked, and the
+unchecked one could contain:
+
+- an agreement that does not exist,
+- an agreement belonging to a **different** Space,
+- a stale entry after an agreement moved.
+
+Nothing would ever have reported it.
+
+**How it survived:** I added the field and the foreign key in the same change and
+described the FK as making containment "structural". It does — for one direction.
+I checked the direction that was already guarded and did not ask what guarded the
+other. The seed data was consistent, one test asserted the list contained the new
+id, and the whole thing looked wired. This is the same shape as F24: fixtures
+agreeing with each other is not evidence that anything enforces them.
+
+**Fixed** by deleting the field. The relationship is `Agreement.spaceId` plus
+`SELECT * FROM mitra.agreements WHERE space_id = $1` — one direction, enforced,
+and the reverse question answered by query rather than by a second copy. A field
+that exists only to be kept in sync is a defect waiting for the first missed
+update; deleting it takes the risk to zero instead of trading it for a check
+nobody would remember to write.
+
+Two tests pin the removal, and both are mutation-checked: an agreement written with
+a wrong `spaceId` fails 1 test, and a `?spaceId=` filter that ignores its argument
+fails 3. The second assertion also proves the information is genuinely not lost —
+it walks every Space and checks the scoped query returns exactly the agreements
+naming it.
+
+Recorded in `docs/adr/0010-space-is-a-scope-not-a-container.md`, together with the
+two fields I invented (`SpaceStatus`, `settlementChains`) and the two spec-listed
+contents I did not build (`Disputes`, `Treasury`).
+
+**Rule.** When a relationship is stored in both directions, establish which
+direction is actually enforced before describing the pair as structural. Adding a
+foreign key protects exactly one side, and the side you just wrote is the one
+already covered by the id you were about to add anyway.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

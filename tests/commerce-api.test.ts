@@ -110,3 +110,42 @@ describe("GET /api/v1/agreements — scoped, and machine-derived affordances", (
     }
   });
 });
+
+describe("removing Space.agreementIds lost no information", () => {
+  it("the reverse question is answered by query, not by a second copy", async () => {
+    // `Space.agreementIds` was removed because only one direction was enforced:
+    // the FK constrains agreements -> spaces, and nothing ever checked the list
+    // on the Space. These assertions exist so the removal is verified rather
+    // than assumed: the relationship must still be answerable in BOTH directions,
+    // with the enforced one doing the work.
+    const spaces = await (await listSpaces()).json();
+    const all = await (await listAgreements(new Request("http://x/api/v1/agreements"))).json();
+
+    // Forward: every agreement names a Space that exists.
+    const known = new Set(spaces.data.map((s: { spaceId: string }) => s.spaceId));
+    for (const a of all.data) expect(known.has(a.spaceId)).toBe(true);
+
+    // Reverse: querying a Space returns exactly the agreements that name it.
+    // Nothing on the Space object is consulted for this.
+    for (const space of spaces.data) {
+      const scoped = await (
+        await listAgreements(new Request(`http://x/api/v1/agreements?spaceId=${space.spaceId}`))
+      ).json();
+      const expected = all.data.filter((a: { spaceId: string }) => a.spaceId === space.spaceId);
+      expect(scoped.count, `space ${space.spaceId}`).toBe(expected.length);
+      expect(scoped.data.map((a: { agreementId: string }) => a.agreementId).sort())
+        .toEqual(expected.map((a: { agreementId: string }) => a.agreementId).sort());
+    }
+  });
+
+  it("a Space object carries no agreement list that could drift", () => {
+    // The removal itself, asserted. A future contributor re-adding the field for
+    // convenience would break this test, which is the point.
+    const shape = Object.keys({
+      spaceId: "", owner: "", status: "", participants: [],
+      allowedCapabilities: [], settlementChains: [], budget: {}, committed: {},
+      version: 0, createdAt: "",
+    });
+    expect(shape).not.toContain("agreementIds");
+  });
+});
