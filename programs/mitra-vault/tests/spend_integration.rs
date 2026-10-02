@@ -67,6 +67,7 @@ fn fixture() -> Fixture {
         limit: 5_000,
         version: 3,
         expires_at: NOW + 10_000,
+        revoked: false,
         ceiling: 50_000,
     };
     let a = Authorization {

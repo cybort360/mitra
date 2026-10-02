@@ -972,6 +972,63 @@ id, making index 2 the *first instruction key*, the recipient. The error named t
 index; I spent several turns not reading it. Where a tool reports a precise
 coordinate, use it before forming a hypothesis.
 
+## F28 — the same mistake three more times: tests that named a property and did not exercise it
+
+**Found** 2026-01-10, by mutation-auditing Phase 3b. F25 was "the suite tested
+the type, not the handler". Phase 3b repeated it **three separate times** in one
+sitting, each time wearing a more convincing costume.
+
+| Test | What it asserted | What it should have asserted |
+|---|---|---|
+| `tightening_does_not_strand_an_already_issued_permit` | compared two local variables: `50_000 <= base().limit` | amend the mandate, then **SPEND** through the handler |
+| `revocation_stops_an_outstanding_permit` | amended fixture **A**, spent fixture **B** | one world: amend the same mandate the spend reads |
+| `the_version_never_resets_or_wraps` | called `saturating_add(1)` on a local — a property of the standard library | amend a mandate at `u64::MAX` through the handler |
+
+All three passed against a build where the property was absent or broken, and all
+three were caught only by deleting the relevant line and observing that nothing
+failed. The names were accurate; the code was not. A test whose *name* states the
+guarantee is the most dangerous kind, because a reviewer reads the name and moves
+on.
+
+**And the mutation it missed was a live security hole.** `spend_authorized`
+checked neither `mandate.revoked` nor anything else about the mandate's current
+state, so a revoked mandate still spent. Revocation was a flag nothing read. The
+correct test — amend, then spend — found it immediately.
+
+### The rule, now written down
+
+A test that mentions a handler is not a test of that handler. Either call the
+handler, or do not claim the property. The question to ask is not "does this test
+look like it covers the guard?" but **"which line of production code would have to
+change for this test to go red?"** If the answer is "none", it is not a test.
+
+The second failure is its own lesson: two fixtures standing in for one world.
+Amending mandate A and spending against mandate B will always succeed, and the
+failure looks exactly like a missing guard in the program. Fixtures must share the
+accounts they claim to share.
+
+## F29 — a fixture that cannot happen on chain, three times over
+
+**Found** 2026-01-10, same sitting.
+
+- `amend_mandate` tests used a random program id. The handler re-derives the PDA
+  from `[b"mandate", holder]` and refuses a mismatch, so **every case failed
+  `InvalidSeeds`** — a defect in the fixture that read as a product defect.
+- The signing holder was hardcoded to `[1u8; 32]` while the mandate's holder was
+  `[3u8; 32]`. Same refusal, same misreading.
+- `AccountInfo::new` needs a `&mut u64` per account, and a `&mut f()` temporary is
+  dropped mid-statement; three such attempts before the borrow was bound to a
+  local.
+
+The program id is now a `PROGRAM_ID_BYTES` constant with a test asserting the exact
+bytes — the first version of that test only checked "not all zeros", which is
+precisely the check a one-digit typo survives. The repo now has a real
+`program_id()` for fixtures to derive against, instead of each inventing one.
+
+**Rule.** When a test fails, the first hypothesis is the test. Loosening an
+assertion to make it pass is how a real guard gets deleted; reaching for the
+fixture instead is how the suite keeps its meaning.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

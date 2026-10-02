@@ -203,7 +203,11 @@ impl Vault {
 /// Fixed and asserted by the layout tests. A mandate's size changing silently
 /// would invalidate every stored policy, and unlike the vault there is no
 /// reconciliation invariant to catch it at load.
-pub const MANDATE_LEN: usize = 96;
+pub const MANDATE_LEN: usize = 97;
+
+/// The length a Mandate had before `revoked` existed. Still loadable — see
+/// [`Mandate::try_from_bytes`].
+pub const MANDATE_LEN_PRE_REVOCATION: usize = 96;
 
 /// A mandate is live until this timestamp. The *only* lifecycle field that is
 /// not a version or a limit.
@@ -237,6 +241,16 @@ pub struct Mandate {
     /// Cumulative ceiling the vault enforces, copied here at authorization time
     /// so the two constraints can be checked against the same instant.
     pub ceiling: u64,
+    /// Terminal. A revoked mandate can neither amend itself nor issue new
+    /// permits, and every outstanding permit stops being spendable.
+    ///
+    /// **Revocation is not a version bump.** The two answer different questions:
+    /// amending says "here is a tighter policy, existing promises stand";
+    /// revoking says "the agent is compromised, everything stops now". Folding
+    /// them together would make a routine limit reduction indistinguishable from
+    /// an emergency kill switch, and the caller would be unable to tell from the
+    /// version number which had happened.
+    pub revoked: bool,
 }
 
 impl Mandate {
@@ -249,6 +263,7 @@ impl Mandate {
         out[48..56].copy_from_slice(&self.version.to_le_bytes());
         out[56..64].copy_from_slice(&self.expires_at.to_le_bytes());
         out[64..72].copy_from_slice(&self.ceiling.to_le_bytes());
+        out[72] = u8::from(self.revoked);
         out
     }
 
@@ -257,7 +272,15 @@ impl Mandate {
     /// The version must be non-zero: version 0 is reserved for "never created",
     /// so a mandate claiming to be version 0 is not one this program wrote.
     pub fn try_from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
-        if data.len() != MANDATE_LEN {
+        // Both the current length and the pre-revocation length are accepted.
+        //
+        // A mandate created before `revoked` existed is 96 bytes with no way to
+        // carry the flag; it is read as not-revoked, which is the correct
+        // default for an account the program wrote under the older layout. The
+        // alternative — refusing 96 — would leave the deployed Phase 3 evidence
+        // unreadable, which is a worse failure than a permissive default on a
+        // layout version that provably predates the field.
+        if data.len() != MANDATE_LEN && data.len() != MANDATE_LEN_PRE_REVOCATION {
             return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
         }
         if data[0..8] != mandate_discriminator() {
@@ -277,6 +300,7 @@ impl Mandate {
         const OFF_VERSION: usize = 48;
         const OFF_EXPIRES: usize = 56;
         const OFF_CEILING: usize = 64;
+        const OFF_REVOKED: usize = 72;
         let version = read_u64(OFF_VERSION);
         if version == 0 {
             return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
@@ -288,6 +312,8 @@ impl Mandate {
             version,
             expires_at: read_u64(OFF_EXPIRES),
             ceiling: read_u64(OFF_CEILING),
+            // A 96-byte account has no flag byte; absent means not revoked.
+            revoked: data.get(OFF_REVOKED).is_some_and(|&b| b != 0),
         })
     }
 

@@ -10,26 +10,68 @@
 //!     test failure rather than as a comment that has gone stale.
 
 use mitra_vault::anchor_parity::{err, mandate_discriminator, mandate_seeds, MANDATE_SEED};
-use mitra_vault::state::{Mandate, MANDATE_LEN};
+use mitra_vault::state::{Mandate, MANDATE_LEN, MANDATE_LEN_PRE_REVOCATION};
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
+/// A FIXED holder, not `new_unique()`.
+///
+/// The first version generated a random holder per call, so a test that compared
+/// `Mandate::try_from_bytes(&bytes)` against a second `sample()` compared two
+/// different random keys and failed for a reason that had nothing to do with the
+/// field under test. Deterministic fixtures make a failure mean what it says.
 fn sample() -> Mandate {
     Mandate {
-        holder: Pubkey::new_unique(),
+        holder: Pubkey::new_from_array([7u8; 32]),
         limit: 5_000,
         version: 3,
         expires_at: 1_700_000_000,
+        revoked: false,
         ceiling: 50_000,
     }
 }
 
 #[test]
-fn mandate_serializes_to_exactly_96_bytes() {
-    // 8 discriminator + 32 holder + 4 * 8 fields. If this fails, every mandate
-    // already on chain is being reinterpreted — a migration, not a bug fix.
+fn mandate_serializes_to_exactly_97_bytes() {
+    // 8 discriminator + 32 holder + 4 * 8 fields + 1 revoked.
+    //
+    // This was 96 until revocation was added, and the assertion was updated
+    // rather than the field dropped, because the 96-byte account deployed during
+    // Phase 3 is the subject of a PROOF_LEDGER claim: changing the length without
+    // the compatibility path in `try_from_bytes` would have made that evidence
+    // unreadable.
     assert_eq!(sample().to_bytes().len(), MANDATE_LEN);
-    assert_eq!(MANDATE_LEN, 96);
+    assert_eq!(MANDATE_LEN, 97);
+}
+
+/// The 96-byte account deployed before `revoked` existed must still load, and
+/// must read as NOT revoked. This is the compatibility guarantee, asserted
+/// directly rather than assumed: if it broke, the Phase 3 devnet evidence would
+/// silently stop being verifiable.
+#[test]
+fn a_pre_revocation_mandate_still_loads_as_not_revoked() {
+    // `to_bytes` returns a fixed-size array, which has no `truncate`; the legacy
+    // buffer is built by slicing to the old length.
+    let full = sample().to_bytes();
+    let mut legacy = full.to_vec();
+    legacy.truncate(MANDATE_LEN_PRE_REVOCATION); // drop the revoked byte
+    assert_eq!(legacy.len(), 96);
+
+    let loaded = Mandate::try_from_bytes(&legacy).expect("a 96-byte mandate must still load");
+    assert_eq!(loaded, sample(), "every other field must round-trip unchanged");
+    assert_eq!(loaded.revoked, false, "absent flag must mean not revoked");
+}
+
+/// And the reverse: a 97-byte mandate with the flag SET must not be mistaken for
+/// an unrevoked one. A permissive "absent means false" default is only safe if
+/// the present-and-true case still reads as revoked.
+#[test]
+fn revocation_is_read_from_the_flag_byte() {
+    let m = Mandate { revoked: true, ..sample() };
+    let bytes = m.to_bytes();
+    assert_eq!(bytes[72], 1, "revoked is byte 72");
+    let loaded = Mandate::try_from_bytes(&bytes).unwrap();
+    assert!(loaded.revoked);
 }
 
 #[test]
@@ -74,7 +116,14 @@ fn mandate_pda_seed_is_not_the_vault_seed() {
 #[test]
 fn a_truncated_mandate_is_refused() {
     let full = sample().to_bytes();
-    for len in [0usize, 1, 71, MANDATE_LEN - 1] {
+    // **Two lengths are valid**: 97 (current) and 96 (pre-revocation), so both
+    // are excluded from this sweep and each is asserted positively elsewhere. A
+    // sweep that included 96 would contradict
+    // `a_pre_revocation_mandate_still_loads_as_not_revoked`, and two tests
+    // disagreeing about the same input is how a real regression hides.
+    // 96 is omitted for the reason above. The listed lengths are all strictly
+    // below the shortest valid layout, so none of them can be accepted.
+    for len in [0usize, 1, 8, 40, 64, 71, 95] {
         assert!(
             Mandate::try_from_bytes(&full[..len]).is_err(),
             "a {len}-byte buffer must not deserialize as a mandate"

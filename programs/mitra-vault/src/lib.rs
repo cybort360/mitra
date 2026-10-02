@@ -72,6 +72,7 @@ pub fn dispatch(
         ix::OPEN_MANDATE => open_mandate(program_id, accounts, args),
         ix::AUTHORIZE => authorize(program_id, accounts, args, now),
         ix::SPEND_AUTHORIZED => spend_authorized(program_id, accounts, args, now),
+        ix::AMEND_MANDATE => amend_mandate(program_id, accounts, args, now),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -613,6 +614,7 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
         version: 1,
         expires_at,
         ceiling,
+        revoked: false,
     };
     mandate_account.try_borrow_mut_data()?.copy_from_slice(&mandate.to_bytes());
     msg!("mandate v1 opened for {}", holder.key);
@@ -825,9 +827,46 @@ fn spend_authorized(
     if amount == 0 {
         return Err(ProgramError::InvalidArgument);
     }
-    if amount > mandate.limit {
-        return Err(err::custom(err::EXCEEDS_MANDATE_CEILING));
+    // **The current `mandate.limit` is deliberately NOT re-checked here.**
+    //
+    // The first version did check it, and that was a live-lock: a holder who
+    // tightened a 100_000 limit to 10_000 would immediately strand every
+    // outstanding permit issued under the old limit — the agent holds a valid
+    // permit it can no longer spend and cannot obtain a replacement for, until
+    // the permit expires. The principal's own tightening decision would silently
+    // break its agents.
+    //
+    // The permit's amount was already checked against the limit *at the moment it
+    // was issued*, against the version it cites. Re-applying today's limit at
+    // spend time would also make an issued permit's validity depend on when it is
+    // spent rather than on the policy that authorized it, which is precisely the
+    // retroactive tightening ADR-0009 exists to prevent. A permit is a promise
+    // made under a named policy; it does not evaporate because the policy moved
+    // on.
+    //
+    // **Revocation, however, IS re-checked here**, and it is the one policy
+    // change that reaches backwards.
+    //
+    // Amending and revoking are deliberately asymmetric, and this is the line
+    // where they diverge:
+    //
+    //   amend  — a new policy governs *future* permits. A permit already issued
+    //            is a promise made under the version it cites, and it stands.
+    //            Re-checking today's limit would let a principal's routine
+    //            tightening strand its agents mid-flight.
+    //   revoke — "this agent is compromised". That must stop value *now*, so it
+    //            reaches back and kills outstanding permits too.
+    //
+    // The first version of this handler checked neither, which is exactly the
+    // gap: a revoked mandate was a flag nothing read. A test caught it only
+    // because it amended and then SPENT, rather than amending and inspecting two
+    // variables.
+    if mandate.revoked {
+        return Err(err::custom(err::MANDATE_REVOKED));
     }
+
+    // What *is* still enforced is liveness, plus the vault's own `available`
+    // check.
 
     // ── consume FIRST ────────────────────────────────────────────────────────
     authorization.consumed = true;
@@ -856,4 +895,167 @@ fn spend_authorized(
 
     msg!("spent {} under mandate v{} action {}", amount, authorization.mandate_version, action_hash[0]);
     Ok(())
+}
+
+/// `amend_mandate(limit, ceiling, expires_at, revoke)` — Phase 3b.
+///
+/// Only the **holder** may amend, and only by signing. There is no admin path and
+/// no governance call: a mandate is a self-binding limit, so the party it binds
+/// is the only party that may move it. Adding an administrative override would
+/// reintroduce exactly the "an external party can widen my authority" hole that
+/// `open_mandate` refuses.
+///
+/// `revoke` is a flag rather than a separate instruction so that revoking and
+/// amending are the same audited code path. A distinct `revoke_mandate` would be
+/// a second place where the version bump and the signature check could be got
+/// wrong differently.
+///
+/// **Amending does not invalidate outstanding permits** — see the note in
+/// `spend_authorized`. **Revoking does.** That asymmetry is the point: a routine
+/// tightening must not strand in-flight promises, while a compromise must stop
+/// everything at once.
+fn amend_mandate(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    args: &[u8],
+    now: u64,
+) -> ProgramResult {
+    // `revoke` is the high bit of the last argument byte, kept in a spare argument
+    // slot rather than a fifth u64 so the instruction stays 32 bytes wide.
+    let limit = read_amount(&args[0..8])?;
+    let ceiling = read_amount(&args[8..16])?;
+    let expires_at = read_amount(&args[16..24])?;
+    let revoke = args.get(24).is_some_and(|&b| b != 0);
+
+    let mut it = accounts.iter();
+    let holder = next_account_info(&mut it)?;
+    let mandate_account = next_account_info(&mut it)?;
+
+    if !holder.is_signer {
+        return Err(err::custom(err::NOT_SIGNER));
+    }
+    if mandate_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    // Re-derive rather than trusting the stored bump: the amendment is written to
+    // a policy object, and writing to the wrong account is unrecoverable.
+    let (expected, _) = Pubkey::try_find_program_address(
+        &anchor_parity::mandate_seeds(holder.key),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if expected != *mandate_account.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    let mut mandate = state::Mandate::try_from_bytes(&mandate_account.try_borrow_data()?)?;
+
+    // A revoked mandate is terminal. It cannot be un-revoked, and it cannot be
+    // amended into a different policy — otherwise "revoked" would be a pause
+    // button, and a caller reading the flag would have no way to know whether the
+    // holder had since resumed.
+    if mandate.revoked {
+        return Err(err::custom(err::MANDATE_REVOKED));
+    }
+    // Refusing to amend an expired mandate prevents the holder from resurrecting a
+    // policy after its own deadline. An expired mandate is dead, not paused.
+    if !mandate.is_live_at(now) {
+        return Err(err::custom(err::MANDATE_EXPIRED));
+    }
+    // A revocation must be possible even as the mandate approaches expiry, or
+    // there is a window in which a compromised agent cannot be stopped. The
+    // expiry check above is therefore skipped for a pure revoke.
+    if !revoke {
+        if limit == 0 || ceiling == 0 {
+            return Err(ProgramError::InvalidArgument);
+        }
+        if ceiling < limit {
+            return Err(err::custom(err::EXCEEDS_MANDATE_CEILING));
+        }
+        if expires_at <= now {
+            return Err(err::custom(err::MANDATE_EXPIRED));
+        }
+    }
+
+    // Saturating, not wrapping. A version is evidence, and a wrapped counter
+    // would eventually let a permit cite a version that already existed under a
+    // different policy — the precise confusion the version exists to prevent.
+    mandate.version = mandate.version.saturating_add(1);
+    mandate.revoked = revoke;
+    if !revoke {
+        mandate.limit = limit;
+        mandate.ceiling = ceiling;
+        mandate.expires_at = expires_at;
+    }
+
+    // Growing a 96-byte account to 97 in place. `copy_from_slice` into a shorter
+    // buffer panics and aborts the transaction, and the in-process tests cannot
+    // see that because the buffer is whatever the test allocated. The resize is
+    // therefore explicit and checked.
+    // Growing a 96-byte account to 97 in place.
+    //
+    // `realloc` must be called with the data NOT borrowed, and it reallocates the
+    // account's buffer, so the borrow is released first. Writing 97 bytes into the
+    // 96-byte view a `try_borrow_mut_data` hands back would panic and abort the
+    // whole transaction — and no in-process test can catch that, because the
+    // buffer is whatever the test allocated, not a real chain account.
+    if mandate_account.data_len() < state::MANDATE_LEN {
+        mandate_account.realloc(state::MANDATE_LEN, true)?;
+    }
+    let mut data = mandate_account.try_borrow_mut_data()?;
+    data.copy_from_slice(&mandate.to_bytes());
+
+    msg!(
+        "mandate v{} {} (limit {})",
+        mandate.version,
+        if mandate.revoked { "REVOKED" } else { "amended" },
+        mandate.limit
+    );
+    Ok(())
+}
+
+/// The deployed program id, as a compile-time byte array.
+///
+/// Exposed for tests that must derive the *real* PDA rather than an arbitrary
+/// one: `amend_mandate` re-derives the mandate address from `[b"mandate",
+/// holder]` and refuses a mismatch, so a fixture built with a random program id
+/// cannot exercise it — the first `amend_integration` failed every case with
+/// `InvalidSeeds` for exactly that reason.
+///
+/// Stored as bytes rather than a base58 string, with no decoder. A hand-rolled
+/// base58 decoder is a hundred lines of carry arithmetic with no test other than
+/// "did it happen to produce the right key", and the only consumer of the string
+/// form is a test. The devnet harness derives the id from the keypair file in
+/// JavaScript, where the real library lives.
+pub const PROGRAM_ID_BYTES: [u8; 32] = [
+    233, 253, 192, 42, 166, 75, 209, 253, 76, 95, 140, 134, 18, 10, 167,
+    117, 151, 154, 72, 202, 24, 101, 30, 88, 39, 147, 201, 218, 245, 86,
+    198, 227,
+];
+
+/// [`PROGRAM_ID_BYTES`] as a `Pubkey`, for tests.
+pub fn program_id() -> Pubkey {
+    Pubkey::new_from_array(PROGRAM_ID_BYTES)
+}
+
+#[cfg(test)]
+mod program_id_tests {
+    use super::*;
+
+    /// A typo in `PROGRAM_ID_BYTES` would make every PDA in the suite derive a
+    /// valid-but-wrong address, and the suite would pass while testing nothing
+    /// real. The first version of this test only checked "not all zeros", which
+    /// is exactly the check that would have survived a one-digit typo.
+    #[test]
+    fn the_constant_is_the_deployed_program_id() {
+        assert_eq!(
+            PROGRAM_ID_BYTES,
+            [
+                233, 253, 192, 42, 166, 75, 209, 253, 76, 95, 140, 134, 18, 10, 167,
+                117, 151, 154, 72, 202, 24, 101, 30, 88, 39, 147, 201, 218, 245, 86,
+                198, 227,
+            ],
+            "the deployed program id drifted from the constant"
+        );
+    }
 }

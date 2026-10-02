@@ -70,6 +70,8 @@ pub mod ix {
     pub const AUTHORIZE: [u8; 8] = [173, 193, 102, 210, 219, 137, 113, 120];
     /// sha256("global:spend_authorized")[..8]
     pub const SPEND_AUTHORIZED: [u8; 8] = [203, 103, 151, 6, 82, 80, 185, 117];
+    /// sha256("global:amend_mandate")[..8]
+    pub const AMEND_MANDATE: [u8; 8] = [227, 125, 176, 179, 135, 233, 185, 140];
 }
 
 /// Error codes. Anchor reserves 0–999 for its framework and assigns user errors
@@ -107,6 +109,9 @@ pub mod err {
     pub const EXCEEDS_MANDATE_CEILING: u32 = 6010;
     /// 6011 — the mandate has expired (`expires_at` in the past).
     pub const MANDATE_EXPIRED: u32 = 6011;
+    /// 6014 — the mandate has been revoked, so it can no longer amend itself or
+    /// issue new permits.
+    pub const MANDATE_REVOKED: u32 = 6014;
     /// 6012 — the supplied authorization has already been consumed.
     ///
     /// A *used* authorization is a different failure from an *invalid* one, and
