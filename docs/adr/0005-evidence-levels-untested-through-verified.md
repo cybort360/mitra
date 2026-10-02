@@ -1,6 +1,16 @@
 # 0005. Five evidence levels; PARTIAL is not VERIFIED
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0008](0008-evidence-two-fields-union-vocabulary.md)
+
+> **Superseded 2026-01-10.** This record's five-level vocabulary is retained
+> unchanged, per the immutability rule that an ADR is not edited in place. ADR-0008
+> replaces it with two fields and the union of this vocabulary with
+> BUILD_FOUNDRY §2, because the five levels cannot express `LIVE_DEMONSTRATED` —
+> the claim Phase 2 actually earned — and have no word for `REGRESSED`, this
+> repository's most common failure class.
+>
+> The reasoning below still stands and is carried forward; only the vocabulary is
+> replaced.
 
 ## Context
 
