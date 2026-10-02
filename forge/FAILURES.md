@@ -1214,6 +1214,55 @@ for an unknown route, CONTAINED collapsed into RECOVERED, multi-step saga allowe
 with no route, recovery triggered on the first step rather than the last, arming
 with an unexecutable route.
 
+## F36 — Postgres had never run, and the two backends served different worlds
+
+**Found** 2026-10-02, running the suite with `DATABASE_URL` set for the first time.
+
+The persistence tests had been gated on an unset `DATABASE_URL` for the entire
+life of the repository — 15 tests, never executed, `PostgresRepository` written,
+typechecked against the interface, and **run zero times**. Its own file said
+`Evidence level for persistence remains DESIGN_ONLY`, which was honest and
+therefore easy to leave alone.
+
+Postgres 16 was installed and *running* the whole time, and the role and database
+already existed. The environment had been prepared and never wired up.
+
+### What running it actually found
+
+**1. `emergency_freeze` had no test at all.** Mutation audit removed BOTH guards —
+the JS check and the `emergency_freeze = FALSE` SQL predicate — and broke **zero**
+tests, because the fixture only ever inserted `emergency_freeze = FALSE` and
+nothing ever froze a vault. A capital-protection control whose only coverage was a
+`grep` in review. Three tests added; both guards removed now fails 2.
+
+**2. `FOR UPDATE` does not do what its comment claimed.** Removing the row lock
+also broke nothing — because the guarantee comes from the conditional UPDATE
+(`WHERE available >= $1`): under READ COMMITTED a losing racer's UPDATE matches
+zero rows and it rollbacks. The lock reduces wasted work between racers. The
+comment claiming it was the mechanism has been corrected rather than left to
+mislead the next reader.
+
+**3. The two backends disagreed, and only the database revealed it.** With
+`DATABASE_URL` set, three commerce tests failed with *"expected 0 to be greater
+than 0"*: `seedReferenceData` persisted vaults, mandates and reservations but
+**not spaces or agreements**. The in-memory backend serves those from `seed.ts`;
+the Postgres backend had never been given any. So the suite was green whenever
+`DATABASE_URL` was unset and broken whenever it was set — and unset is the default.
+
+Fixed by persisting spaces and agreements, spaces first because
+`agreements.space_id` references `spaces.space_id`. `InMemoryRepository` now
+reports its real counts rather than zeros, so the two backends describe the same
+world.
+
+**The generalisable failure.** A gated test is not a slow test, it is an absent
+one that reports itself as present — it appears in the file, it appears in the
+count, and it never runs. The evidence discipline this repository applies to
+on-chain claims was never applied to the storage layer.
+
+**Rule.** If a test is gated on an environment variable, something must assert
+that the gate has been opened at least once. `15 skipped` in a passing suite is a
+claim that was never gathered, wearing the same green as the ones that were.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

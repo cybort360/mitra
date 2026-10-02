@@ -21,9 +21,14 @@
  * real data.
  */
 import type { Pool } from "pg";
-import { reservations, vaults, mandates } from "@/lib/store/seed";
+import { agreements, mandates, reservations, spaces, vaults } from "@/lib/store/seed";
 
-export async function seedReferenceData(pool: Pool): Promise<{ vaults: number; mandates: number; reservations: number }> {
+export interface SeedCounts {
+  vaults: number; mandates: number; reservations: number;
+  spaces: number; agreements: number;
+}
+
+export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
   for (const v of vaults) {
     await pool.query(
       `INSERT INTO mitra.vaults
@@ -68,5 +73,43 @@ export async function seedReferenceData(pool: Pool): Promise<{ vaults: number; m
     reservationCount += res.rowCount ?? 0;
   }
 
-  return { vaults: vaults.length, mandates: mandates.length, reservations: reservationCount };
+  // Spaces MUST be persisted before agreements: `mitra.agreements.space_id`
+  // references `mitra.spaces(space_id)`, so inserting an agreement first would
+  // fail the foreign key. The order here is a real constraint, not a style choice.
+  //
+  // **Why this block exists:** running the suite with DATABASE_URL set selected
+  // the Postgres backend and three commerce tests failed with "expected 0 to be
+  // greater than 0" — the in-memory backend serves fixtures from seed.ts while
+  // the Postgres backend had never been given any. Two backends serving different
+  // worlds is worse than one serving an honest empty store, because the tests
+  // looked green whenever DATABASE_URL was unset.
+  let spaceCount = 0;
+  for (const sp of spaces) {
+    const res = await pool.query(
+      `INSERT INTO mitra.spaces (space_id, owner, status, document)
+       VALUES ($1,$2,$3,$4::jsonb)
+       ON CONFLICT (space_id) DO NOTHING`,
+      [sp.spaceId, sp.owner, sp.status, JSON.stringify(sp)],
+    );
+    spaceCount += res.rowCount ?? 0;
+  }
+
+  let agreementCount = 0;
+  for (const a of agreements) {
+    const res = await pool.query(
+      `INSERT INTO mitra.agreements (agreement_id, space_id, status, document)
+       VALUES ($1,$2,$3,$4::jsonb)
+       ON CONFLICT (agreement_id) DO NOTHING`,
+      [a.agreementId, a.spaceId, a.status, JSON.stringify(a)],
+    );
+    agreementCount += res.rowCount ?? 0;
+  }
+
+  return {
+    vaults: vaults.length,
+    mandates: mandates.length,
+    reservations: reservationCount,
+    spaces: spaceCount,
+    agreements: agreementCount,
+  };
 }

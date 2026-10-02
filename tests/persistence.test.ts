@@ -176,6 +176,37 @@ describeDb("postgres repository (SECURITY.md invariants 11, 12, 13)", () => {
     }
   });
 
+  it("a FROZEN vault refuses every reservation, however much capital it holds", async () => {
+    // **This test did not exist until mutation audit.** Removing BOTH
+    // emergency_freeze guards - the JS check and the SQL predicate - broke zero
+    // tests, because the fixture always inserted `emergency_freeze = FALSE` and
+    // nothing ever froze a vault. A capital-protection control with no coverage is
+    // a control that only exists in review.
+    await pool.query("UPDATE mitra.vaults SET emergency_freeze = TRUE WHERE vault_id = 'v1'");
+    const r = await reserve("r_frozen", 1);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("VAULT_FROZEN");
+
+    // And the capital must be untouched, not partially moved.
+    const { rows } = await pool.query("SELECT available, reserved FROM mitra.vaults WHERE vault_id='v1'");
+    expect(Number(rows[0].available)).toBe(1000);
+    expect(Number(rows[0].reserved)).toBe(0);
+  });
+
+  it("a frozen vault refuses even a reservation for zero capital movement context", async () => {
+    // Belt and braces: the refusal must not depend on the amount.
+    await pool.query("UPDATE mitra.vaults SET emergency_freeze = TRUE WHERE vault_id = 'v1'");
+    const many = await Promise.all([reserve("a", 1), reserve("b", 500), reserve("c", 999)]);
+    expect(many.every((m) => !m.ok)).toBe(true);
+  });
+
+  it("a NEW reservation is refused while frozen and works again after thaw", async () => {
+    await pool.query("UPDATE mitra.vaults SET emergency_freeze = TRUE WHERE vault_id = 'v1'");
+    expect((await reserve("r1", 10)).ok).toBe(false);
+    await pool.query("UPDATE mitra.vaults SET emergency_freeze = FALSE WHERE vault_id = 'v1'");
+    expect((await reserve("r1", 10)).ok).toBe(true);
+  });
+
   it("SECURITY.md 12: a reservation belongs to one vault and one intent", async () => {
     // The intent is recorded on the row, so a reservation cannot be silently
     // re-pointed at a different intent or vault.

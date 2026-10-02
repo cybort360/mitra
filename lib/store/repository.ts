@@ -28,6 +28,12 @@ import type {
   Agreement, Authorization, Mandate, Obligation, Reservation, RunEvent, Space, Vault,
 } from "@/lib/domain/types";
 
+/** Counts reported by seeding. Widened when spaces and agreements were added. */
+export interface SeedCounts {
+  vaults: number; mandates: number; reservations: number;
+  spaces: number; agreements: number;
+}
+
 export interface ReservationInput {
   reservationId: string;
   runId: string;
@@ -109,7 +115,7 @@ export interface EconomicRepository {
    * would be indistinguishable from one holding real data. Production rows come
    * from the PRD Phase 2 vault controller, which does not exist yet.
    */
-  seedReferenceData(): Promise<{ vaults: number; mandates: number; reservations: number }>;
+  seedReferenceData(): Promise<SeedCounts>;
   listReservations(vaultId?: string): Promise<Reservation[]>;
   getReservation(reservationId: string): Promise<Reservation | null>;
 

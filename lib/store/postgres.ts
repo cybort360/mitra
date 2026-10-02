@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type { Agreement, Authorization, Mandate, Reservation, RunEvent, Space, Vault } from "@/lib/domain/types";
-import type { CapitalResult, EconomicRepository, ReserveCapitalInput } from "./repository";
+import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
 const num = (v: unknown): number => Number(v);
 
@@ -96,6 +96,13 @@ export class PostgresRepository implements EconomicRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      // `FOR UPDATE` is defence in depth, NOT the guarantee. Mutation audit
+      // removed it and every test still passed, because the guarantee actually
+      // comes from the conditional UPDATE below (`WHERE available >= $1`): under
+      // READ COMMITTED a losing racer's UPDATE matches zero rows and it
+      // rollbacks. The row lock reduces wasted work between racers; it is not what
+      // makes SECURITY.md invariant 13 hold, and a comment claiming otherwise
+      // would credit it with work it does not do.
       const { rows } = await client.query("SELECT * FROM mitra.vaults WHERE vault_id = $1 FOR UPDATE", [input.vaultId]);
       const vault = rows[0] ? rowToVault(rows[0]) : null;
       if (!vault) { await client.query("ROLLBACK"); return { ok: false, reason: `VAULT_NOT_FOUND: ${input.vaultId}` }; }
@@ -206,7 +213,7 @@ export class PostgresRepository implements EconomicRepository {
     return reservation;
   }
 
-  async seedReferenceData(): Promise<{ vaults: number; mandates: number; reservations: number }> {
+  async seedReferenceData(): Promise<SeedCounts> {
     const { seedReferenceData } = await import("@/lib/store/seed-reference");
     return seedReferenceData(this.pool);
   }

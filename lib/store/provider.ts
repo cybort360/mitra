@@ -46,7 +46,7 @@ import type {
   Agreement, Authorization, Mandate, Reservation, RunEvent, Space, Vault,
 } from "@/lib/domain/types";
 import type {
-  CapitalResult, EconomicRepository, ReserveCapitalInput,
+  CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts,
 } from "@/lib/store/repository";
 import { createPool } from "@/lib/store/db";
 import { PostgresRepository } from "@/lib/store/postgres";
@@ -71,9 +71,20 @@ export class InMemoryRepository implements EconomicRepository {
     return this.ledger.getVault(vaultId) ?? null;
   }
 
-  /** The ledger is seeded at construction, so this is a no-op that reports fact. */
-  async seedReferenceData(): Promise<{ vaults: number; mandates: number; reservations: number }> {
-    return { vaults: 0, mandates: 0, reservations: 0 };
+  /**
+   * The ledger is seeded at construction, so this is a no-op — but the COUNTS it
+   * reports are the in-memory world's actual contents, not zeros.
+   *
+   * It previously returned zeros for everything, which was the in-memory half of
+   * the disagreement found by running with DATABASE_URL set: the Postgres backend
+   * persisted spaces and agreements, this one reported none, and the two backends
+   * described different worlds.
+   */
+  async seedReferenceData(): Promise<SeedCounts> {
+    return {
+      vaults: 0, mandates: 0, reservations: 0,
+      spaces: spaces.length, agreements: agreements.length,
+    };
   }
 
   /** Served from the seed array: the ledger has no mandate store of its own. */
