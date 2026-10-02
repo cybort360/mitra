@@ -29,6 +29,7 @@
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
+import type { EvidenceBundle } from "@/lib/evm/evidence";
 import { settlementDigest, settlingDomain } from "@/lib/evm/eip712";
 
 export type BaseChainId = 8453 | 84532; // mainnet, sepolia
@@ -165,4 +166,13 @@ export class BaseSettlementAdapter implements SettlementAdapter {
     if (!this.opts.transport) return { confirmed: false };
     return this.opts.transport.verify(txHash, this.opts.chainId);
   }
+  /**
+   * PRD 21.4 `getEvidence`. Returns null rather than a bundle assembled from
+   * nothing: a bundle with no observed chain behind it is indistinguishable from
+   * one that watched a transfer, and the counterparty has no way to tell.
+   */
+  async getEvidence(_ref: { settlementId: string }): Promise<EvidenceBundle | null> {
+    return null;
+  }
+
 }

@@ -16,6 +16,7 @@
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
+import type { EvidenceBundle } from "@/lib/evm/evidence";
 
 /** Solana SPL token mints. Registry, not configuration. */
 export const SOLANA_ASSETS: Record<string, { symbol: string; mint: string; decimals: number }> = {
@@ -80,6 +81,15 @@ export class SolanaSettlementAdapter implements SettlementAdapter {
     if (!this.opts.transport) return { confirmed: false };
     return this.opts.transport.verify(txHash);
   }
+  /**
+   * PRD 21.4 `getEvidence`. Returns null rather than a bundle assembled from
+   * nothing: a bundle with no observed chain behind it is indistinguishable from
+   * one that watched a transfer, and the counterparty has no way to tell.
+   */
+  async getEvidence(_ref: { settlementId: string }): Promise<EvidenceBundle | null> {
+    return null;
+  }
+
 }
 
 /** Same construction as the Base commitment, namespaced by chain. */

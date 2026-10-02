@@ -1,5 +1,6 @@
 import type { MarketplaceAdapter, PaymentAdapter, ProviderCandidate, SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
+import type { EvidenceBundle } from "@/lib/evm/evidence";
 import type { Chain } from "@/lib/domain/types";
 
 export class LocalMarketplaceAdapter implements MarketplaceAdapter {
@@ -23,4 +24,6 @@ export class UnconfiguredSettlementAdapter implements SettlementAdapter {
   async validateTarget(){return}
   async settle():Promise<never>{throw new UnconfiguredAdapterError(`${this.chain} settlement`)}
   async verify(){return {confirmed:false}}
+  /** PRD 21.4 getEvidence. Nothing was ever settled, so nothing can be evidenced. */
+  async getEvidence(_ref:{settlementId:string}):Promise<EvidenceBundle|null>{return null}
 }
