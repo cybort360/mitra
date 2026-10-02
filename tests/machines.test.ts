@@ -21,7 +21,9 @@ const HAPPY_PATHS: Record<string, string[]> = {
   reservation: ["REQUESTED", "RESERVED", "COMMITTED", "SETTLING", "SETTLED"],
   agreement: ["OPEN", "FUNDED", "EXECUTING", "SUBMITTED", "ACCEPTED"],
   obligation: ["PROPOSED", "ACCEPTED", "ACCRUING", "DUE", "CLEARED", "SETTLING", "SETTLED"],
-  saga: ["DECLARED", "EXECUTING", "RECOVERY_PENDING", "RECOVERING", "RECOVERED"],
+  // PRD 15.3 verbatim. ARMED is load-bearing: PRD 15.5 requires the compensation
+  // route to be committed before execution, and ARMED is where it is committed.
+  saga: ["DECLARED", "ARMED", "EXECUTING", "STEP_FAILURE", "COMPENSATING", "RECOVERED"],
   clearingEpoch: ["OPEN", "FROZEN", "CALCULATING", "CHALLENGE", "FINALIZED", "SETTLING", "SETTLED"],
   mandate: ["DRAFT", "ACTIVE"],
 };

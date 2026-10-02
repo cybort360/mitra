@@ -1167,6 +1167,53 @@ direction is actually enforced before describing the pair as structural. Adding 
 foreign key protects exactly one side, and the side you just wrote is the one
 already covered by the id you were about to add anyway.
 
+## F34 — the saga machine was missing ARMED, which was a safety gap
+
+**Found** 2026-10-02, building Phase 6 against PRD §15.
+
+The implemented `saga` machine went `DECLARED -> EXECUTING -> RECOVERY_PENDING ->
+RECOVERING`. PRD §15.3 specifies:
+
+```
+DECLARED -> ARMED -> EXECUTING -> STEP_FAILURE -> COMPENSATING
+                                                  -> {RECOVERED, CONTAINED, ABORTED}
+```
+
+Three states were missing. **`ARMED` was not a naming preference — it was a
+missing safety state.**
+
+PRD §15.5: *"A compensation route must be committed before execution when
+possible. Never let the recovery engine invent arbitrary compensation calldata
+after failure."*
+
+`ARMED` is the state in which the route is committed. Without it the table
+permitted `DECLARED -> EXECUTING` directly, which is a path to irreversible action
+with **no defined way back** — and, on failure, exactly the situation §15.5 forbids:
+the recovery engine with nothing committed and therefore obliged to invent
+compensation.
+
+Fixed: the machine is now §15.3 verbatim, `SagaStatus` follows, and
+`lib/kernel/recovery.ts` enforces the commitment — `startSaga` refuses anything
+not `ARMED`, and `armSaga` refuses a route with `maxAttempts <= 0` or an empty
+body, because a route that cannot execute is not a commitment.
+
+**How it survived:** `docs/STATE_MACHINES.md` documented the *implemented* table
+without ever mentioning that §15.3 says something different. A doc that restates
+the code is not evidence the code matches the spec — the same shape as F24 and
+F33. Nobody had compared the two.
+
+**Two smaller things found alongside it.** `RunStatus` legitimately contains
+`RECOVERING`, and a broad `sed` renaming saga states hit it too; the type system
+caught the collision and the line was reverted. And `failure-lab`'s
+`PROVIDER_TIMEOUT.expected` still says "Saga enters RECOVERY_PENDING", a state
+that no longer exists — left in place and asserted against, because a fixture
+quietly rewritten to match the code is how F24 happens.
+
+Mutations 6/6 caught: DECLARED->EXECUTING edge permitted, compensation invented
+for an unknown route, CONTAINED collapsed into RECOVERED, multi-step saga allowed
+with no route, recovery triggered on the first step rather than the last, arming
+with an unexecutable route.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

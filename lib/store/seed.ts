@@ -362,7 +362,7 @@ export const sagas: Saga[] = [
     compensationRoutes: ["RETRY_SAME_PROVIDER", "REASSIGN_APPROVED_PROVIDER", "REFUND_UNUSED", "CONTAIN"], timeoutPolicy: "provider heartbeat 120s; hard timeout 300s", version: 2,
   },
   {
-    sagaId: "saga_496", runId: "run_496", intentId: "intent_496", status: "RECOVERING", recoveredValue: 0, containedValue: 0,
+    sagaId: "saga_496", runId: "run_496", intentId: "intent_496", status: "COMPENSATING", recoveredValue: 0, containedValue: 0,
     steps: [
       { stepId: "s1", name: "Primary provider execution", state: "FAILED", attempts: 1, failureReason: "UPSTREAM_RATE_LIMIT" },
       { stepId: "s2", name: "Select approved backup", state: "RUNNING", attempts: 1 },

@@ -32,7 +32,17 @@ OPEN → FUNDED → EXECUTING → SUBMITTED → ACCEPTED | REJECTED, with refund
 PROPOSED → ACCEPTED → ACCRUING → DUE → CLEARED → SETTLING → SETTLED, with DISPUTED and DEFAULTED branches. A disputed obligation may return to DUE or proceed to CLEARED; DEFAULTED is terminal.
 
 ## Saga
-DECLARED → EXECUTING → RECOVERY_PENDING → RECOVERING → RECOVERED | CONTAINED | ABORTED.
+DECLARED → ARMED → EXECUTING → STEP_FAILURE → COMPENSATING → RECOVERED | CONTAINED | ABORTED.
+
+PRD §15.3, verbatim. Corrected 2026-10-02 (F34): the previous table omitted ARMED,
+STEP_FAILURE and COMPENSATING, and `docs/STATE_MACHINES.md` restated the
+implementation without noting that §15.3 said otherwise.
+
+**ARMED is load-bearing.** PRD §15.5 requires a compensation route to be committed
+*before* execution; ARMED is the state in which it is committed. Without it the
+table permitted DECLARED → EXECUTING — a path to irreversible action with no
+defined way back, and on failure exactly the situation §15.5 forbids, where the
+recovery engine must invent compensation calldata.
 
 RECOVERED, CONTAINED and ABORTED remain semantically distinct outcomes, and the
 guard treats them as such: none is reachable from another, and all three are

@@ -15,7 +15,22 @@ export type ReservationStatus = "REQUESTED" | "RESERVED" | "COMMITTED" | "RELEAS
 export type AuthorizationDecision = "ALLOW" | "DENY" | "REVIEW";
 export type AgreementStatus = "OPEN" | "FUNDED" | "EXECUTING" | "SUBMITTED" | "ACCEPTED" | "REJECTED" | "REFUNDED" | "CANCELED" | "EXPIRED";
 export type ObligationStatus = "PROPOSED" | "ACCEPTED" | "ACCRUING" | "DUE" | "DISPUTED" | "DEFAULTED" | "CLEARED" | "SETTLING" | "SETTLED";
-export type SagaStatus = "DECLARED" | "EXECUTING" | "RECOVERY_PENDING" | "RECOVERING" | "RECOVERED" | "CONTAINED" | "ABORTED";
+/**
+ * PRD 15.3, verbatim:
+ * `DECLARED -> ARMED -> EXECUTING -> STEP_FAILURE -> COMPENSATING -> {RECOVERED, CONTAINED, ABORTED}`.
+ *
+ * ARMED is not decoration. PRD 15.5 requires the compensation route to be
+ * committed *before* execution, and ARMED is the state in which it is committed.
+ */
+export type SagaStatus =
+  | "DECLARED"
+  | "ARMED"
+  | "EXECUTING"
+  | "STEP_FAILURE"
+  | "COMPENSATING"
+  | "RECOVERED"
+  | "CONTAINED"
+  | "ABORTED";
 export type ClearingStatus = "OPEN" | "FROZEN" | "CALCULATING" | "CHALLENGE" | "FINALIZED" | "SETTLING" | "SETTLED";
 export type SettlementStatus = "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "REVERSED";
 export type RunStatus = "RUNNING" | "WAITING" | "RECOVERING" | "CLEARING" | "SETTLING" | "SETTLED" | "CONTAINED" | "FAILED";

@@ -90,11 +90,25 @@ export const TRANSITIONS: Record<string, Record<LifecycleState, LifecycleState[]
     SETTLED: [],
   },
 
+  // Aligned to PRD 15.3 on 2026-10-02. The previous table went
+  // DECLARED -> EXECUTING -> RECOVERY_PENDING -> RECOVERING, which dropped ARMED,
+  // STEP_FAILURE and COMPENSATING entirely.
+  //
+  // **ARMED was a safety gap, not a naming preference.** PRD 15.5 requires that
+  // "a compensation route must be committed before execution when possible", and
+  // ARMED is the state in which that commitment exists. Without it the table
+  // permitted DECLARED -> EXECUTING directly, so a saga could begin executing with
+  // NO committed recovery route - precisely the situation 15.5 forbids. There was
+  // now a path to irreversible action with no defined way back.
   saga: {
-    DECLARED: ["EXECUTING", "ABORTED"],
-    EXECUTING: ["RECOVERY_PENDING", "RECOVERED", "CONTAINED", "ABORTED"],
-    RECOVERY_PENDING: ["RECOVERING"],
-    RECOVERING: ["RECOVERED", "CONTAINED", "ABORTED"],
+    DECLARED: ["ARMED", "ABORTED"],
+    // ARMED requires at least one committed compensation route. That is enforced by
+    // the kernel, not here, because it is a property of the saga's contents rather
+    // than of the edge.
+    ARMED: ["EXECUTING", "ABORTED"],
+    EXECUTING: ["STEP_FAILURE", "RECOVERED", "CONTAINED", "ABORTED"],
+    STEP_FAILURE: ["COMPENSATING"],
+    COMPENSATING: ["RECOVERED", "CONTAINED", "ABORTED"],
     // Three distinct terminal outcomes. Collapsing them would erase the
     // difference between "recovered the value" and "stopped the loss".
     RECOVERED: [],
