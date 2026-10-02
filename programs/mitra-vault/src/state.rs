@@ -11,7 +11,7 @@
 //! for the same struct, preceded by the 8-byte Anchor discriminator. That is
 //! what makes the eventual Anchor migration a wrapper rather than a rewrite.
 
-use crate::anchor_parity::{err, VAULT_DISCRIMINATOR};
+use crate::anchor_parity::{err, mandate_discriminator, VAULT_DISCRIMINATOR};
 use solana_program::{entrypoint::ProgramResult, program_error::ProgramError, pubkey::Pubkey};
 
 /// The six capital positions from PRD §4.12, plus the total they must sum to.
@@ -169,5 +169,132 @@ impl Vault {
         // was corrupted. Refusing to load it beats loading a lie.
         vault.reconcile()?;
         Ok(vault)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mandate: the persistent, versioned authority object (ADR-0009).
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Engraving contributes the *semantics* here, and ADR-0009 records exactly what
+// was reused and what was refused. The two refusals are load-bearing, so they
+// are stated in the type itself rather than only in a document:
+//
+//   REFUSED — Engraving's four-state `EngravingStatus` machine. A mandate may
+//   be live, expired, or revoked; it may not be "spent". Spend is a property of
+//   an *authorization*, not of the mandate, and folding it in would make the
+//   mandate a one-shot object that cannot authorize a second action — which is
+//   the normal case. This type therefore has no `status` field at all.
+//
+//   REFUSED — COTI's implementation. This is borsh with explicit byte offsets,
+//   not COTI's protobuf. The mandate *account* is a product concept in Mitra's
+//   own canonical serialization, not an import.
+//
+// What is kept from Engraving: the mandate is persistent, it is versioned, and
+// a proposal is evaluated against a *specific* version so that a decision can
+// name the policy text that produced it.
+
+
+/// Byte length of a serialized Mandate: 8 discriminator + 32 holder + 32 limit +
+/// 8 version + 8 expires_at + 8 ceiling = 96.
+///
+/// Fixed and asserted by the layout tests. A mandate's size changing silently
+/// would invalidate every stored policy, and unlike the vault there is no
+/// reconciliation invariant to catch it at load.
+pub const MANDATE_LEN: usize = 96;
+
+/// A mandate is live until this timestamp. The *only* lifecycle field that is
+/// not a version or a limit.
+///
+/// Phase 3a scope: expiry is stored and enforced at authorization time. Revocation
+/// is Phase 3b — it needs a bump of `version` plus a terminal flag, and adding a
+/// flag now would mean shipping a layout I had not yet needed to change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mandate {
+    /// The agent this mandate authorizes. The PDA is derived from this key, so
+    /// the account cannot be reassigned to a different agent.
+    pub holder: Pubkey,
+    /// Largest single action this mandate can authorize, in base units.
+    ///
+    /// A per-action ceiling, not a total. A cumulative counter would need to be
+    /// mutated by the program on every spend, which is a *stateful* budget and
+    /// re-introduces exactly the sequencing the ceiling is meant to avoid. The
+    /// per-action bound is what the vault's own `available` check is for.
+    pub limit: u64,
+    /// Monotonic policy version. Every change to `limit` or `expires_at`
+    /// increments it.
+    ///
+    /// This is Engraving's central idea: a proposal is evaluated against a
+    /// *named* version, so "this was permitted" is answerable after the fact even
+    /// if the mandate has since changed. Without it, any tightening is
+    /// retroactively retroactive and no evidence survives.
+    pub version: u64,
+    /// Unix timestamp. A proposal carrying a version created after this instant
+    /// is refused with MANDATE_EXPIRED.
+    pub expires_at: u64,
+    /// Cumulative ceiling the vault enforces, copied here at authorization time
+    /// so the two constraints can be checked against the same instant.
+    pub ceiling: u64,
+}
+
+impl Mandate {
+    /// Borsh-serialize, prefixing the Anchor discriminator.
+    pub fn to_bytes(&self) -> [u8; MANDATE_LEN] {
+        let mut out = [0u8; MANDATE_LEN];
+        out[0..8].copy_from_slice(&mandate_discriminator());
+        out[8..40].copy_from_slice(self.holder.as_ref());
+        out[40..48].copy_from_slice(&self.limit.to_le_bytes());
+        out[48..56].copy_from_slice(&self.version.to_le_bytes());
+        out[56..64].copy_from_slice(&self.expires_at.to_le_bytes());
+        out[64..72].copy_from_slice(&self.ceiling.to_le_bytes());
+        out
+    }
+
+    /// Load a mandate, verifying the discriminator.
+    ///
+    /// The version must be non-zero: version 0 is reserved for "never created",
+    /// so a mandate claiming to be version 0 is not one this program wrote.
+    pub fn try_from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() != MANDATE_LEN {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        if data[0..8] != mandate_discriminator() {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        // Offsets are named rather than derived from `i * 8`. The arithmetic does
+        // happen to work out (40 is 8-aligned, so `i*8` lands on each field), but
+        // that alignment is a coincidence of *this* layout — a field inserted at
+        // byte 48 would silently shift every later read by three bytes and still
+        // compile. Naming the offsets makes the next edit safe by construction.
+        let read_u64 = |from: usize| {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&data[from..from + 8]);
+            u64::from_le_bytes(b)
+        };
+        const OFF_LIMIT: usize = 40;
+        const OFF_VERSION: usize = 48;
+        const OFF_EXPIRES: usize = 56;
+        const OFF_CEILING: usize = 64;
+        let version = read_u64(OFF_VERSION);
+        if version == 0 {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        Ok(Self {
+            holder: Pubkey::try_from(&data[8..40])
+                .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
+            limit: read_u64(OFF_LIMIT),
+            version,
+            expires_at: read_u64(OFF_EXPIRES),
+            ceiling: read_u64(OFF_CEILING),
+        })
+    }
+
+    /// Does this mandate still permit *any* action at `now`?
+    ///
+    /// Split from `authorize` so that a caller can distinguish "this mandate is
+    /// over" from "this action is too big". Merging them would make every
+    /// refusal look like a ceiling problem and hide expiry entirely.
+    pub fn is_live_at(&self, now: u64) -> bool {
+        now < self.expires_at
     }
 }

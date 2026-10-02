@@ -37,6 +37,20 @@ use solana_program::{
 /// test enforces it.
 pub const VAULT_DISCRIMINATOR: [u8; 8] = [211, 8, 232, 43, 2, 152, 117, 119];
 
+/// sha256("account:Mandate")[..8], **computed at runtime from the same
+/// derivation Anchor uses** rather than hand-copied as a byte array.
+///
+/// This is deliberately unlike `VAULT_DISCRIMINATOR`, which stays a literal.
+/// That constant is a parity fixture: its *value* is what is under test against
+/// an external implementation, so hard-coding it is what makes the comparison
+/// meaningful. This one has no external oracle — it defines what "a Mandate
+/// account" means *here* — so deriving it removes a bug class a copied constant
+/// invites: a byte-level typo that still compiles, still round-trips against
+/// itself, and silently identifies the wrong type.
+pub fn mandate_discriminator() -> [u8; 8] {
+    account_discriminator("Mandate")
+}
+
 /// Anchor's instruction discriminators, one per handler. Same provenance as
 /// `VAULT_DISCRIMINATOR` — computed, then pinned by a test.
 pub mod ix {
@@ -83,6 +97,19 @@ pub mod err {
     /// `0x1771` (INVALID_ACCOUNT_OWNER), which says the caller passed the wrong
     /// account — the opposite of the truth, which was "you already have one".
     pub const ALREADY_INITIALIZED: u32 = 6009;
+    /// 6010 — the mandate's spend ceiling would be exceeded by this action.
+    pub const EXCEEDS_MANDATE_CEILING: u32 = 6010;
+    /// 6011 — the mandate has expired (`expires_at` in the past).
+    pub const MANDATE_EXPIRED: u32 = 6011;
+    /// 6012 — the supplied authorization has already been consumed.
+    ///
+    /// A *used* authorization is a different failure from an *invalid* one, and
+    /// conflating them hides replay attempts behind generic errors.
+    pub const AUTHORIZATION_CONSUMED: u32 = 6012;
+    /// 6013 — the authorization's `action_hash` does not match the action being
+    /// attempted. The most important guard in the program: it is what makes "an
+    /// ALLOW is not permission to move value" structural rather than advisory.
+    pub const ACTION_HASH_MISMATCH: u32 = 6013;
 
     pub fn custom(code: u32) -> ProgramError {
         ProgramError::Custom(code)
@@ -116,6 +143,19 @@ pub const VAULT_SEED: &[u8] = b"vault";
 /// The seed slice Anchor would build for `seeds = [b"vault", authority.key()]`.
 pub fn vault_seeds(authority: &Pubkey) -> [&[u8]; 2] {
     [VAULT_SEED, authority.as_ref()]
+}
+
+/// The mandate seed. Deliberately distinct from `VAULT_SEED`: a mandate is a
+/// *policy* object and a vault is a *capital* object, and ADR-0002 is explicit
+/// that capital must stay arithmetic-with-guards rather than becoming a state
+/// machine. A shared seed would let a policy object and a capital object be
+/// derived into the same address space, which is precisely the conflation
+/// ADR-0002 refuses. Keeping the seeds apart makes the separation structural.
+pub const MANDATE_SEED: &[u8] = b"mandate";
+
+/// The seed slice Anchor would build for `seeds = [b"mandate", holder.key()]`.
+pub fn mandate_seeds(holder: &Pubkey) -> [&[u8]; 2] {
+    [MANDATE_SEED, holder.as_ref()]
 }
 
 /// Anchor derives an account discriminator from the *struct* name.
