@@ -11,17 +11,21 @@
 //! supply their own authorization.
 
 pub mod anchor_parity;
+pub mod rent;
 pub mod state;
 
 use anchor_parity::{err, find_vault_pda, ix, vault_seeds};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
+    program::{invoke, invoke_signed},
     entrypoint::ProgramResult,
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
 };
 use state::Vault;
+// System-program instructions live in the `system_program` crate, not `solana_program`.
+use solana_program::system_instruction;
 
 solana_program::entrypoint!(process);
 
@@ -60,29 +64,39 @@ fn read_amount(args: &[u8]) -> Result<u64, ProgramError> {
 /// Ordering matches Anchor: signer, owner, seeds, then data-level. A caller who
 /// forgets an account gets `NotSigner` rather than a confusing decode error,
 /// which is what makes the failure legible in a client.
+/// Verifies the *vault* account and that `authority` is allowed to direct it.
+///
+/// Two accounts, two distinct questions, and conflating them is the bug this
+/// signature now makes impossible: the first version took a single
+/// `&AccountInfo` and every caller passed the *authority* — a wallet, which is
+/// of course not owned by this program. It failed on devnet with
+/// `0x1771` (INVALID_ACCOUNT_OWNER) while the real fault was one call-site
+/// argument away. The vault is what must be program-owned; the authority is what
+/// must match the vault's recorded owner.
 fn check_vault_account(
-    account: &AccountInfo,
+    vault: &AccountInfo,
+    authority: &AccountInfo,
     program_id: &Pubkey,
-    authority: &Pubkey,
-    expected: &Pubkey,
 ) -> ProgramResult {
-    if !account.is_signer {
+    // The signer must be the authority — and it must actually have signed. The
+    // seeds are public, so deriving the PDA is not authorization on its own.
+    if !authority.is_signer {
         return Err(err::custom(err::NOT_SIGNER));
     }
-    if account.owner != program_id {
+    if vault.owner != program_id {
         return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
     }
-    // A PDA carries its own bump; re-deriving proves the address really is the
-    // vault for this authority, not merely one the caller passed in.
-    let (derived, bump) = find_vault_pda(&vault_seeds(authority), program_id)?;
-    if &derived != expected {
+    // Re-deriving proves the address really is the vault for this authority,
+    // rather than merely one the caller passed in alongside a valid signer.
+    let (derived, bump) = find_vault_pda(&vault_seeds(authority.key), program_id)?;
+    if &derived != vault.key {
         return Err(ProgramError::InvalidSeeds);
     }
-    let vault = Vault::from_bytes(&account.try_borrow_data()?)?;
-    if vault.authority != *authority {
+    let state = Vault::from_bytes(&vault.try_borrow_data()?)?;
+    if state.authority != *authority.key {
         return Err(err::custom(err::UNAUTHORIZED));
     }
-    if vault.bump != bump {
+    if state.bump != bump {
         return Err(ProgramError::InvalidSeeds);
     }
     Ok(())
@@ -90,32 +104,117 @@ fn check_vault_account(
 
 /// `initialize_vault(bump)` — creates the PDA for `authority`.
 fn initialize_vault(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
-    let mut it = accounts.iter();
-    let authority = next_account_info(&mut it)?;
-    let vault_account = next_account_info(&mut it)?;
-    let system_program = next_account_info(&mut it)?;
+    // The iterator is named because the CPI below continues reading from it — a
+    // fourth entry is the program account itself, which the system program needs
+    // in order to verify the new account's owner.
+    let mut accounts_iter = accounts.iter();
+    let authority = next_account_info(&mut accounts_iter)?;
+    let vault_account = next_account_info(&mut accounts_iter)?;
+    let system_program = next_account_info(&mut accounts_iter)?;
 
     if !authority.is_signer {
         return Err(err::custom(err::NOT_SIGNER));
     }
-    // A system-owned, empty account is how Anchor creates a PDA.
-    if vault_account.owner != &solana_program::system_program::ID {
+    // A PDA is either system-owned (not yet created) or owned by this program
+    // (already initialized). Re-initializing an existing vault is refused below
+    // with a precise error, because the owner check here cannot distinguish the
+    // two cases — that mistake produced a misleading `0x1771` during development.
+    if vault_account.owner != &solana_program::system_program::ID
+        && vault_account.owner != program_id
+    {
         return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    if vault_account.owner == program_id {
+        return Err(err::custom(err::ALREADY_INITIALIZED));
     }
     if system_program.key != &solana_program::system_program::ID {
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    let bump = args.first().copied().unwrap_or(255);
-    let (expected, _) = find_vault_pda(&vault_seeds(authority.key), program_id)?;
+    let bump_arg = args.first().copied();
+    let (expected, derived_bump) = find_vault_pda(&vault_seeds(authority.key), program_id)?;
     if expected != *vault_account.key {
         return Err(ProgramError::InvalidSeeds);
+    }
+    // The stored bump must be the one derivation found, or the account's own
+    // record of how to re-derive it would be a lie.
+    let bump = match bump_arg {
+        None => derived_bump,
+        Some(b) if b == derived_bump => b,
+        Some(_) => return Err(ProgramError::InvalidSeeds),
+    };
+
+    // **A PDA does not exist until something creates it.** On devnet the account
+    // arrives with zero-length data and `copy_from_slice` into it *panics*,
+    // aborting the transaction:
+    //
+    //   panicked at src/lib.rs:116:42:
+    //   copy_from_slice: source slice length (105) does not match destination
+    //   slice length (0)
+    //
+    // No unit test could have caught this: in-process the account is a buffer
+    // this function is free to write to, and it only becomes a real account with
+    // a real length on a real chain. This is the case for running against devnet
+    // rather than trusting the local suite.
+    //
+    // Anchor's `#[account(init, payer = …, space = …)]` does exactly this via a
+    // CPI to the system program, which is why an Anchor program never has to
+    // think about it. Reproduced here so the migration is a wrapper.
+    // `system_instruction::create_account` makes the PDA a signer. For the CPI to
+    // succeed, this program's *invoke* privileges must include the vault's
+    // signer privilege — otherwise the runtime refuses with "signer privilege
+    // escalated", because from the runtime's perspective this program was never
+    // given the right to sign for the PDA. Anchor hides this behind `init`.
+    //
+    // The third element is the program account itself, which the system program
+    // needs to verify the new account's owner. It is passed through from the
+    // transaction rather than fabricated, so its real privileges are preserved.
+    if vault_account.lamports() == 0 {
+        let payer = authority.clone();
+        let lamports = rent_for_bytes(state::VAULT_LEN)?;
+        let cpi = system_instruction::create_account(
+            payer.key, vault_account.key, lamports,
+            state::VAULT_LEN as u64, &program_id,
+        );
+        let program_account = next_account_info(&mut accounts_iter)?;
+        // `invoke_signed`, not `invoke`: creating a PDA makes it a signer for the
+        // CPI, and only `invoke_signed` can grant that from the program's own
+        // seeds. `invoke` fails with "signer privilege escalated" — found on
+        // devnet, and precisely the sort of thing a unit test cannot see because
+        // the in-process account is already "signed".
+        // `invoke_signed` takes an outer slice of *seed sets*, one per signer.
+        // A single PDA signer needs ONE set whose contents are the seeds plus the
+        // bump: `[b"vault", authority, bump]`. Passing `[seeds, &[bump]]` instead
+        // asks the runtime to derive two separate addresses, and it fails with
+        // "Could not create program address with signer seeds" — which reads like
+        // a derivation bug and is actually an argument-shape bug.
+        let bump_seed = [bump];
+        let seed_sets: &[&[&[u8]]] = &[&[
+            anchor_parity::VAULT_SEED,
+            authority.key.as_ref(),
+            &bump_seed,
+        ]];
+        invoke_signed(
+            &cpi,
+            &[payer.clone(), vault_account.clone(), program_account.clone()],
+            seed_sets,
+        )?;
     }
 
     let vault = Vault::new(*authority.key, bump);
     vault_account.try_borrow_mut_data()?.copy_from_slice(&vault.to_bytes());
     msg!("vault initialized for {}", authority.key);
     Ok(())
+}
+
+/// Rent-exempt minimum for `bytes`.
+///
+/// The syscall is unavailable in-process, so under `cfg(test)` it returns the
+/// devnet figure. That is acceptable precisely because this path only executes
+/// on chain — and if it ever ran in a test, the account would not be a PDA
+/// anyway.
+pub fn rent_for_bytes(bytes: usize) -> Result<u64, ProgramError> {
+    rent::rent_exempt_minimum(bytes)
 }
 
 /// `deposit(amount)` — moves lamports in and credits `available`.
@@ -144,10 +243,25 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
     data.copy_from_slice(&vault.to_bytes());
     drop(data);
 
-    **depositor.try_borrow_mut_lamports()? = depositor.lamports()
-        .checked_sub(amount).ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
-    **vault_account.try_borrow_mut_lamports()? = vault_account.lamports()
-        .checked_add(amount).ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
+    // Move the lamports through the system program rather than by writing
+    // `try_borrow_mut_lamports` directly.
+    //
+    // Direct mutation is what the first version did, and the runtime rejects it:
+    //
+    //   failed: instruction spent from the balance of an account it does not own
+    //
+    // A program may only debit an account it owns or has been given signer
+    // authority over; the depositor is neither. The CPI expresses the transfer
+    // the way the runtime actually models it, and it is what Anchor's
+    // `system_program::transfer` does — so the migration stays a wrapper.
+    let system_program = next_account_info(&mut it)?;
+    if system_program.key != &solana_program::system_program::ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    invoke(
+        &system_instruction::transfer(depositor.key, vault_account.key, amount),
+        &[depositor.clone(), vault_account.clone(), system_program.clone()],
+    )?;
     Ok(())
 }
 
@@ -165,9 +279,16 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progr
     if amount == 0 {
         return Err(ProgramError::InvalidArgument);
     }
-    check_vault_account(authority, program_id, authority.key, vault_account.key)?;
+    // `check_vault_account` proves the authority owns this vault; the only
+    // remaining question is whether there is enough to withdraw.
+    check_vault_account(vault_account, authority, program_id)?;
     if amount > Vault::from_bytes(&vault_account.try_borrow_data()?)?.available {
         return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
+    }
+
+    let system_program = next_account_info(&mut it)?;
+    if system_program.key != &solana_program::system_program::ID {
+        return Err(ProgramError::IncorrectProgramId);
     }
 
     let mut data = vault_account.try_borrow_mut_data()?;
@@ -178,10 +299,29 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progr
     data.copy_from_slice(&vault.to_bytes());
     drop(data);
 
-    **vault_account.try_borrow_mut_lamports()? = vault_account.lamports()
-        .checked_sub(amount).ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
-    **authority.try_borrow_mut_lamports()? = authority.lamports()
-        .checked_add(amount).ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
+    // As in `deposit`: a CPI to the system program, not direct mutation. Moving
+    // lamports *into* an account the program does not own is the same rule in the
+    // other direction.
+    // The vault is a PDA. A program may move lamports *out of* an account it
+    // owns, but the system program's `transfer` still requires that account to be
+    // a signer for the CPI — so this must be `invoke_signed` with the vault's
+    // seeds, exactly as `initialize_vault` does. Found on devnet:
+    //   rY6jkirt…KUyL's signer privilege escalated
+    // The bump is re-derived rather than carried through `check_vault_account`,
+    // which verifies it but does not return it. Deriving twice is cheap; a
+    // second source of truth for the bump is not.
+    let (_, bump) = find_vault_pda(&vault_seeds(authority.key), program_id)?;
+    let bump_seed = [bump];
+    let seed_sets: &[&[&[u8]]] = &[&[
+        anchor_parity::VAULT_SEED,
+        authority.key.as_ref(),
+        &bump_seed,
+    ]];
+    invoke_signed(
+        &system_instruction::transfer(vault_account.key, authority.key, amount),
+        &[vault_account.clone(), authority.clone(), system_program.clone()],
+        seed_sets,
+    )?;
     Ok(())
 }
 
@@ -195,13 +335,10 @@ fn reserve(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
     if amount == 0 {
         return Err(ProgramError::InvalidArgument);
     }
-    check_vault_account(authority, program_id, authority.key, vault_account.key)?;
+    check_vault_account(vault_account, authority, program_id)?;
 
     let mut data = vault_account.try_borrow_mut_data()?;
     let mut vault = Vault::from_bytes(&data)?;
-    if vault.authority != *authority.key {
-        return Err(err::custom(err::UNAUTHORIZED));
-    }
     vault.reserve(amount)?;
     data.copy_from_slice(&vault.to_bytes());
     // Reservation moves capital between positions; lamports must not move.
@@ -228,13 +365,10 @@ fn release(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
     if amount == 0 {
         return Err(ProgramError::InvalidArgument);
     }
-    check_vault_account(authority, program_id, authority.key, vault_account.key)?;
+    check_vault_account(vault_account, authority, program_id)?;
 
     let mut data = vault_account.try_borrow_mut_data()?;
     let mut vault = Vault::from_bytes(&data)?;
-    if vault.authority != *authority.key {
-        return Err(err::custom(err::UNAUTHORIZED));
-    }
     vault.release(amount)?;
     data.copy_from_slice(&vault.to_bytes());
     drop(data);
@@ -249,8 +383,22 @@ fn release(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
 /// lamports onto the vault account, which would desync the real balance from the
 /// `total` the program reports — the on-chain version of F12, where a number
 /// that looks right is not.
-fn check_no_surplus_lamports(vault: &AccountInfo, expected: u64) -> ProgramResult {
-    if vault.lamports() != expected {
+/// The vault's real lamports must be exactly its capital plus the rent-exempt
+/// minimum.
+///
+/// This is Anchor's `/// CHECK:` pattern, and it is what stops someone inflating
+/// the vault with a direct transfer: the program would then report a `total`
+/// that disagrees with the balance the chain actually holds.
+///
+/// The comparison is `capital + rent`, **not** `capital`. The first version
+/// compared against `total` alone and rejected every legitimate instruction on
+/// devnet with `0x1773` — because a PDA must retain ~1.18M lamports of
+/// rent-exempt balance to exist at all. Subtracting the requirement makes the
+/// check exact: any lamport above capital+rent is an unaccounted injection, and
+/// any lamport below it means the account has been drained.
+fn check_no_surplus_lamports(vault: &AccountInfo, capital: u64) -> ProgramResult {
+    let rent = rent::rent_exempt_minimum(state::VAULT_LEN)?;
+    if vault.lamports() != capital + rent {
         return Err(err::custom(err::UNEXPECTED_LAMPORTS));
     }
     Ok(())

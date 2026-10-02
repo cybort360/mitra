@@ -76,6 +76,13 @@ pub mod err {
     pub const VAULT_FROZEN: u32 = 6007;
     /// 6008 — the signer is not permitted to perform this action.
     pub const UNAUTHORIZED: u32 = 6008;
+    /// 6009 — the vault already exists; re-initializing must not reset it.
+    ///
+    /// This one exists because its absence caused a real misdiagnosis. Without it
+    /// a second `initialize_vault` failed on the *owner* check and reported
+    /// `0x1771` (INVALID_ACCOUNT_OWNER), which says the caller passed the wrong
+    /// account — the opposite of the truth, which was "you already have one".
+    pub const ALREADY_INITIALIZED: u32 = 6009;
 
     pub fn custom(code: u32) -> ProgramError {
         ProgramError::Custom(code)
@@ -154,11 +161,13 @@ mod tests {
             err::NOT_SIGNER, err::INVALID_ACCOUNT_OWNER, err::ACCOUNT_DISCRIMINATOR_MISMATCH,
             err::UNEXPECTED_LAMPORTS, err::RECONCILIATION_FAILED, err::INSUFFICIENT_AVAILABLE,
             err::ARITHMETIC_OVERFLOW, err::VAULT_FROZEN, err::UNAUTHORIZED,
+            err::ALREADY_INITIALIZED,
         ] {
             assert!(code >= 6000, "error {code} collides with Anchor's range");
         }
         assert_eq!(err::NOT_SIGNER, 6000);
         assert_eq!(err::UNAUTHORIZED, 6008);
+        assert_eq!(err::ALREADY_INITIALIZED, 6009);
     }
 
     #[test]

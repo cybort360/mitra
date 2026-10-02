@@ -586,6 +586,72 @@ the same as a transaction the chain executed.
 patch, not of the system. When the gap is upstream, record it as `UNTESTED` and
 say which command would close it.
 
+## F19 — the program had five defects that only a real chain could find
+
+**Found** 2026-01-10, deploying to Solana devnet.
+
+The vault program passed **18 unit tests**, built to a clean 37KB eBPF ELF, and
+deployed successfully. Then five of its instructions failed on devnet. Every one
+is a property that only exists on a real chain, and none is testable in-process:
+
+1. **`copy_from_slice: source slice length (105) does not match destination slice
+   length (0)`.** `initialize_vault` wrote into a PDA that did not exist yet. A PDA
+   has no account until something creates it; in-process the account is just a
+   buffer the function may write to. Fixed with a `create_account` CPI — which is
+   precisely what Anchor's `#[account(init, payer = …, space = …)]` does, and the
+   reason an Anchor program never confronts this.
+2. **`signer privilege escalated`.** The `create_account` CPI makes the PDA a
+   signer, and `invoke` cannot grant that; `invoke_signed` with the program's own
+   seeds must.
+3. **`Could not create program address with signer seeds`.** `invoke_signed` takes
+   an outer slice of *seed sets*, one per signer. I passed `[seeds, &[bump]]`,
+   asking the runtime to derive two addresses. It wants **one** set:
+   `[b"vault", authority, bump]`. The error reads like a derivation bug and is
+   actually an argument-shape bug.
+4. **`instruction spent from the balance of an account it does not own`.** Lamport
+   movement was done by writing `try_borrow_mut_lamports` directly. A program may
+   only debit an account it owns or can sign for; the depositor is neither. Fixed
+   with a system-program `transfer` CPI.
+5. **`check_vault_account` was passed the wrong account.** Its signature took one
+   `&AccountInfo`, and every call site passed the *authority* — a wallet, which of
+   course is not program-owned. It failed with `INVALID_ACCOUNT_OWNER`, a message
+   that says "you passed the wrong account" while the real fault was the argument
+   *within* the function. Reshaped to take `(vault, authority)` separately so the
+   two questions can no longer be confused.
+
+**And a sixth, in my own verification harness** — worth more than any of the
+five. The harness returned `null` on failure and printed nothing, so a genuine bug
+was indistinguishable from an expected rejection. Three rounds of debugging went
+into that before it surfaced the actual program log. A harness that hides its
+errors is worse than no harness: it makes the *absence* of information look like
+information.
+
+Then two more harness defects, both found by their consequences rather than by
+inspection:
+
+- **Absolute assertions.** It asserted `total == 1 SOL` and `reserved == 0`, which
+  only hold on a fresh vault. On a second run those failed — and worse, the
+  over-reserve guard *passed* when it should have failed, because leftover capital
+  from the previous run made a "beyond available" amount affordable. The harness
+  reported a broken boundary that was intact. Every expectation is now relative to
+  the state read immediately before the action, which is what makes it re-runnable.
+- **A hardcoded program id.** Because the deploy and the script edit ran in
+  different shells, the id silently drifted and the harness was driving a
+  *previous* deployment, reporting its failures as current. The id is now derived
+  from the deployed keypair.
+
+**Why this is the strongest evidence in the repository.** 18 unit tests exercised
+the capital arithmetic and Anchor parity and found nothing, because every one of
+these five bugs lives in the boundary between the program and the runtime: account
+existence, signer privileges, CPI shape, and lamport ownership. No amount of local
+testing reaches them. This is the concrete argument for ADR-0004 — "real" and
+"funded" in the PRD exit condition are not pedantry, they name the only place these
+bugs are visible.
+
+**Rule.** A program that compiles and deploys is not a program that works. The
+tests that matter are the ones that run where the account, the runtime and the
+signer actually exist.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

@@ -12,7 +12,7 @@ publish = false
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-solana-program = "2.3"
+solana-program = { version = "2.3", features = ["borsh"] }
 
 # NOTE: `solana-program-test` is deliberately NOT a dependency.
 #
