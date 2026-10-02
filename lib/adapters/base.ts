@@ -29,6 +29,7 @@
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
+import { settlementDigest, settlingDomain } from "@/lib/evm/eip712";
 
 export type BaseChainId = 8453 | 84532; // mainnet, sepolia
 
@@ -67,10 +68,14 @@ export interface BaseSettlementOptions {
 /**
  * EIP-712 commitment for a settlement.
  *
- * PRD §9 requires the settlement to be bound to the economic facts that produced
- * it, so a transfer cannot be presented as settling something else. The type hash
- * is fixed and the domain separator is derived, so two different settlements can
- * never produce the same digest.
+ * **This was FNV-1a.** The first version computed a deterministic digest with a
+ * hand-rolled hash and labelled it honestly as "NOT keccak256, NOT
+ * signature-grade" — which was true, and which meant the adapter could not be
+ * signed for. It is now a real EIP-712 typed-data digest over a domain separator,
+ * so the settlement is a value a wallet can SIGN and a verifier can CHECK.
+ *
+ * The commitment is still re-derived inside `settle()` rather than trusted, so a
+ * caller cannot present one settlement's authorisation for another's transfer.
  */
 export function settlementCommitment(input: {
   settlementId: string;
@@ -79,30 +84,20 @@ export function settlementCommitment(input: {
   amount: string;
   asset: string;
   chainId: number;
+  verifyingContract?: `0x${string}`;
 }): `0x${string}` {
-  const domain = [
-    "MitraSettlement",
-    input.chainId.toString(),
-    "mitra-v1",
-  ].join("|");
-  const fields = [
-    input.settlementId,
-    input.from.toLowerCase(),
-    input.to.toLowerCase(),
-    input.amount,
-    input.asset,
-    domain,
-  ].join("|");
-  // FNV-1a over the canonical field string. Deterministic and dependency-free;
-  // NOT keccak256, and the type is named accordingly — a caller must not mistake
-  // this for a signature-grade digest.
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < fields.length; i++) {
-    h ^= fields.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return `0x${h.toString(16).padStart(8, "0").repeat(8)}`;
+  const contract = input.verifyingContract ?? ZERO_ADDRESS;
+  return settlementDigest(settlingDomain(input.chainId, contract), {
+    settlementId: input.settlementId,
+    from: input.from as `0x${string}`,
+    to: input.to as `0x${string}`,
+    amountAtomic: BigInt(input.amount),
+    asset: input.asset,
+  });
 }
+
+/** The zero address, used when no verifying contract is configured yet. */
+export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
 export class BaseSettlementAdapter implements SettlementAdapter {
   readonly chain: Chain = "base";
