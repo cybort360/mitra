@@ -231,9 +231,9 @@ from [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md).
 | 1 Core | "Purely local end-to-end lifecycle passes." | `E2E_VERIFIED` | — |
 | 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | `LIVE_DEMONSTRATED` | — |
 | 3 Authority | "Agent cannot execute an out-of-policy transaction." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: engraving, signer abstraction, Arcium path absent |
-| 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: no Space, evaluator, deliverable, acceptance |
+| 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation in Mitra. **Substrate located**: Microcosm at `/opt/microcosm-x` (§50 reuse list audited, F24) |
 | 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — interfaces plus one `local` stub; no A2A, MCP server, ERC-8004, marketplace, x402 |
-| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation; saga recovery undefined |
+| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `PROPOSED` | `BLOCKED_INTERNAL` **and** `BLOCKED_EXTERNAL` — no implementation, and PRD §50's named source (TALOS) is not present anywhere on disk (F24). Buildable; any claim of TALOS reuse would be unsupported |
 | 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
 | 8 Base | "Same economic intent executes on Base through the common API." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: no ERC-8004/8183/4337/1271, no EIP-712 |
 | 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `PROPOSED` | `BLOCKED_INTERNAL` — adapter absent; the *environment* is ready and verified (Moderato funded) |

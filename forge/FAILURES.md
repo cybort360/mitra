@@ -815,6 +815,44 @@ reader can no longer build from half the specification without the suite failing
 building. "I read the important one" is a judgement no one can audit, and it is
 the judgement that produced this record.
 
+## F24 — two of the four §50 substrate repositories were never located
+
+**Found** 2026-01-10, running the substrate audit that PRD §50 requires.
+
+PRD §50 says to reuse semantics from **four** inherited projects: Engraving,
+Microcosm, Cleara, TALOS (with Noema explicitly non-core). Ten days of work
+never touched any of them — recorded as F23. On auditing properly:
+
+| Project | Status | Evidence |
+|---|---|---|
+| **Engraving** | FOUND | `/home/ubuntu/engravings`, remote `github.com/etvjay/Engraving.git` |
+| **Cleara** | FOUND | `/home/ubuntu/ClearaOnGen`, remote `github.com/etvjay/ClearaOnGen` |
+| **Microcosm** | FOUND — **not where expected** | `/opt/microcosm-x`, remote `github.com/Jaydearcadian/microcosm-x.git`. Runs as a systemd service (`microcosm-server.service`, `active`). FORGE 1.4, 189 tests |
+| **TALOS** | **NOT FOUND** | Exhaustive case-insensitive search of `/` to depth 6: zero hits. No `*recovery*`/`*saga*` rename candidates in `/home/ubuntu` or `/opt` |
+
+**Microcosm being at `/opt` rather than `/home/ubuntu` is the instructive part.**
+It sits beside the two siblings, in the same PATH-visible location, running as a
+service. Two searches of the obvious directory missed it; only a filesystem-wide
+sweep found it. A "the inherited repos aren't here" conclusion drawn from one
+directory listing would have been wrong on one of two counts.
+
+**TALOS is a genuine `BLOCKED_EXTERNAL`.** The PRD instructs Mitra to integrate
+`Saga`, `Recovery Covenant`, `STN Delta accounting`, explicit `RECOVERED` vs
+`CONTAINED` semantics, and bounded recovery routes from it. §50 names it; no
+implementation is present. Phase 6's exit condition — *"Deliberately failed job
+reaches a defined terminal recovery state"* — can be built, but any claim that
+it reuses TALOS semantics would be **unsupported by construction**.
+
+Note that Mitra's own `lib/store/seed.ts` already contains a TALOS recovery
+event (`evt_501_10`, `RECOVERY_PENDING`, `REASSIGN_APPROVED_PROVIDER`), so the
+*concept* is present as seeded data while the *source* is unavailable. Seed data
+describing a system is not evidence that the system was studied.
+
+**Rule.** Before recording a dependency as missing, search the whole filesystem,
+not the directory where you expected it. And distinguish "the concept appears in
+our seed data" from "we have read the implementation" — the first is a fixture,
+the second is a substrate audit.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
