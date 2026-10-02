@@ -1,5 +1,23 @@
 export type Chain = "solana" | "base" | "tempo";
-export type AssetSymbol = "USDC" | "USDT" | "SOL" | "ETH";
+/**
+ * Assets Mitra can name.
+ *
+ * **Widened for Tempo's TIP-20 tokens.** Tempo settles in OUSD / pathUSD /
+ * AlphaUSD / BetaUSD / ThetaUSD and has NO USDC — the original enum could not
+ * express a Tempo settlement at all, which is how `lib/adapters/tempo.ts` ended
+ * up carrying a fabricated "USDC" mint to satisfy the type.
+ *
+ * That is the real lesson: the type was the reason the invented address existed,
+ * so widening it removes the pressure that produced the invention. A type that
+ * cannot express the domain invites a fake to fill the gap.
+ *
+ * The chain-specific addresses live in the adapters and, per ADR-0011 open item
+ * 2, should ultimately be per-Space configuration resolved from chain.
+ */
+export type AssetSymbol =
+  | "USDC" | "USDT" | "SOL" | "ETH"
+  // Tempo TIP-20
+  | "OUSD" | "pathUSD" | "AlphaUSD" | "BetaUSD" | "ThetaUSD";
 export type EvidenceLevel =
   | "DESIGN_ONLY"
   | "LOCAL_PASS"

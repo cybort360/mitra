@@ -1351,6 +1351,60 @@ Mutations 7/7: domain removed from the digest, delegate unchecked, ceiling
 unenforced, expiry made exclusive, Virtuals running under Mitra's rules, unknown
 marketplace state coerced to REJECTED, pricing in an unadmitted asset.
 
+## F39 — I invented a Tempo token address, and the tests validated the invention against itself
+
+**Found** 2026-10-02, while enumerating deployment credentials.
+
+`lib/adapters/tempo.ts` shipped:
+
+```ts
+USDC: { symbol: "USDC", mint: "0x5dDFa3e0d2C9d0dF4D6b1C6bA9E1A0eD4C5f2B1", decimals: 6 }
+```
+
+**That address does not exist.** And neither does USDC on Tempo: Moderato settles in
+TIP-20 tokens — OUSD, pathUSD, AlphaUSD, BetaUSD, ThetaUSD. It was typed to satisfy
+`Record<string, {...}>`, never checked against a node, and shipped inside a
+`TESTED` phase.
+
+### Why every test passed
+
+`tests/tempo-adapter.test.ts` read `TEMPO_TOKENS.USDC.mint` and asserted things
+about it. **A test that reads a constant out of the module under test cannot detect
+that the constant is wrong.** The suite validated the invention against itself, which
+is the same shape as F24 (fixtures agreeing) and F36 (backends self-consistent).
+
+### The root cause was the TYPE
+
+`AssetSymbol` was `"USDC" | "USDT" | "SOL" | "ETH"`. A Tempo settlement **could not
+be expressed**, so something had to be invented to fill the gap. The type created
+the pressure; the lie relieved it.
+
+Fixed on both levels: `AssetSymbol` now includes the five TIP-20 symbols, and the
+registry holds the mints read from Moderato. The test now **PINS** all five values,
+asserts no USDC exists, and notes that BetaUSD (`0x20c0…6a37da5c996874be`) breaks
+the `0x20c0…<index>` pattern the other four follow — so any code inferring addresses
+by pattern would silently miss it.
+
+### Why this one matters more than the other 38
+
+Every previous failure was a missing or broken **control**. This one was a
+**fabricated fact about an external system**, presented as verified. It is the one
+failure mode that makes an evidence record actively misleading rather than merely
+incomplete — and it survived because it sat inside a phase I had already reported as
+`TESTED` with a mutation audit behind it.
+
+**Rules.**
+1. **An address that names something outside this repository is a CLAIM until read
+   from a node.** No exceptions for "well-known" constants.
+2. **A test that reads a constant from the module under test is not a test of that
+   constant.** Pin it against an independent source, or delete the test.
+3. **When a type cannot express the domain, widen the type.** Inventing a value to
+   satisfy a type is a design failure dressed as a convenience.
+
+Also confirmed live this session: **F12 still holds.** `eth_getBalance` on
+Moderato returns a repeating constant (tail `4c9b26c9b26c9b26c9b2`), and Tempo's
+RPC rejects `topics` arrays in `eth_getLogs` entirely.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

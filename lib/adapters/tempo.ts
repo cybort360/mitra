@@ -28,9 +28,36 @@ import { UnconfiguredAdapterError } from "./types";
 import type { EvidenceBundle } from "@/lib/evm/evidence";
 
 /** TIP-20 mints on Tempo. TIP-20 is the settlement asset; native balance is not usable (F12). */
+/**
+ * TIP-20 tokens on Tempo Moderato (chain id 42431).
+ *
+ * **These were FABRICATED until this session.** The previous registry held a single
+ * made-up entry:
+ *
+ *     USDC: 0x5dDFa3e0d2C9d0dF4D6b1C6bA9E1A0eD4C5f2B1
+ *
+ * That address does not exist, and there is no "USDC" on this chain at all. It
+ * was typed to satisfy `Record<string, {...}>` and never checked against a node —
+ * the same failure as the asset registries ADR-0011 removed, except the invented
+ * entry would have been the ONLY thing an adapter could resolve.
+ *
+ * The addresses below are read from Moderato itself (see PROOF_LEDGER: 1M units
+ * each, confirmed from Transfer logs, not from the faucet response). They follow
+ * Tempo's deterministic TIP-20 scheme, `0x20c0…` followed by an index — except
+ * BetaUSD, which is `0x20c0…6a37da5c996874be` and would have been missed by any
+ * pattern-matching. **Enumerate from chain; do not infer.**
+ *
+ * Decimals are 6 for all five, per the observed `0xe8d4a51000` = 1e12 = 1M units
+ * transfer amounts.
+ */
 export const TEMPO_TOKENS: Record<string, { symbol: string; mint: `0x${string}`; decimals: number }> = {
-  USDC: { symbol: "USDC", mint: "0x5dDFa3e0d2C9d0dF4D6b1C6bA9E1A0eD4C5f2B1", decimals: 6 },
+  OUSD: { symbol: "OUSD", mint: "0x20c0000000000000000000000000000000000000", decimals: 6 },
+  pathUSD: { symbol: "pathUSD", mint: "0x20c0000000000000000000000000000000000001", decimals: 6 },
+  AlphaUSD: { symbol: "AlphaUSD", mint: "0x20c0000000000000000000000000000000000002", decimals: 6 },
+  BetaUSD: { symbol: "BetaUSD", mint: "0x20c0000000000000000000006a37da5c996874be", decimals: 6 },
+  ThetaUSD: { symbol: "ThetaUSD", mint: "0x20c0000000000000000000000000000000000003", decimals: 6 },
 };
+
 
 export type TempoNetwork = "moderato" | "mainnet";
 
