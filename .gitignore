@@ -51,3 +51,4 @@ programs/*/Cargo.lock
 # A testnet faucet key is not high value, but it is exactly the habit this repo's
 # secrets tests exist to prevent, and the directory is 32MB of RocksDB besides.
 test-ledger/
+.dev-logs/

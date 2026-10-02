@@ -20,6 +20,7 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@solana/web3.js": "^1.99.0",
     "@types/node": "^22.18.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.1.12",
