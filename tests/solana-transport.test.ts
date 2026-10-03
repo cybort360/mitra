@@ -323,4 +323,27 @@ describe.skipIf(!live)("live Solana devnet (SOLANA_LIVE=1)", () => {
     console.log(`live solana settlement ${txHash} confirmed=${ok}`);
     expect(ok).toBe(true);
   }, 180_000);
+
+  /**
+   * F51 on the DEPLOYED program, not only in-process: a funded key that is not
+   * the mandate's engine tries to issue a permit. Simulated, so it costs nothing
+   * and changes nothing. Before F51 this succeeded for any signer.
+   */
+  it("the deployed program refuses a permit from anyone but the mandate's engine", async () => {
+    const conn = new Connection(process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com", "confirmed");
+    const principalKp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(KEY, "utf8"))));
+    const derive = (role: string) => Keypair.fromSeed(createHash("sha256").update(`mitra-solana-settlement:${role}:${principalKp.publicKey.toBase58()}`).digest());
+    const liveHolder = derive("holder").publicKey;
+    // The principal: funded and real, but NOT the engine its own mandate names.
+    const stranger = principalKp;
+    const tx = new Transaction().add(authorizeIx({
+      engine: stranger.publicKey, holder: liveHolder, action: new Uint8Array(32).fill(0x5a), amount: 3_000n, recipient: stranger.publicKey,
+    }));
+    tx.feePayer = stranger.publicKey;
+    tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+    tx.sign(stranger);
+    const sim = await conn.simulateTransaction(tx);
+    console.log(`simulated stranger authorize err=${JSON.stringify(sim.value.err)}`);
+    expect(sim.value.err).toEqual({ InstructionError: [0, { Custom: 6015 }] }); // POLICY_ENGINE_MISMATCH
+  }, 60_000);
 });

@@ -2290,9 +2290,11 @@ never stepping it, the vacuous-pass trap — fails **6** of the 12 new tests.
 
 ## F51 — a stranger could move a principal's capital through `spend_authorized`
 
-**Status:** `FAILED` on the deployed program (`GkQQtmVX…`, devnet). Fixed in code on
-`fix/vault-permit-binding` and `VERIFIED` in-process only — **not deployed**; the
-upgrade authority is `C4ZoTdNS…pSefD`.
+**Status:** fixed and **redeployed**. Fix merged to `fix/integrity-f40-f45`; the lead
+redeployed `GkQQtmVX…` (deploy slot 506552169 → 507040856, and the bytecode now holds
+the F51-only string `mandate v1 granted by`). On devnet a non-engine `authorize` is
+refused with `Custom: 6015` and the granted path settles — see PROOF_LEDGER. The
+wrong-vault and wrong-payee refusals are verified in-process only.
 **Found:** 2026-10-03, while preparing to bind `SolanaSettlementAdapter` to the vault.
 
 Three gaps, each reproduced against the real `mitra_vault::dispatch` before any
