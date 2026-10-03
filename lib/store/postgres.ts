@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type {
   Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
-  Settlement, Space, Vault,
+  Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
@@ -345,6 +345,58 @@ export class PostgresRepository implements EconomicRepository {
     const { rows } = await this.pool.query("SELECT * FROM mitra.event_log WHERE run_id = $1 ORDER BY seq ASC", [runId]);
     return rows.map(rowToEvent);
   }
+  // ── Sagas (F49) ─────────────────────────────────────────────────────────────
+
+  /**
+   * Upsert.
+   *
+   * The recovery kernel emits a NEW immutable Saga per transition rather than
+   * mutating one, so a replayed event stream must converge rather than fail on a
+   * duplicate key. `version` is carried in the payload but deliberately NOT used as a
+   * WHERE clause on the upsert: an out-of-order replay would then leave the newer row
+   * untouched silently, which is harder to notice than a conflict.
+   */
+  async saveSaga(saga: Saga): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.sagas
+         (saga_id, run_id, intent_id, status, recovered_value, contained_value,
+          steps, compensation_routes, route_attempts, timeout_policy, version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)
+       ON CONFLICT (saga_id) DO UPDATE SET
+         status              = EXCLUDED.status,
+         recovered_value     = EXCLUDED.recovered_value,
+         contained_value     = EXCLUDED.contained_value,
+         steps               = EXCLUDED.steps,
+         compensation_routes = EXCLUDED.compensation_routes,
+         -- F47: route_attempts is overwritten from the caller's copy, so a persisted
+         -- spent attempt can never be resurrected by a stale write.
+         route_attempts      = EXCLUDED.route_attempts,
+         timeout_policy      = EXCLUDED.timeout_policy,
+         version             = EXCLUDED.version`,
+      [
+        saga.sagaId, saga.runId, saga.intentId, saga.status,
+        saga.recoveredValue, saga.containedValue,
+        JSON.stringify(saga.steps), JSON.stringify(saga.compensationRoutes),
+        JSON.stringify(saga.routeAttempts ?? {}), saga.timeoutPolicy, saga.version,
+      ],
+    );
+  }
+
+  async getSaga(sagaId: string): Promise<Saga | null> {
+    const { rows } = await this.pool.query("SELECT * FROM mitra.sagas WHERE saga_id = $1", [sagaId]);
+    return rows[0] ? rowToSaga(rows[0]) : null;
+  }
+
+  async listSagas(runId?: string): Promise<Saga[]> {
+    const { rows } = runId
+      ? await this.pool.query("SELECT * FROM mitra.sagas WHERE run_id = $1 ORDER BY saga_id", [runId])
+      : await this.pool.query("SELECT * FROM mitra.sagas ORDER BY saga_id");
+    return rows.map(rowToSaga);
+  }
+
+  async updateSaga(saga: Saga): Promise<void> {
+    await this.saveSaga(saga);
+  }
 }
 
 function rowToVault(r: Record<string, unknown>): Vault {
@@ -404,5 +456,30 @@ function rowToEvent(r: Record<string, unknown>): RunEvent {
     status: String(r.status) as RunEvent["status"], receiptId: (r.receipt_id as string) ?? undefined,
     objectRef: (r.object_ref as string) ?? undefined,
     metadata: (r.metadata ?? {}) as Record<string, string | number | boolean>,
+  };
+
+}
+
+/**
+ * Row -> `Saga`.
+ *
+ * `route_attempts` defaults to `{}` rather than being optional on the type, so a row
+ * written before F47 (or with the column absent) reads as "no attempts spent" instead
+ * of `undefined` — which would make a replayed compensation look like a first
+ * attempt.
+ */
+function rowToSaga(r: Record<string, unknown>): Saga {
+  return {
+    sagaId: String(r.saga_id),
+    runId: String(r.run_id),
+    intentId: String(r.intent_id),
+    status: String(r.status) as Saga["status"],
+    steps: (Array.isArray(r.steps) ? r.steps : []) as Saga["steps"],
+    compensationRoutes: (Array.isArray(r.compensation_routes) ? r.compensation_routes : []) as string[],
+    routeAttempts: (r.route_attempts && typeof r.route_attempts === "object" ? r.route_attempts : {}) as Record<string, number>,
+    timeoutPolicy: String(r.timeout_policy ?? ""),
+    recoveredValue: Number(r.recovered_value ?? 0),
+    containedValue: Number(r.contained_value ?? 0),
+    version: Number(r.version ?? 1),
   };
 }

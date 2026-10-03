@@ -1,5 +1,5 @@
 import type {
-  Authorization, AuthorizationDecision, Reservation, ReservationStatus, Vault,
+  Authorization, AuthorizationDecision, Reservation, ReservationStatus, Saga, Vault,
 } from "@/lib/domain/types";
 import { mandates, reservations, vaults } from "@/lib/store/seed";
 import { transition } from "@/lib/kernel/machines";
@@ -28,6 +28,8 @@ export class CapitalLedger {
   private readonly vaults = new Map<string, Vault>();
   /** Authorizations issued, newest last. */
   private readonly authorizations: Authorization[] = [];
+
+  private readonly sagas = new Map<string, Saga>();
 
   constructor(seedVaults: readonly Vault[] = [], seedReservations: readonly Reservation[] = []) {
     for (const v of seedVaults) this.vaults.set(v.vaultId, { ...v });
@@ -191,6 +193,30 @@ export class CapitalLedger {
       .filter((r) => Number.isFinite(r.amount) && r.amount > 0)
       .filter((r) => new Date(r.expiresAt).getTime() > cutoff)
       .map((r) => ({ at: r.expiresAt, amount: r.amount }));
+  }
+
+  // ── Sagas (F49) ─────────────────────────────────────────────────────────────
+  //
+  // A saga is stored by value, not by reference, so a caller mutating the object it
+  // passed in cannot reach into the store afterwards — the same rule the vault and
+  // reservation maps already follow. `saveSaga` is an upsert because the recovery
+  // kernel produces a new immutable Saga per transition rather than mutating one.
+
+  async saveSaga(saga: Saga): Promise<void> {
+    this.sagas.set(saga.sagaId, { ...saga, steps: saga.steps.map((s) => ({ ...s })) });
+  }
+
+  async getSaga(sagaId: string): Promise<Saga | null> {
+    return this.sagas.get(sagaId) ?? null;
+  }
+
+  async listSagas(runId?: string): Promise<Saga[]> {
+    const all = [...this.sagas.values()];
+    return runId ? all.filter((s) => s.runId === runId) : all;
+  }
+
+  async updateSaga(saga: Saga): Promise<void> {
+    await this.saveSaga(saga);
   }
 }
 

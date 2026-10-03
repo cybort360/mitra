@@ -249,5 +249,30 @@ export const MIGRATIONS: string[] = [
       ALTER TABLE mitra.agreements DROP COLUMN space_id;
     END IF;
   END $$;
+
+  -- Sagas (F49). The recovery kernel had complete unit coverage and NO write path, so
+  -- declareSaga/compensate could only ever be exercised by a test calling them
+  -- directly. This table is what lets a real agreement produce one.
+  --
+  -- route_attempts is NOT NULL DEFAULT '{}' -- F47. maxAttempts is only enforceable if
+  -- the count lives on the persisted row. A nullable column would let a saga resume
+  -- with no attempts recorded, and a replayed compensation would then be treated as a
+  -- first attempt.
+  CREATE TABLE IF NOT EXISTS mitra.sagas (
+    saga_id             TEXT PRIMARY KEY,
+    run_id              TEXT NOT NULL,
+    intent_id           TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    recovered_value     NUMERIC(20,6) NOT NULL DEFAULT 0,
+    contained_value     NUMERIC(20,6) NOT NULL DEFAULT 0,
+    steps               JSONB NOT NULL DEFAULT '[]'::jsonb,
+    compensation_routes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    route_attempts      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    timeout_policy      TEXT NOT NULL DEFAULT '',
+    version             INTEGER NOT NULL DEFAULT 1,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_sagas_run ON mitra.sagas(run_id);
+  CREATE INDEX IF NOT EXISTS idx_sagas_status ON mitra.sagas(status);
   `,
 ];

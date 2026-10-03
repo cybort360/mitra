@@ -25,7 +25,7 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
 
@@ -167,6 +167,23 @@ export interface EconomicRepository {
   putReservation(reservation: Reservation): Promise<Reservation>;
 
   recordAuthorization(auth: Authorization): Promise<void>;
+
+  // ── Sagas (F49) ───────────────────────────────────────────────────────────
+  // The recovery kernel had complete unit coverage and no write path at all:
+  // `declareSaga`, `armSaga`, `recordStep` and `compensate` could only be reached
+  // by a test calling them directly, so PRD §4.5 ("failure is a state transition,
+  // not an exception") was unenforced in any running system.
+  //
+  // `saveSaga` UPSERTs rather than INSERTs, so replaying a saga event stream
+  // converges instead of failing on a duplicate key. `version` is carried so a
+  // stale writer cannot overwrite a newer saga.
+
+  saveSaga(saga: Saga): Promise<void>;
+  getSaga(sagaId: string): Promise<Saga | null>;
+  /** All sagas, optionally narrowed to one run. */
+  listSagas(runId?: string): Promise<Saga[]>;
+  /** Alias of saveSaga: the upsert IS the update. Named for call-site clarity. */
+  updateSaga(saga: Saga): Promise<void>;
   recentSpend(vaultId: string, mandateId: string, now: Date, windowMinutes: number): Promise<{ at: string; amount: number }[]>;
 
   /** Append to the durable, replayable event log. */

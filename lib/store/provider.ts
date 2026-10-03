@@ -44,7 +44,7 @@
 import type { Pool } from "pg";
 import type {
   Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
-  Settlement, Space, Vault,
+  Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import type {
   CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts,
@@ -214,6 +214,29 @@ export class InMemoryRepository implements EconomicRepository {
 
   async recordAuthorization(auth: Authorization): Promise<void> {
     this.ledger.recordAuthorization(auth);
+  }
+
+  // ── Sagas (F49) ─────────────────────────────────────────────────────────────
+  //
+  // A DELEGATION, not a second store. `InMemoryRepository` wraps `CapitalLedger`, and
+  // the ledger already owns the saga map — implementing this interface here as a
+  // separate copy would reintroduce exactly the drift `activeMandates` had (F48): two
+  // answers to "is this saga persisted?" that agree only until one of them changes.
+
+  async saveSaga(saga: Saga): Promise<void> {
+    await this.ledger.saveSaga(saga);
+  }
+
+  async getSaga(sagaId: string): Promise<Saga | null> {
+    return this.ledger.getSaga(sagaId);
+  }
+
+  async listSagas(runId?: string): Promise<Saga[]> {
+    return this.ledger.listSagas(runId);
+  }
+
+  async updateSaga(saga: Saga): Promise<void> {
+    await this.ledger.updateSaga(saga);
   }
 
   async recentSpend(
