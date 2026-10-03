@@ -1,0 +1,940 @@
+{
+  "fromNodeId": "n_ya91pvg5",
+  "highSeq": 47,
+  "entries": [
+    {
+      "entryId": "ctx_9114ecb85dd5d8ca",
+      "seq": 1,
+      "kind": "decision",
+      "title": "Sequence: harden the kernel before any chain integration",
+      "body": "The README's 10-step path put Solana programs at step 3. We reordered: the authorization kernel decides what is ever allowed to move value, so it must be trustworthy before anything anchors to it. Live-chain evidence is worthless if the thing emitting commitments has holes.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "kernel",
+        "sequencing"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.389Z",
+      "parents": [],
+      "hash": "8ca224b3e8528016786e2754e2a434116d5dd1a0e9862304286551db1a188f7a"
+    },
+    {
+      "entryId": "ctx_0e68e0dedf4f0e40",
+      "seq": 2,
+      "kind": "finding",
+      "title": "Reservation expiry was never enforced in the execution guard",
+      "body": "validateExecutionBinding read no expiresAt, so stale RESERVED/COMMITTED reservations returned ok:true. Confirmed against seed data res_run496. Fixed by requiring an explicit `now` and adding a RESERVATION_EXPIRED check.",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "expiry",
+        "security"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.392Z",
+      "parents": [
+        "8ca224b3e8528016786e2754e2a434116d5dd1a0e9862304286551db1a188f7a"
+      ],
+      "hash": "cc306b00c227146af68996f81d3b803bc5af9eae30c35fde6f34f8b9afa415c0"
+    },
+    {
+      "entryId": "ctx_71d2840f6c293276",
+      "seq": 3,
+      "kind": "finding",
+      "title": "velocityLimit was declared but never evaluated",
+      "body": "The field existed on the Mandate type and was set on seed data, but evaluateProposal never read it. Now enforced over a caller-supplied window of recent spend.",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "policy"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.394Z",
+      "parents": [
+        "cc306b00c227146af68996f81d3b803bc5af9eae30c35fde6f34f8b9afa415c0"
+      ],
+      "hash": "a3455091bac68cffc15949817652707f4536f3db2126eb8f1e9b07ae8fe2546a"
+    },
+    {
+      "entryId": "ctx_a47b18a16b13eebd",
+      "seq": 4,
+      "kind": "finding",
+      "title": "Negative amounts returned ALLOW at the policy layer",
+      "body": "Every amount guard was one-sided (>), so -100 passed policy and was only caught downstream in reserve(). Added INVALID_AMOUNT lower-bound guards in both the policy and execution layers, plus a NaN guard in reserve().",
+      "status": "active",
+      "scope": "kernel/authorization",
+      "tags": [
+        "bug",
+        "validation"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.396Z",
+      "parents": [
+        "a3455091bac68cffc15949817652707f4536f3db2126eb8f1e9b07ae8fe2546a"
+      ],
+      "hash": "9d392b377400015f4064d45cccb908e1696fe7d0e44501e2bd7bb0e001b8474a"
+    },
+    {
+      "entryId": "ctx_89ce3e9f71bf4b34",
+      "seq": 5,
+      "kind": "convention",
+      "title": "Kernel functions take explicit time; they never call new Date()",
+      "body": "A hidden wall-clock read is what allowed the expiry bug to sit undetected. Time is now an injected parameter so the kernel stays pure and testable.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "purity",
+        "testing"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.398Z",
+      "parents": [
+        "9d392b377400015f4064d45cccb908e1696fe7d0e44501e2bd7bb0e001b8474a"
+      ],
+      "hash": "7ada9d8291bdbb4efc5833e69b644f00d985f5afbe651dae165a93fb47d886ff",
+      "data": {
+        "files": [
+          "lib/kernel/authorization.ts",
+          "lib/kernel/vault.ts",
+          "lib/kernel/clearing.ts"
+        ]
+      }
+    },
+    {
+      "entryId": "ctx_850848858ab43f8a",
+      "seq": 6,
+      "kind": "invariant",
+      "title": "An ALLOW decision is never itself permission to move value",
+      "body": "The exact instruction must still match the evaluated action digest, amount, asset, chain, expiry, nonce and reservation. This is the thesis of the product and the reason the execution guard exists as a separate gate from policy evaluation.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "security",
+        "thesis"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.401Z",
+      "parents": [
+        "7ada9d8291bdbb4efc5833e69b644f00d985f5afbe651dae165a93fb47d886ff"
+      ],
+      "hash": "a2dfb8ea1626741c5061116c31146b6b22e3e3ac9b38558f15cadc65598ae4dd"
+    },
+    {
+      "entryId": "ctx_38bb7a12d9f84d8e",
+      "seq": 7,
+      "kind": "invariant",
+      "title": "Available vault capital reflects every encumbrance",
+      "body": "total = available + reserved + escrowed + encumbered + settling + frozen. reconcileVault must report zero difference or the log is not trustworthy.",
+      "status": "active",
+      "scope": "kernel/vault",
+      "tags": [
+        "conservation"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.404Z",
+      "parents": [
+        "a2dfb8ea1626741c5061116c31146b6b22e3e3ac9b38558f15cadc65598ae4dd"
+      ],
+      "hash": "788d732e69f2c355508be6fd74d4195bc83af2fcdcfda85d96bb2873fece33f9",
+      "data": {
+        "files": [
+          "lib/kernel/vault.ts"
+        ]
+      }
+    },
+    {
+      "entryId": "ctx_737589f6a838c2fe",
+      "seq": 8,
+      "kind": "blocker",
+      "title": "Economic kernel is not yet reachable from any API route or page",
+      "body": "evaluateProposal and validateExecutionBinding are never called in production paths. Only reconcileVault, netObligations and failureScenarios are wired. The authorization engine is effectively dead code until Phase 1 adds /reservations and /authorizations routes.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "phase1",
+        "wiring"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.407Z",
+      "parents": [
+        "788d732e69f2c355508be6fd74d4195bc83af2fcdcfda85d96bb2873fece33f9"
+      ],
+      "hash": "bcc0b20cc34f8fefb6f2f56e98e3b73bc21cb847c8b44f859a6ed691327bf372"
+    },
+    {
+      "entryId": "ctx_db21ae062806c5ce",
+      "seq": 9,
+      "kind": "finding",
+      "title": "Console UI is template-literal HTML, not components",
+      "body": "15 pages totalling 89 lines, built from giant inline HTML strings (app/policies/page.tsx has a 2496-char single line). It demonstrates information architecture but is a mockup, not a product.",
+      "status": "active",
+      "scope": "ui",
+      "tags": [
+        "phase1",
+        "ui"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.409Z",
+      "parents": [
+        "bcc0b20cc34f8fefb6f2f56e98e3b73bc21cb847c8b44f859a6ed691327bf372"
+      ],
+      "hash": "42a1d03efb8d0acad6cd69ba7cc5de051f716cc41792312b8676f4d9c1f79aef"
+    },
+    {
+      "entryId": "ctx_280ae778d07adcbb",
+      "seq": 10,
+      "kind": "decision",
+      "title": "Store is a static seed array; data.ts only re-exports it",
+      "body": "lib/store/data.ts is `export * from './seed'`. There is no persistence and no event log. Replacing this with Postgres plus an append-only event log is the first item of Phase 1.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "phase1",
+        "storage"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.411Z",
+      "parents": [
+        "42a1d03efb8d0acad6cd69ba7cc5de051f716cc41792312b8676f4d9c1f79aef"
+      ],
+      "hash": "98f8a82a9ee6d8a33a07637f908ac62fe4b4e38d6ad2ca214f82a3f283daf405"
+    },
+    {
+      "entryId": "ctx_9ee0723be8e15371",
+      "seq": 11,
+      "kind": "question",
+      "title": "Should the shared context server live inside the app or beside it?",
+      "body": "Currently a standalone package with its own build. Integrating into Next.js would couple memory availability to the app's lifecycle, which is undesirable for a tool that must run even when the app is down.",
+      "status": "active",
+      "scope": "tooling",
+      "tags": [
+        "architecture"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:38:04.412Z",
+      "parents": [
+        "98f8a82a9ee6d8a33a07637f908ac62fe4b4e38d6ad2ca214f82a3f283daf405"
+      ],
+      "hash": "213d588eed8e3321e50b4bb77848e5434774e8228a92fbbe41a77808b23eaa54"
+    },
+    {
+      "entryId": "ctx_7e6e4a22e3abd61d",
+      "seq": 12,
+      "kind": "convention",
+      "title": "Agents announce intent in shared context before non-obvious work",
+      "body": "Record a decision entry BEFORE making the change, not a summary after. The reasoning is the only part a future reader cannot reconstruct from the diff. If you stop mid-task, leave a handoff entry stating what is done, what is next, and the risk.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.711Z",
+      "parents": [
+        "213d588eed8e3321e50b4bb77848e5434774e8228a92fbbe41a77808b23eaa54"
+      ],
+      "hash": "9761cccee4ec1ca0590a3ba9fcebdf9cbd6d4f6cbfdb80a4353fe670caa7d0ad"
+    },
+    {
+      "entryId": "ctx_7037dc563528b28e",
+      "seq": 13,
+      "kind": "convention",
+      "title": "Search shared context before editing code you did not write",
+      "body": "Code that looks wrong is usually a decision you cannot see from the code itself. Run context_recall on the area first, and again whenever something surprises you. This is the cheapest way to avoid re-solving a settled problem.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.718Z",
+      "parents": [
+        "9761cccee4ec1ca0590a3ba9fcebdf9cbd6d4f6cbfdb80a4353fe670caa7d0ad"
+      ],
+      "hash": "274b956240a031b6819cb0f3d14bba848a8483be1b0aafd0883f71f8d9fac888"
+    },
+    {
+      "entryId": "ctx_fd66a511da42b4e6",
+      "seq": 14,
+      "kind": "convention",
+      "title": "A wrong context entry is worse than a missing one",
+      "body": "Record only what you verified, never speculation. Every entry is read as fact by someone who was not there. If you were wrong, supersede it loudly and say what changed — never quietly contradict an entry you did not write.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "protocol",
+        "quality"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.720Z",
+      "parents": [
+        "274b956240a031b6819cb0f3d14bba848a8483be1b0aafd0883f71f8d9fac888"
+      ],
+      "hash": "50992cc017c4f7f5738720617d55e1337da3d42a95baece2cf4f8c67b787300f"
+    },
+    {
+      "entryId": "ctx_60612d38c3c3742f",
+      "seq": 15,
+      "kind": "convention",
+      "title": "Actor ids are stable and prefixed by kind",
+      "body": "Use agent:<name>, human:<name> or service:<name> and reuse the same id across all sessions and machines. A fresh id per session makes context look like it came from a crowd of one-off strangers and breaks attribution.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "identity",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.722Z",
+      "parents": [
+        "50992cc017c4f7f5738720617d55e1337da3d42a95baece2cf4f8c67b787300f"
+      ],
+      "hash": "51f338316b3b28f829f14657f1d879c7b174311c99f386f3307e35eb9f6fa049"
+    },
+    {
+      "entryId": "ctx_df3de9f840b82444",
+      "seq": 16,
+      "kind": "invariant",
+      "title": "A stopped agent must leave a handoff or the work is lost",
+      "body": "An agent that stops mid-task without a handoff entry is the most expensive failure mode: worse than one that never started, because a human or another agent must re-derive all the reasoning. Done / next / risk, always.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "handoff",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.725Z",
+      "parents": [
+        "51f338316b3b28f829f14657f1d879c7b174311c99f386f3307e35eb9f6fa049"
+      ],
+      "hash": "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
+    },
+    {
+      "entryId": "ctx_eb0700bdd778580c",
+      "seq": 17,
+      "kind": "convention",
+      "title": "Disagreements are resolved by superseding, not by picking silently",
+      "body": "When context_digest reports a topic as contested, two people recorded the same decision differently. Write a new decision that supersedes both and states the tradeoff, so the reasoning survives. If it truly needs a human, record a question naming the exact choice.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "conflict",
+        "protocol"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T13:50:08.727Z",
+      "parents": [
+        "3d9f5a473784a0f4caa91c36681163d047aaa9cae4bc7215bb98262a68b2200f"
+      ],
+      "hash": "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+    },
+    {
+      "entryId": "ctx_7314de9d331ec1b4",
+      "seq": 18,
+      "kind": "finding",
+      "title": "Partner verified sync round-trip on a fresh clone",
+      "body": "Auto-detected sync dir publishes correctly.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [],
+      "authorId": "human:partner",
+      "createdAt": "2026-10-01T13:54:15.017Z",
+      "parents": [
+        "1ca2ceab4b840fdf603ab7d7badec401e3493c53a11072a3ef8078e9383600f9"
+      ],
+      "hash": "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
+    },
+    {
+      "entryId": "ctx_69f2138f13ca7a5a",
+      "seq": 19,
+      "kind": "finding",
+      "title": "PR #2 review: kernel hardening verifies clean, safe to merge",
+      "body": "Reviewed feat/kernel-hardening against main in /tmp/pr2 worktree. Typecheck clean, vitest 23/23 green. No production callers of evaluateProposal/validateExecutionBinding in app/ lib/ components/ - breaking now/context params are test-only migration, safe. All four holes confirmed by reading diff: expiry check with required now, velocityLimit over caller-supplied recentSpend, INVALID_AMOUNT lower bound in policy+guard+reserve NaN guard, NONCE_ALREADY_CONSUMED via ExecutionContext. Residual notes (not blockers): negative SpendEvent amounts would reduce windowed sum - no lower-bound guard on SpendEvent; nonce replay protection is only as strong as caller-supplied consumedNonces list, no persistent store yet; releaseReservation accepts RESERVED only, COMMITTED must go through consume. Does not make kernel reachable - blocker #8 still stands.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "kernel",
+        "pr-2",
+        "review"
+      ],
+      "authorId": "agent:opencode",
+      "createdAt": "2026-10-01T14:36:10.711Z",
+      "parents": [
+        "b3f0ae014fd5c10146a5b29fdec0e6fb86b62368eb9b12f505b84409de163c77"
+      ],
+      "hash": "19ae025b90fc19661bc3ffef32eedc7af2e46818d883fa30632341c762d7916b"
+    },
+    {
+      "entryId": "ctx_f20b4f0a54cb6d68",
+      "seq": 20,
+      "kind": "convention",
+      "title": "Read AGENTS.md and forge/ before any meaningful change; the PRD is normative",
+      "body": "This repo is under the FORGE 1.4 control plane. Read forge/PRODUCT.md, forge/INVARIANTS.md, forge/ARCHITECTURE.md, forge/EXECUTION_PLAN.md, forge/PROOF_LEDGER.md. Repository files beat chat memory. Never mark a claim VERIFIED without executed evidence; record the command. Where docs/*.md and docs/product/MITRA_PRD.md disagree, the PRD wins and the disagreement goes in forge/FAILURES.md.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "agents",
+        "forge",
+        "governance"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T16:18:22.502Z",
+      "parents": [
+        "19ae025b90fc19661bc3ffef32eedc7af2e46818d883fa30632341c762d7916b"
+      ],
+      "hash": "b1f3bbc1f35bab14c7a3be541569fea192e40ff757b6540bb1b2316fb24484bd"
+    },
+    {
+      "entryId": "ctx_dc74a4e153a1085a",
+      "seq": 21,
+      "kind": "decision",
+      "title": "The PRD roadmap governs; local phase numbering is superseded",
+      "body": "The PRD defines 11 phases. Its Phase 2 exit condition is REAL testnet proof (vault creation, funding, guarded spend, release/refund, settlement). Our local kernel is a prerequisite for that, not progress toward it. PHASES.md is retained as history and labelled superseded; forge/EXECUTION_PLAN.md is authoritative. Do not describe Postgres work as Phase 2 progress.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [
+        "correction",
+        "prd",
+        "roadmap"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T16:18:22.510Z",
+      "parents": [
+        "b1f3bbc1f35bab14c7a3be541569fea192e40ff757b6540bb1b2316fb24484bd"
+      ],
+      "hash": "3869208247a108230d11e6e37f2fa4e4a1da5cf698f5957cb37e2133f2c55bec"
+    },
+    {
+      "entryId": "ctx_5f068fea2551a905",
+      "seq": 22,
+      "kind": "finding",
+      "title": "FR-VAULT-006 holds by absence: there is no withdrawal path to test",
+      "body": "Agent authority not implying principal withdrawal authority is the weakest link in the build. It is true today because no withdrawal route exists at all, which is not evidence. The moment one is added nothing stops it being wrong. Recorded UNTESTED rather than VERIFIED; PRD places it in Phase 3.",
+      "status": "active",
+      "scope": "kernel",
+      "tags": [
+        "evidence",
+        "prd",
+        "security"
+      ],
+      "authorId": "agent:cline",
+      "createdAt": "2026-10-01T16:18:22.513Z",
+      "parents": [
+        "3869208247a108230d11e6e37f2fa4e4a1da5cf698f5957cb37e2133f2c55bec"
+      ],
+      "hash": "d83c74cf519a3e307a135033d1ec9db3947b6b465ea21b45dff69b9e6b194b29"
+    },
+    {
+      "entryId": "ctx_e87744e2aee1a43e",
+      "seq": 23,
+      "kind": "finding",
+      "title": "Entries 8 and 10 are STALE — do not rely on them",
+      "body": "Entry 8 ('kernel not reachable from any API route') and entry 10 ('store is a static seed array') were true in week 1 and are FALSE now.\n\nCurrent state 2026-01-10:\n- Durable Postgres repository is wired; routes go through getStore() with InMemoryRepository/PostgresRepository behind one interface (ADR-0003).\n- PRD Phase 2 exit condition is VERIFIED on Solana devnet: vault creation, funding, reservation, guarded spend, release/refund, settlement. Program GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY, vault 5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T.\n- Phases 3-10 are unbuilt (BLOCKED_INTERNAL), except TALOS which is BLOCKED_EXTERNAL (not on disk).\n- 24 self-recorded failures in forge/FAILURES.md. Read those before trusting any claim.\n\nThe context db predates all of this. Treat entries 1-22 as historical unless they are invariants or conventions.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T04:19:15.249Z",
+      "parents": [
+        "d83c74cf519a3e307a135033d1ec9db3947b6b465ea21b45dff69b9e6b194b29"
+      ],
+      "hash": "974d0956afc43a971cd27330998ca5c2ac40ac7d011f534acb899474273a5eb7"
+    },
+    {
+      "entryId": "ctx_50a4c1b44cffd933",
+      "seq": 24,
+      "kind": "decision",
+      "title": "Substrate locations for PRD section 50 reuse",
+      "body": "Four inherited projects named in PRD section 50. Verified locations (F24):\n\n  Engraving  /home/ubuntu/engravings     github.com/etvjay/Engraving\n  Microcosm  /opt/microcosm-x            github.com/Jaydearcadian/microcosm-x  [RUNNING systemd service, FORGE 1.4]\n  Cleara     /home/ubuntu/ClearaOnGen    github.com/etvjay/ClearaOnGen\n  TALOS      NOT FOUND - depth-6 sweep of / returned zero hits\n\nMicrocosm is NOT in /home/ubuntu with its siblings; it is at /opt. A directory listing of the obvious location misses it.\n\nTALOS absent is BLOCKED_EXTERNAL for Phase 6. Phase 6 can still be built, but claiming it reuses TALOS semantics would be unsupported.\n\nNoema is explicitly non-core per section 50.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T04:19:25.736Z",
+      "parents": [
+        "974d0956afc43a971cd27330998ca5c2ac40ac7d011f534acb899474273a5eb7"
+      ],
+      "hash": "6bb6696ba3c1c930f8776488a84f6d9f1d797f8f569367e80e3f6204411f0442"
+    },
+    {
+      "entryId": "ctx_21623ef067787574",
+      "seq": 25,
+      "kind": "handoff",
+      "title": "5 analyses delegated to an external agent via MCP",
+      "body": "Cline teammate dispatch is BLOCKED_EXTERNAL (all 6 runs failed with 'Unauthorized - re-authenticate'). An external agent is taking these over.\n\nDo them IN THIS ORDER. Read forge/FAILURES.md and forge/PROOF_LEDGER.md before starting - they contain 24 self-recorded failures and the current evidence state.\n\n1. CLEARA CLEARING MAP (Phase 7 substrate). Repo: /home/ubuntu/ClearaOnGen. PRD section 50 says reuse: clearing state machine, obligation/settlement separation, proof-native receipts, reconciliation. ALSO: 'Do not force GenLayer semantic adjudication into every Mitra transaction' - flag anything GenLayer-specific. ASSESS MATURITY HONESTLY: does netting actually exist in code, or only in docs? Do tests exist and pass?\n\n2. MICROCOSM COMMERCE MAP (Phase 4 substrate). Repo: /opt/microcosm-x (note: /opt, not /home/ubuntu). PRD section 50 says reuse: Space concept, work-order lifecycle, escrow semantics, evidence-linked delivery, MCP integration, commercial coordination, event/proof discipline. Has packages/policy-engine (attestation, capability-manifest, delegation, governance), contracts/ (foundry), apps/charcoal.\n\n3. RED-TEAM EVIDENCE AUDIT (highest value). Find failure records the repo has NOT self-identified. Check: can tests/dev-scripts.test.ts, spec-parity, evidence-vocabulary, adr-0009-reuse, and Rust tests/capital.rs actually FAIL? Does scripts/vault-devnet.mjs bind to on-chain state or to its own bookkeeping? Is any VERIFIED claim supported only by 'the script that made it passed'?\n\n4. EVM ADAPTER FEASIBILITY (Phases 8/9). READ F12 and F15 IN forge/FAILURES.md FIRST: on Tempo, eth_getBalance returns a large CONSTANT identical for every address, and api.tempo.xyz indexes MAINNET not Moderato. Verify both yourself before writing balance code. State the smallest genuinely-working settlement per chain and what credential each lacks.\n\nEvery claim needs a file:line or a command you ran plus its output. 'NOT FOUND IN REPO' is a valid and useful result.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T04:19:43.415Z",
+      "parents": [
+        "6bb6696ba3c1c930f8776488a84f6d9f1d797f8f569367e80e3f6204411f0442"
+      ],
+      "hash": "289658b1f6cfe6c12014256d40794f202a805e59f4c42f6b3abf81b7ef881856"
+    },
+    {
+      "entryId": "ctx_0bad23f74442e03f",
+      "seq": 26,
+      "kind": "finding",
+      "title": "Arcium is NOT blocked - F31: I declared BLOCKED_EXTERNAL without attempting it",
+      "body": "Phase 3d was recorded BLOCKED_EXTERNAL because 'Docker is not installed, disk 95% full'. Both true. The blocker was not, because I never ran the install.\n\nAttempted instead of assumed, all exit 0:\n  sudo -n true                -> passwordless sudo available\n  apt-get install docker.io   -> Docker 29.1.3\n  usermod -aG docker          -> sg docker works (cannot re-login mid-session, so use sg)\n  arcup install               -> Arcium CLI 0.15.0 + Arx Node + Trusted Dealer\n  arcium init probe           -> full scaffold, yarn deps in 4.46s\n  arcium build                -> BUILD/evaluate_mandate.arcis COMPILED (267KB + 192KB IR)\n\nPrerequisites now all present: Rust 1.98.0, Solana 4.3.0, Yarn 1.22.22, Anchor 1.0.2, Docker 29.1.3.\n\nRULE THIS PRODUCED: a blocker must be an ATTEMPT, not an observation. 'X is absent' is a state; 'I ran the command and X failed with Y' is a blocker. One command separates them and the cost of conflating them is a phase falsely written off.\n\nGotcha for anyone continuing: arcup needs Docker. My user was not in the docker group and a session cannot re-login, so run it as: sg docker -c 'arcup install'. Also arcium build's ANCHOR step fails with 'Platform tools v1.52 is incompatible with SBPFv3' - that is the Solana program build, NOT the Arcis circuit, which compiles first. Fix is cargo-build-sbf --arch v0 or a newer platform-tools.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:50:50.083Z",
+      "parents": [
+        "289658b1f6cfe6c12014256d40794f202a805e59f4c42f6b3abf81b7ef881856"
+      ],
+      "hash": "3d2b47ee6c3aab3596f40415194a70a6fd8ccc90d7bc35588cc3cbd54c2d787b"
+    },
+    {
+      "entryId": "ctx_3436837bf1f8814f",
+      "seq": 27,
+      "kind": "decision",
+      "title": "Phase 3c: one policy-evaluation seam, not scattered 'if encrypted' branches",
+      "body": "PRD 11.11 requires that a down enclave FAIL CLOSED and that 'no component may silently downgrade a confidential policy into an unrestricted approval'. That rule is only enforceable if 'is this confidential?' is a property of the evaluation REQUEST rather than an if at each call site. So: one PolicyEvaluator interface, two implementations (PublicPolicyEvaluator, and Arcium behind the same interface), one flag on one type, one gate.\n\nPRD 11.10 binds an enclave output to six fields: policy version, action digest, vault, mandate, decision expiry, execution guard. These are now a TS interface with all six REQUIRED, so adding one to the PRD forces adding it to the type and an implementation cannot omit one and compile.\n\nTHE FALLBACK, precisely. The PRD says 'fail closed UNLESS a separately defined public-policy fallback exists'. Those readings reconcile only if the fallback is (a) declared per-call, never a global default someone wires up and forgets; (b) marked evaluator:'public' on the result; (c) tagged ENCLAVE_FALLBACK_USED. An untagged fallback IS the silent downgrade the clause forbids, because evidence would claim a confidentiality that never happened.\n\nALSO ADDED: SignerAdapter (wallet signer abstraction, the other Phase 3 requirement). It exists because the same economic intent must execute on Solana, Base and Tempo (PRD 4.2) and each signs differently; a caller depending on Keypair directly would force a per-chain rewrite of the execution guard, which is the most dangerous code we have. mayExecute keeps two questions SEPARATE: is policy satisfied, and can this wallet sign. A local keypair answering yes to both must still be refused when policy says no.\n\nMUTATION AUDIT 6/6 caught (implicit downgrade, hidden fallback marking, skipped expiry, public-error-as-outage, guard token not re-derived, DENY reaching the signer). This is the standard F25/F28 failed.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:51:37.608Z",
+      "parents": [
+        "3d2b47ee6c3aab3596f40415194a70a6fd8ccc90d7bc35588cc3cbd54c2d787b"
+      ],
+      "hash": "7a32ef1638fda4b1d8ff7e0ef6209e20041eb6a1228d837341c9f9bac32040fe"
+    },
+    {
+      "entryId": "ctx_439b6d1b1d252a36",
+      "seq": 28,
+      "kind": "decision",
+      "title": "Phase 4 started: Space exists, and the agreement machine finally has a write path",
+      "body": "TWO FINDINGS FROM GROUNDING PHASE 4 IN THE ACTUAL CODE.\n\n1. SPACE WAS MISSING ENTIRELY. The word appears 35x in Microcosm's source and 0x in Mitra's domain types, while PRD 50 explicitly asks for the 'Space concept'. Its absence was not cosmetic: without a container there is no SCOPED authority, so a mandate/rule/evaluator defined for one engagement is implicitly global and an agent admitted to one job is admitted to all. That is the opposite of 13.1's 'bounded' and it is the containment property the policy enclave rests on. Now a real type in lib/domain/types.ts.\n\n2. THE AGREEMENT MACHINE HAD NO WRITE PATH. canTransition/transition existed and were called ONLY from tests - no production code touched them. That is exactly Phase 0's recorded blocker, 'six of seven state machines lack write paths'. A transition table nothing consults is documentation with a type signature. lib/kernel/commerce.ts now routes every status change through transition(), which THROWS on an illegal edge so a caller that forgets to check cannot write the state anyway.\n\nCONTainment DESIGN POINT: I added spaceId to the Agreement type. Without it containment was ADVISORY - applyAgreementOp(space, agreement, ...) takes the Space as an argument, so a caller can hand in the wrong one and every rule silently validates against a Space the agreement was never in. Storing the link makes a wrong Space DETECTABLE rather than a mistake people must remember to avoid. That is the difference between a check and a convention.\n\nRefund is deliberately EXEMPT from the budget admission check: requiring headroom to give money back would strand it.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:52:02.237Z",
+      "parents": [
+        "7a32ef1638fda4b1d8ff7e0ef6209e20041eb6a1228d837341c9f9bac32040fe"
+      ],
+      "hash": "b95f8a2bfe9d6cb380cb2703c042e01189cf1498bdefc177d60e90b6a12a8114"
+    },
+    {
+      "entryId": "ctx_42aa4a63e2d0bb0d",
+      "seq": 29,
+      "kind": "handoff",
+      "title": "Phase status 2026-10-02 + the one-shot plan (waves 1-6)",
+      "body": "PHASE AUDIT, honest, with the caveat below.\n\n  0 Ground truth  INTEGRATED        schemas + ADRs; 6/7 machines had no write path (Phase 4 starts fixing)\n  1 Core          E2E_VERIFIED      full local lifecycle\n  2 Solana kernel LIVE_DEMONSTRATED devnet\n  3 Authority     LIVE_DEMONSTRATED spend+amend+revoke on devnet; replay refused on-chain (0x177c)\n  4 Commerce      IN PROGRESS       Space type + commerce lifecycle landed; no API routes yet\n  5 Ecosystem     IMPLEMENTED       only a 65-LOC local stub; no A2A/MCP/ERC-8004/x402\n  6 Recovery      PROPOSED          failure-lab.ts has ZERO exports; TALOS absent from disk (F24)\n  7 Clearing      TESTED            netObligations only; no epochs/challenge/adversarial suite\n  8 Base          PROPOSED          no adapter\n  9 Tempo         PROPOSED          env funded, no adapter\n 10 Tooling       IMPLEMENTED       console is a mockup; AND 4 of 9 API routes serve static seed.ts\n                                   instead of the repository (/vaults, /runs, /clearing, /obligations)\n\nREAL DEFECT FOUND WHILE GROUNDING: /api/v1/vaults imports  from lib/store/seed, so it returns\nFIXTURES with a reconciliation computed on top. 4 of 9 routes do this. That is Phase 10's 'console is\na mockup' leaking into the API layer, and it means the API is not yet a view of the store.\n\nTHE ONE-SHOT PLAN, waves 1-6 in dependency order (user asked for this):\n  W1 Authority 3c/3d  <- policy seam DONE, signer abstraction DONE, Arcium unblocked + circuit compiles\n  W2 Commerce         <- Space + lifecycle DONE; needs API routes + tests + mutation audit\n  W3 Recovery         <- saga/compensation/redirect; TALOS is BLOCKED_EXTERNAL (F24)\n  W4 Clearing         <- epochs, netting, challenges, adversarial tests\n  W5 Adapters         <- A2A/MCP/ERC-8004/x402 | Base | Tempo\n  W6 Tooling          <- accounting, webhooks, observability, FIX THE 4 SEEDED ROUTES\n\nVERIFICATION STAYS INSIDE EACH WAVE. Mutation audit is part of the step, not a later ceremony.\nEvidence for why: F25 (green suite, replay protection deleted, nobody noticed), F28 (5 mutations\nsurvived, 3 tests named guarantees and never tested them), F30 (harness printed ALL CHECKS PASSED\nhaving skipped half the run). All three were caught by stopping to verify, not by moving faster.\n\nCURRENT GATES: Rust 72/72, TS 164 pass / 15 gated (persistence needs DATABASE_URL), tsc clean.\n30 failure records in forge/FAILURES.md - read them before trusting any claim.",
+      "status": "superseded",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:52:29.158Z",
+      "parents": [
+        "b95f8a2bfe9d6cb380cb2703c042e01189cf1498bdefc177d60e90b6a12a8114"
+      ],
+      "hash": "3a981d72e4f1501b2d4249ad1c38a7cfc9b0092b51a4ba203380b2e724cd8621"
+    },
+    {
+      "entryId": "ctx_4d920222748f308b",
+      "seq": 30,
+      "kind": "handoff",
+      "title": "Phase status 2026-10-02 + the one-shot plan (waves 1-6) [CORRECTED: supersedes the damaged entry]",
+      "body": "PHASE AUDIT, honest.\n\n  0 Ground truth  INTEGRATED        schemas + ADRs; 6/7 machines had no write path (Phase 4 starts fixing)\n  1 Core          E2E_VERIFIED      full local lifecycle\n  2 Solana kernel LIVE_DEMONSTRATED devnet\n  3 Authority     LIVE_DEMONSTRATED spend+amend+revoke on devnet; replay refused on-chain (0x177c)\n  4 Commerce      IN PROGRESS       Space type + commerce lifecycle landed; no API routes yet\n  5 Ecosystem     IMPLEMENTED       only a 65-LOC local stub; no A2A/MCP/ERC-8004/x402\n  6 Recovery      PROPOSED          failure-lab.ts has ZERO exports; TALOS absent from disk (F24)\n  7 Clearing      TESTED            netObligations only; no epochs/challenge/adversarial suite\n  8 Base          PROPOSED          no adapter\n  9 Tempo         PROPOSED          env funded, no adapter\n 10 Tooling       IMPLEMENTED       console is a mockup; AND 4 of 9 API routes serve static seed fixtures\n                                   instead of the repository (/vaults, /runs, /clearing, /obligations)\n\nREAL DEFECT FOUND WHILE GROUNDING: the /api/v1/vaults route imports the vaults array straight from\nlib/store/seed, so it returns FIXTURES with a reconciliation computed on top. 4 of 9 routes do this.\nThat is Phase 10's mockup leaking into the API layer; the API is not yet a view of the store.\n\nTHE ONE-SHOT PLAN, waves 1-6 in dependency order:\n  W1 Authority 3c/3d  <- policy seam DONE, signer abstraction DONE, Arcium unblocked + circuit compiles\n  W2 Commerce         <- Space + lifecycle DONE; needs API routes + tests + mutation audit\n  W3 Recovery         <- saga/compensation/redirect; TALOS is BLOCKED_EXTERNAL (F24)\n  W4 Clearing         <- epochs, netting, challenges, adversarial tests\n  W5 Adapters         <- A2A/MCP/ERC-8004/x402 | Base | Tempo\n  W6 Tooling          <- accounting, webhooks, observability, FIX THE 4 SEEDED ROUTES\n\nVERIFICATION STAYS INSIDE EACH WAVE. Mutation audit is part of the step, not a later ceremony.\nEvidence: F25 (green suite, replay protection deleted, nobody noticed), F28 (5 mutations survived,\n3 tests named guarantees and never tested them), F30 (harness printed ALL CHECKS PASSED having\nskipped half the run). All three were caught by stopping to verify, not by moving faster.\n\nCURRENT GATES: Rust 72/72, TS 164 pass / 15 gated (persistence needs DATABASE_URL), tsc clean.\n30 failure records in forge/FAILURES.md - read them before trusting any claim.\n\nNOTE: the superseded entry was damaged because backticks in a shell-quoted body trigger command\nsubstitution. Use single quotes, never backticks, when posting via the CLI.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T07:56:06.301Z",
+      "parents": [
+        "3a981d72e4f1501b2d4249ad1c38a7cfc9b0092b51a4ba203380b2e724cd8621"
+      ],
+      "hash": "73dc905caa4a05ce0a48578dfc611704778729366af1422682a8cece88298be9",
+      "supersedesId": "ctx_42aa4a63e2d0bb0d"
+    },
+    {
+      "entryId": "ctx_f5e76c88e1bb8d29",
+      "seq": 31,
+      "kind": "handoff",
+      "title": "Structure complete for Phases 3-10; deployment deferred to the closing phase",
+      "body": "Goal was a structured template run on FORGE with every test passing and deployment left to close it out. That is now the state.\n\nBUILT AND TESTED THIS SESSION (all mutations audited locally, none deployed):\n  P3 Authority   policy seam + signer abstraction. Mutation 6/6. Arcium circuit COMPILES\n                  (evaluate_mandate.arcis, 267KB + IR).\n  P4 Commerce    Space type, agreement write path, /spaces and /agreements routes. 6/6.\n  P5 Ecosystem   MCP participation surface + A2A lifecycle. 5/5.\n  P6 Recovery    saga kernel, ARMED gate, three distinct outcomes. 6/6.\n  P7 Clearing    epoch write path, immutability, adversarial suites. 8/8.\n  P8 Base        Base + Solana adapters behind one SettlementAdapter. 6/6.\n  P9 Tempo       Tempo adapter with F12/F15 encoded as guards. 5/5.\n  P10 Tooling    accounting + reconciliation + /api/v1/accounting. 5/5.\n\nGATES: TS 297 pass / 15 gated, Rust 72/72, tsc clean.\n\nEVIDENCE IS DELIBERATELY TESTED, NOT LIVE_DEMONSTRATED, for Phases 3-10. Only Phase 2 has\non-chain proof. Every adapter without a transport THROWS rather than fabricating a txHash,\nso the deployment gap is visible rather than silent - that property is mutation-tested on\nall three rails.\n\nTHE PATTERN ACROSS ALL EIGHT WAVES: netObligations existed with no write path, canTransition\nwas called only from tests, and now three settlement adapters exist while nothing is deployed.\nSame shape every time, so it is a rule worth keeping: a type or a transition table with no\ncaller is documentation, not a feature.\n\nDEPLOYMENT QUEUED for the close: Arcium MPC cluster (P3), Base Sepolia (P8), Tempo Moderato\n(P9). Known risks recorded in forge.json: Base gas unverified since the bridge, Tempo mints\nare constants not read from chain, devnet vault drained to near-rent by test runs.\n\nFORGE UPDATED: EXECUTION_PLAN phase table now separates BUILD from EVIDENCE from BLOCKER,\nand forge.json carries prd_phases, a deployment block, and per-wave mutation results.\n\n36 failure records in forge/FAILURES.md. Read them before trusting any claim - the highest-\nsignal ones are F25, F28, F32 (tests that named a property and did not exercise it) and F33\n(a duplicated relationship with nothing enforcing it).",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T12:04:43.883Z",
+      "parents": [
+        "73dc905caa4a05ce0a48578dfc611704778729366af1422682a8cece88298be9"
+      ],
+      "hash": "c47dd0e09ad70c5fb0a489a1fa0a55410af99b541076c5924b362eb2abee6674"
+    },
+    {
+      "entryId": "ctx_26c79b43e9b2bb2a",
+      "seq": 32,
+      "kind": "decision",
+      "title": "EVM standards layer built: EIP-712, ERC-1271, ERC-8183, ERC-8004, x402/MPP, ERC-4337",
+      "body": "Every ERC/EIP reference in this codebase used to be a counterparty string in seed.ts - x402:approved:*, erc8183:provider-3. That is the F24 pattern: seed data describing systems that did not exist. Now built.\n\nEIP-712 is the load-bearing one. The Base settlement commitment was FNV-1a, honestly labelled NOT signature-grade - and that label is why the adapter was provisional, because a digest no signer can produce and no verifier can check is not a commitment. It is now a real typed-data digest over a domain separator (verified 32-byte keccak), so a settlement is a value a wallet can SIGN.\n\nTHE BUG THAT MATTERED, found by a test using a stub verifier: EOA signature recovery THROWS on a contract-wallet signature, and I was returning MALFORMED_SIGNATURE immediately - which made the entire ERC-1271 path unreachable and denied every smart-account signature. Exactly the silent denial the function exists to prevent. Fall-through is now the design.\n\nERC-8183 is a PROJECTION from Agreement/Deliverable/Reservation, not a second commerce system. One lifecycle, two vocabularies. It refuses an unbacked escrow, because an ERC-8183 consumer reads escrow as held funds.\n\nERC-8004 is projected OUTWARD only. Mitra never accepts a registry verdict on identity - a third party that could mint an agent into existence would bypass onboarding. Reputation is an ATTRIBUTED CLAIM that may influence only discovery RANKING. If a registry score could raise a spending limit, an attacker would buy a high score and spend against it, which is the unaudited credit system PRD 3.2 explicitly refuses.\n\nx402/MPP: neither may move capital. Both issue instructions; the vault decides. A session REFUSES a charge past its ceiling, and every x402 challenge requires a reservation. Tempo receipt mapping refuses while token decimals are UNRESOLVED - converting without a scale is off by a power of ten, and a receipt wrong by 10^6 is worse than one never produced.\n\nERC-4337 is envelope only and the module header says so: packing, hashing, validation, batching by sender. No bundler, EntryPoint or paymaster is deployed and nothing has touched Base.\n\nMutations 8/8. TS 343 pass, Rust 72/72, tsc clean.\nSTILL NOT BUILT: the Virtuals marketplace adapter - the one Phase 5 item left.",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "lead",
+      "createdAt": "2026-10-02T12:29:17.515Z",
+      "parents": [
+        "c47dd0e09ad70c5fb0a489a1fa0a55410af99b541076c5924b362eb2abee6674"
+      ],
+      "hash": "a2685ce05e35a7b7b1987a6f9a7126f0d5bb3e38a98810a8b112e554a9f3553e"
+    },
+    {
+      "entryId": "ctx_285f545c43adcb7d",
+      "seq": 33,
+      "kind": "decision",
+      "title": "F40 — the F39 TIP-20 registry was itself fabricated (4 of 5 entries wrong)",
+      "body": "Moderato has no USDC *and* no OUSD. Reading name() from a node gives PathUSD/AlphaUSD/BetaUSD/ThetaUSD at indices 0-3, plus OpenUSD at 0x20c0...6a37da5c996874be. F39 asserted OUSD@0, pathUSD@1, AlphaUSD@2, BetaUSD@6a37, ThetaUSD@3 — four of five wrong.\n\nWhy nothing caught it: the pinning test asserted expect(TEMPO_TOKENS).toEqual({...the same literals it replaced...}). Asserting a literal against the object it was copied from cannot fail for any reason other than someone editing the test. Two self-referential copies do not corroborate each other.\n\nThe literal assertion is DELETED, not rewritten. Replaced by property assertions (symbol equals key; no native symbol; exactly the verified set) plus an opt-in TEMPO_LIVE=1 test that re-derives every name() from rpc.moderato.tempo.xyz. Verified: 842ms of real network round-trips, 28/28 in file.\n\nRULES ADDED: (4) a constant pinned by a literal is pinned to nothing; (5) correcting a fabrication is itself an unverified claim.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "f39",
+        "f40",
+        "fabrication",
+        "tempo"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:02:31.097Z",
+      "parents": [
+        "a2685ce05e35a7b7b1987a6f9a7126f0d5bb3e38a98810a8b112e554a9f3553e"
+      ],
+      "hash": "ae10d058453533aeb20e5158dbe388a0ee39abe86df4c8dc0eeeac1bec37060c"
+    },
+    {
+      "entryId": "ctx_855e68eda1e473b3",
+      "seq": 34,
+      "kind": "decision",
+      "title": "F41 — a frozen vault could be drained",
+      "body": "withdraw() did its arithmetic INLINE in the handler and, unlike its sibling reserve(), never checked is_frozen(). An emergency freeze did not stop the one operation it most needed to.\n\nWhy it survived: FR-VAULT-006 was recorded UNTESTED with the rationale \"the invariant holds by absence: there is no withdrawal route at all\". That was FALSE — withdraw had been in lib.rs the whole time. The missing thing was a test, not a path. An invariant discharged by a claimed absence nobody checked is a claim, not weaker evidence; it concealed the work.\n\nFix: rules moved into Vault::withdraw alongside deposit/reserve/release. The freeze asymmetry with release is deliberate and documented — release moves capital WITHIN the vault and must stay permitted or a freeze strands in-flight obligations; withdraw moves capital OUT, which is what a freeze exists to stop.\n\nTHE PART WORTH KEEPING: type tests alone did not catch it. A mutation restoring the pre-F41 handler shape left the ENTIRE Rust suite green (9 new tests, all 72 pre-existing). Two further tests now drive the real mitra_vault::dispatch with real AccountInfos and kill that mutation (2 failures). The negative case (an unfrozen vault MUST allow withdrawal) is included so always-refuse cannot pass either way.\n\nRULES ADDED: (8) holds-by-absence must be checked, not assumed; (9) inline arithmetic in a handler bypasses every state-level guard.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "f41",
+        "fr-vault-006",
+        "security",
+        "solana"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:02:36.708Z",
+      "parents": [
+        "ae10d058453533aeb20e5158dbe388a0ee39abe86df4c8dc0eeeac1bec37060c"
+      ],
+      "hash": "c410e28014fc4ee044b61218d5590da03942de471da956631666c50e47a69541"
+    },
+    {
+      "entryId": "ctx_af31933887235a77",
+      "seq": 35,
+      "kind": "decision",
+      "title": "F42 — a Space budget was a lifetime cap; the fix allowed a double-release",
+      "body": "committed was incremented on fund and NEVER decremented — not on acceptance, not on refund. Headroom is budget - committed, so a Space with a 100 budget could fund exactly ten 10-USDC agreements ACROSS ALL TIME; the eleventh failed with SPACE_BUDGET_EXCEEDED even though all ten had been accepted and paid for. Reproduction fails on agreement index 9.\n\nWhy nothing caught it: every commerce test drove ONE agreement to completion and asserted the resulting status. None asked what the Space could do NEXT.\n\nTHE SECOND DEFECT WAS INTRODUCED BY THE FIRST. ACCEPTED -> REFUNDED is a LEGAL edge in the machine table, and both are settlement states, so releasing on either without a flag returns the price TWICE. With other agreements still encumbered this manufactures headroom ABOVE the budget. escrowReleased on Agreement exists for exactly this.\n\nThe double-release nearly shipped untested: a mutation removing the if(agreement.escrowReleased) guard left 27 of 27 tests green. Only a test that places a chargeback next to two live agreements kills it.\n\nThree fixture bugs in my own tests, each looking like a kernel defect: driveToAccepted returned only the agreement (stale Space), apply discarded r.value.space, and one assertion used the pre-fund Space. Because applyAgreementOp is pure, a fixture that forgets to thread the returned Space measures stale state and the kernel is right.\n\nAlso: all three were cited to PRD §12, which is payment TRANSPORT and does not define them. PRD §13.4 Escrow invariants does, and lists six clauses. Citations corrected.\n\nRULES ADDED: (10) a budget is a concurrency limit, not a cumulative total; (11) a fix for a leak can introduce a double-release.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "budget",
+        "commerce",
+        "f42",
+        "fr-com"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:02:45.057Z",
+      "parents": [
+        "c410e28014fc4ee044b61218d5590da03942de471da956631666c50e47a69541"
+      ],
+      "hash": "cf2192b26f0e1c22c7d1b8efb0735ec8a5e905edb68ede012ddf36c3b6e1153d"
+    },
+    {
+      "entryId": "ctx_1ff4b98029c87699",
+      "seq": 36,
+      "kind": "decision",
+      "title": "F43 — the mandate circuit ALLOWED zero-amount actions and one reason for every DENY",
+      "body": "Neither defect is visible in the artifact: the circuit compiles, its Rust unit test passes, and arcium build reports success. Both bugs live in the reason and validity arithmetic, which no test exercised.\n\nDEFECT 1 — zero-amount actions were ALLOWED. is_nonzero(x) was not_gt(0, x), commented \"which is exactly x >= 1\". It is not: not_gt(0,x) is !(0 > x) which is x >= 0 — ALWAYS TRUE. So is_nonzero(0) returned 1, amount_ok was 1, and the guard four lines above (\"a zero amount is never valid\") never fired. x != 0 is x > 0.\n\nDEFECT 2 — every DENY returned REASON_AMOUNT_INVALID. when_allowed(a,r,f) = a*r + (1-a)*f; when the decision fails a=0, so (1-a)=1 and the result is the fallback UNCONDITIONALLY. Reasons 1, 2, 4, 5, 6 were unreachable — the entire attribution mechanism the doc comment calls the point of the circuit.\n\nDEFECT 2b — precedence inverted: when(is_zero(x), CODE, reason) ran unconditionally, so a LATER failure overwrote an earlier one. A dead mandate that also breached max_transaction blamed the limit.\n\nVerified by extracting the arithmetic and simulating it (when(c,t,o)=c*t+(1-c)*o) rather than reasoning about it. Before: zero amount allowed=1; all four DENY cases reason=AMT. After: all 9 cases correct including the boundary amount==max_transaction and multi-failure precedence.\n\nRULES ADDED: (12) a comment asserting an equivalence is a claim, not a proof — verify boundary values 0 and the limit, not the middle; (13) a constant can masquerade as a mechanism.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "arcium",
+        "circuit",
+        "f43",
+        "fr-vault-008",
+        "security"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:02:52.008Z",
+      "parents": [
+        "cf2192b26f0e1c22c7d1b8efb0735ec8a5e905edb68ede012ddf36c3b6e1153d"
+      ],
+      "hash": "9554f8b172587c996964680a181bce208996b6fd85e90e1619263f8f2ed01b10"
+    },
+    {
+      "entryId": "ctx_36ce6f4f805b5fd5",
+      "seq": 37,
+      "kind": "decision",
+      "title": "F44 — the Arcium integration was a renamed template",
+      "body": "arcium build compiled the encrypted instruction and exited green while programs/probe/src/lib.rs was still wired to the template add_together. build/ contains only evaluate_mandate.arcis. Nine macro and type positions still referenced the old name.\n\nSo every previous statement that \"the Arcium circuit compiles\" was true of the encrypted module ALONE, and was never evidence that a confidential policy path existed. This is F39/F40s failure mode exactly: a green build standing in for a working feature.\n\nTOOLCHAIN, fully diagnosed. Four fixes tried, ALL FOUR FAILED: platform-tools in Anchor.toml (silently ignored); same in programs/*/Cargo.toml (also ignored); an env var (none exists); getting anchor to forward the flag (IMPOSSIBLE — strings anchor | grep tools-version is empty at anchor-cli 1.0.2). Root cause is version skew, not misconfiguration: anchor 1.0.2 predates SBPFv3; Solana CLI 4.3.0 pairs SBPFv3 with platform-tools v1.52 while only v1.57 is installed. Working invocation: cargo-build-sbf --tools-version v1.57 --arch v1 (--arch v1 is required; v0 links proc-macro crates against a 4KB stack and fails with frame size 49472 bytes). A shim at ~/bin/cargo-build-sbf injects the flags.\n\nNETWORKING, root-caused not resolved. The validator starts and advances slots but ARX nodes never come online: \"Failed to check cluster status ... http://host.docker.internal:8899/\". The compose file DOES map host.docker.internal:host-gateway, so the mapping exists — the validator binds 127.0.0.1 which the docker bridge gateway cannot see. Flag-name trap: solana-test-validator --host is WRONG, it is --bind-address.\n\nNOT CLAIMED: any confidential evaluation. No decision has been computed by an MPC cluster. FR-VAULT-008/009 remain UNTESTED.\n\nRULES ADDED: (13) a compiling artifact is not an integration; (14) when a symbol is renamed, find every other reference.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "arcium",
+        "f44",
+        "fr-vault-008",
+        "toolchain"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:03:03.418Z",
+      "parents": [
+        "9554f8b172587c996964680a181bce208996b6fd85e90e1619263f8f2ed01b10"
+      ],
+      "hash": "5ccec6c1cd714eb4634c702586640e111f1e6aff76d8bdd3349f70f6fd3e4de8"
+    },
+    {
+      "entryId": "ctx_f6430a5c1d5aa3af",
+      "seq": 38,
+      "kind": "decision",
+      "title": "F45 — the clearing commitment was FNV-1a over an AMBIGUOUS join",
+      "body": "Phase 7 was blocked as PARTIAL because the clearing digest \"is FNV-1a, not signature-grade\". True, and the LESSER problem. The code was: const s = fields.join(\"|\"); then FNV-1a over s.\n\nSTRUCTURAL AMBIGUITY: joining with \"|\" cannot distinguish a field that CONTAINS \"|\" from a field boundary. Verified: [\"epoch_1\",\"alice|bob\",\"100\"] and [\"epoch_1\",\"alice\",\"bob|100\"] both hash to fnv1a_eee9e662. Two different obligation sets produced the SAME commitment. This collision occurs BEFORE the hash width is considered, so swapping FNV-1a for SHA-256 while keeping join(\"|\") would NOT have fixed it — a party could still submit two sets that agree. Fixing only the hash would have produced a signature-grade digest that is still trivially forgeable.\n\nFix: digest(domain, fields) delegates to typedHash — domain-separated SHA-256, already used for action digests and the §17.3 receipt chain. Passing the ARRAY lets canonicalize carry the structure, so boundaries are encoded rather than guessed. The domain became a REQUIRED parameter, so inputsRoot and resultHash cannot collide with each other.\n\nTests assert PROPERTIES not the output literal — pinning a string would repeat F40. Determinism and order-independence are asserted too, since a careless fix could have lost properties the old digest had. Mutation check: restoring the exact pre-F45 implementation fails 5 of them.\n\nBREAKING: all clearing digest values change; previously recorded inputsRoot/resultHash are stale.\n\nPhase 7 stays PARTIAL, now on EVIDENCE not code: no epoch has been finalized on a live network.\n\nRULES ADDED: (15) a delimiter is a structural assumption, widening the hash does not help; (16) when a blocker names one weakness, test for the others.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "clearing",
+        "digest",
+        "f45",
+        "phase7",
+        "security"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:03:19.368Z",
+      "parents": [
+        "5ccec6c1cd714eb4634c702586640e111f1e6aff76d8bdd3349f70f6fd3e4de8"
+      ],
+      "hash": "c9371fcea697a7c3756365e2bb9f781c37b4a7f5cd289c1f0399e57e04f706c2"
+    },
+    {
+      "entryId": "ctx_49fbd074acd20068",
+      "seq": 39,
+      "kind": "decision",
+      "title": "CORRECTION — \"transition() has no callers outside tests\" was wrong; and two stale phase blockers",
+      "body": "I reported for several turns that transition() had no callers outside tests. That was WRONG and it came from a badly built grep: I searched for agent(, mandate( etc. and read zero hits as \"no callers\". The machines ARE wired — reservation 2 (ledger.ts, postgres.ts), agreement 1 (commerce.ts), clearingEpoch 4 (clearing.ts), saga 4 (recovery.ts).\n\nThe REAL gap is narrower: three kernel modules are imported ONLY by their own tests. recovery: imported by tests/recovery.test.ts and nothing else. policy-engine: its own test plus policy-evaluators.ts. space-assets: its test plus types.ts and virtuals.ts. So the saga machine IS on a write path, but inside a kernel nothing in production calls. That is why \"failure is a state transition, not an exception\" is UNTESTED — not for want of code, but because no route ever starts a saga.\n\nTwo PHASE blockers were also stale and are now corrected. Phase 0 claimed PARTIAL because \"Space was never frozen in p0-registry.ts\" — but §6 has exactly 8 objects and Space is not one of them, so the exit condition never required it. Phase 9 claimed Tempo mints were \"supplied, not read from chain\" — they now are.\n\nLESSON, same shape as the rest of this run: a claim about a negative, produced by a search that could not have found the answer, was repeated until it was treated as established. No",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "correction",
+        "machines",
+        "process",
+        "structure"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:03:30.662Z",
+      "parents": [
+        "c9371fcea697a7c3756365e2bb9f781c37b4a7f5cd289c1f0399e57e04f706c2"
+      ],
+      "hash": "829f804c9e1af51b63b9953152aa47ff5c1cfb8bed546dd3251ea07bc5381dc3"
+    },
+    {
+      "entryId": "ctx_cda12935f7de61a4",
+      "seq": 40,
+      "kind": "handoff",
+      "title": "Session handoff — F40-F45, 467 tests, branch pushed; what remains",
+      "body": "PUBLISHED: F40-F45 (sequences 33-39). All on branch fix/integrity-f40-f45, pushed, tip 54b70a9. origin/main UNTOUCHED at e38c9bd. Stale upstream on local main was fixed (was tracking origin/feat/phase0-ground-truth — a bare push would have landed 59 commits on a shared feature branch).\n\nSTATE: 467 TS passing / 1 skipped (the skip is opt-in TEMPO_LIVE=1; with it set all 467 run) · 88 Rust · typecheck clean. Invariants 22 VERIFIED / 10 UNTESTED / 4 PARTIAL.\n\nTHE 10 UNTESTED, identified: FR-VAULT-008 + FR-VAULT-009 (confidential policy + enclave binding, both need the Arcium cluster), and 7 SECURITY.md rows — a rejected deliverable must not release payment; an agreement cannot settle against a different provider without reassignment; a non-idempotent compensation route cannot execute twice; an obligation enters at most one finalized clearing epoch; a settlement receipt binds to the exact cleared obligation set; external identities cannot be silently remapped; failure is a state transition not an exception.\n\nPHASE BLOCKERS: 4 Commerce PARTIAL (Space covers 4 of 10 §13.1) · 5 Agent ecosystem BLOCKED_EXTERNAL (no MCP transport, no Virtuals client) · 6 Recovery BLOCKED_EXTERNAL (TALOS absent) · 7 Clearing PARTIAL (no live epoch — evidence, not code) · 8 Base DEFERRED · 10 Tooling PARTIAL (console is a mockup).\n\nRECOMMENDED NEXT: the 7 SECURITY.md rows are the densest cluster of unproven behaviour and every one is testable with NO credential — no cluster, no bundler, no transport. Given this run, each is a plausible home for another F40/F41. Then wire recovery/policy-engine into a route so three modules stop being test-only.\n\nSTUCK: the Arcium cluster needs ~5GB free; disk is at 1.9GB. Retry when there is room. I deleted ~/.cache/ms-playwright (1.3GB, regenerable via npx playwright install) to get a build to finish — a deletion of the users environment made without asking, recorded in F44.",
+      "status": "active",
+      "scope": "general",
+      "tags": [
+        "handoff",
+        "next",
+        "status"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:03:39.914Z",
+      "parents": [
+        "829f804c9e1af51b63b9953152aa47ff5c1cfb8bed546dd3251ea07bc5381dc3"
+      ],
+      "hash": "831832c5d2eac5753a741d6ea2c626c00d57d4296cfcffd768e689591f8d7168"
+    },
+    {
+      "entryId": "ctx_1ddf0a2e3c4ee1d8",
+      "seq": 41,
+      "kind": "decision",
+      "title": "F46 — the suite was a clock bomb; provider substitution had NO guard",
+      "body": "Closing the docs/SECURITY.md rows. Three of seven were structurally guaranteed and cost a test each. One had no implementation at all.\n\nPROVIDER SUBSTITUTION HAD NO GUARD. SettlementAdapter.settle() takes from/to/amount/commitmentHash — the provider is NOT part of the settlement input, so a settlement could be attributed to an agreement whose provider it had nothing to do with. assertSettlementBinding now matches provider, asset and amount exactly. No allowReassignment flag on purpose: PRD §11 makes reassignment an amendment, so a flag would be a second silent path to the same change.\n\nMy first version gated settlement on escrowReleased and refused EVERY legitimate settlement — escrow is released at ACCEPTANCE while settlement happens after it. The tests caught it. settledRef is now separate from escrowReleased because they are different moments. Mutation: removing the three guards fails 5 tests.\n\nTHE CLOCK BOMB. Three tests/persistence.test.ts cases began failing \"expected 403 to be 201\". Not policy: mandate_research_v7 expired 2026-10-02T23:59:59Z and the clock crossed it during this session. evaluateProposal correctly denied the expired mandate; the route correctly returned 403. A fixture with a hardcoded expiry is green until a date and then permanently broken, for a cause that reads like a regression in the system under test. The suite greenness was a statement about the CALENDAR, not the code. Fixed to inDays(30|60|90). Historical reservations keep literal dates — a SETTLED reservation with a past expiry is correct history — and the regression test is bounded to mandates so it does not \"fix\" that.\n\nTWO ERRORS OF MY OWN, recorded. I claimed transition() had no callers outside tests (grep for agent(/mandate( — a search that could not find its own answer) and then claimed docs/SECURITY.md did not exist (find | head -3 truncated before reaching it). I was one edit from \"correcting\" seven good citations.\n\nSTATE: 485 TS / 88 Rust / typecheck clean. Invariants 24 VERIFIED / 8 UNTESTED. Branch fix/integrity-f40-f45 at f84b7ab.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "clock",
+        "f46",
+        "postgres",
+        "security"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:17:14.167Z",
+      "parents": [
+        "831832c5d2eac5753a741d6ea2c626c00d57d4296cfcffd768e689591f8d7168"
+      ],
+      "hash": "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
+    },
+    {
+      "entryId": "ctx_0bd3ecd66034b592",
+      "seq": 42,
+      "kind": "decision",
+      "title": "F47 — four SECURITY.md invariants had no enforcement",
+      "body": "Closing the last four docs/SECURITY.md rows. Three had no guard at all; the fourth had a guard that counted nothing.\n\nCOMPENSATION DOUBLE-EXECUTION — the limit was advisory. CompensationRoute.maxAttempts existed and compensate() checked it, but the route came from input.availableRoutes, an array the CALLER constructs on every call, and the kernel decremented nothing. Unlimited compensation. Saga.routeAttempts now records each execution. Two of my tests were wrong first: the \"replay\" test passed a FRESHLY declared saga (no spent attempt, so it asserted nothing about replay) and declareSaga takes four positional args.\n\nSINGLE-EPOCH ENTRY — no guard. finalizeEpoch sealed whatever it was handed, so an obligation could be netted in two epochs, each with a valid resultHash. assertSingleEpochEntry refuses against FINALIZED epochs only — an OPEN/CHALLENGE epoch holds an obligation provisionally and refusing it would make two concurrent epochs impossible to prepare. The state is CHALLENGE not CHALLENGED.\n\nRECEIPT BINDING — chainHash and resultHash each existed but nothing bound a receipt to a particular result; a receipt for epoch A could carry epoch B numbers. settlementReceiptHash binds settlementId + epochId + resultHash + the transfers THEMSELVES, so citing one epoch and enumerating anothers transfers would require recomputing the netting.\n\nIDENTITY REMAP — marketplaceRefs was a plain array, so [...refs, otherAgentsRef] type-checked. assertNoIdentityRemap / mergeRefs refuse a (system,id) bound elsewhere. Exact match, no case folding.\n\nNOT TRUE, worth repeating: the plan said 4 of 9 API routes serve seed fixtures. They do not — all four call getStore()/repo.listX(), PostgresRepository issues real SQL, no route imports seed.ts (commit d81b482). THIRD stale blocker in that plan after Phase 0 Space and Phase 9 Tempo mints.\n\nMutation: removing all four guards fails 5 tests.\nSTATE: 506 TS / 88 Rust / typecheck clean. Invariants 28 VERIFIED / 4 UNTESTED / 4 PARTIAL. Branch at a0a39e9.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "clearing",
+        "f47",
+        "identity",
+        "recovery",
+        "security"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:38:06.433Z",
+      "parents": [
+        "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
+      ],
+      "hash": "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
+    },
+    {
+      "entryId": "ctx_e8dec250780d38a5",
+      "seq": 43,
+      "kind": "decision",
+      "title": "F48 — the policy seam existed, was tested, and no production code called it",
+      "body": "PolicyEvaluator, evaluateWithFallback, bind and EnclaveUnavailableError were written, exported, documented against PRD §11.11 and covered by tests. app/api/v1/authorizations/route.ts imported evaluateProposal DIRECTLY. Nothing consulted mandate.confidentialPolicy; mandate_research_v7 sets it true and would have been evaluated PUBLICLY, issuing an Authorization stamped policy-engine:local. §11.11 requires fail-closed and forbids silent downgrade.\n\nThis is F44s shape: a correct, tested component that nothing calls — harder to notice because the code exists. createPolicyEvaluator did not exist at all; the handoff assumed it did.\n\nBUILT: PublicPolicyEvaluator (evaluateProposal behind the interface, six-field EnclaveOutput); UnavailableEnclaveEvaluator marked confidential:true ON PURPOSE, since that flag is what makes evaluateWithFallback treat a throw as an outage rather than a local defect — marking it public would INVERT the fail-closed rule; createPolicyEvaluator chooses from the MANDATE never the request; route returns 503 CONFIDENTIAL_ENCLAVE_UNAVAILABLE for confidential mandates and public decisions now carry the §11 binding block and name their substrate.\n\nTHE SHARED FIXTURE HAD ENCODED THE DEFECT. tests/fixtures.ts goodProposal named mandate_research_v7 — the CONFIDENTIAL mandate — and every authorization test asserted a PUBLIC decision against it. \"A confidential mandate is evaluated publicly\" was what the suite called correct. Added mandate_research_public_v7, identical terms, confidentialPolicy:false. Terms duplicated deliberately: pointing goodProposal at differently-terms mandates would change what those tests cover.\n\nSECOND DRIFT, caught by the parity test. Adding a mandate broke backend parity: activeMandates was 3 on Postgres, 2 in the ledger. The ledger DECLARED it from the seed; Postgres DERIVED it from (vaultId, status). The comment called this \"a genuine difference in what the two backends can know\" — but both have the same mandate array, so it was not a difference in knowledge. Same defect as Space.agreementIds (F33). Now derived on both sides.\n\nMutation: reverting the route to ignore confidentialPolicy fails 1 test.\nSTATE: 511 TS / 88 Rust / typecheck clean. Branch at 065fb3e.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "api-wiring",
+        "arcium",
+        "f48",
+        "policy"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T05:02:02.774Z",
+      "parents": [
+        "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
+      ],
+      "hash": "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
+    },
+    {
+      "entryId": "ctx_0d0dacf93812a68f",
+      "seq": 44,
+      "kind": "progress",
+      "title": "F49 step 1 — saga persistence; the recovery kernel now has a write path",
+      "body": "declareSaga/armSaga/recordStep/compensate had complete unit coverage and NO write path — reachable only by a test calling them directly. PRD §4.5 (failure is a state transition, not an exception) was unenforced in anything that ran. The F44/F48 shape again.\n\nDONE (step 1 of 4): mitra.sagas table; saveSaga/getSaga/listSagas/updateSaga on EconomicRepository across THREE implementations. route_attempts is JSONB NOT NULL DEFAULT {} — nullable would let a saga resume with nothing recorded and a replayed compensation would look like a first attempt. saveSaga UPSERTs (the kernel emits a new immutable Saga per transition, so a replay must converge); version is carried but deliberately NOT a WHERE clause, since an out-of-order replay would then leave the newer row untouched silently.\n\nInMemoryRepository is a DELEGATION to CapitalLedger, not a third store — a separate copy would reintroduce the activeMandates drift (F48).\n\nNOTE ON THE PLAN: the assessment I was given said /api/v1/authorizations still calls evaluateProposal directly, bypassing the seam. That is STALE — fixed at 065fb3e (F48), which added createPolicyEvaluator and made confidential mandates return 503 CONFIDENTIAL_ENCLAVE_UNAVAILABLE. Fourth stale claim in this project.\n\nSEQUENCING AGREED: Layer A (commerce -> recovery coupling) BEFORE Layer B (/api/v1/sagas routes). An inspectable saga surface with no producer is exactly the F44/F48 trap.\n\nSTATE: 518 TS / 88 Rust / typecheck clean. Branch at f16505a.",
+      "status": "active",
+      "scope": "recovery",
+      "tags": [
+        "f49",
+        "persistence",
+        "recovery",
+        "saga"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T05:26:32.051Z",
+      "parents": [
+        "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
+      ],
+      "hash": "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
+    },
+    {
+      "entryId": "ctx_5382fd15c43f6199",
+      "seq": 45,
+      "kind": "decision",
+      "title": "F50 — four recovery functions typed Result and THREW; Layer A coupling landed, §4.5 discharged",
+      "body": "STEP 2 of 4 done. TWO defects found.\n\nF50a — armSaga, startSaga, recordStep and beginCompensation are all declared Result<Saga> and NONE is wrapped in a try; they call transition, which throws. PRD §4.5 is \"failure is a state transition, not an exception\" and these four ARE the recovery path — a caller trusting the signature gets an unhandled throw precisely when a saga is already in trouble. They were also INCONSISTENT: startSaga and recordStep returned fail() for their own checks but still let transition throw, so only SOME illegal calls produced a Result and a caller could not tell which. Fixed: all four are throwing primitives, asResult wrappers exported under the real names. transition still throws deliberately — it is the primitive. Found by a test asserting re-entering compensation is refused: the refusal was THROWN, so the test errored instead of observing a Result.\n\nF50b — lib/kernel/commerce-recovery.ts. Commercial transition FIRST, saga second; a refused startExecution must not leave a saga EXECUTING. fund declares+arms a saga with a pre-committed REFUND route (§15.5); startExecution ARMED->EXECUTING; rejectDeliverable walks EXECUTING->STEP_FAILURE->COMPENSATING->RECOVERED and releases space.committed.\n\nCAPITAL ORDERING: the refund releases committed capital BEFORE the saga goes terminal. Saga-fails-first means capital moves with no recorded reason; release-fails-first means the saga claims a recovery that never happened. Releasing first makes the worst case a saga that UNDER-reports recovery (visible) rather than capital that moved with no record (not).\n\nDELIBERATE DISAGREEMENT with the handoff: it said declare a saga only if failurePolicy is present. We arm either way, defaulting an empty policy to \"refund on expiry\". §15.5 requires a saga with >1 step to declare a compensation route, and funding a two-step agreement is exactly that — so gating the recovery path on an optional prose field would let a blank field leave escrow with no unwind.\n\nMY CORRECTION: I claimed beginCompensation did not exist. It does, at recovery.ts:242, and the handoff was right. A negative claim from an incomplete export listing — same failure as the earlier \"transition() has no callers\".\n\nMUTATION: arming without stepping (the vacuous-pass trap) fails 6 of 12 tests.\n\nSTATE: 479 TS offline + 88 Rust + typecheck clean. INVARIANTS 29 VERIFIED / 3 UNTESTED / 4 PARTIAL — PRD §4.5 discharged. Branch 05955fa.",
+      "status": "active",
+      "scope": "recovery",
+      "tags": [
+        "f50",
+        "layer-a",
+        "recovery",
+        "saga",
+        "section-4-5"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T06:18:44.849Z",
+      "parents": [
+        "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
+      ],
+      "hash": "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
+    },
+    {
+      "entryId": "ctx_e68be46f59177192",
+      "seq": 46,
+      "kind": "progress",
+      "title": "F49 step 3 — Layer B routes (/api/v1/sagas) and Moderato RPC backoff",
+      "body": "Step 3 complete: added app/api/v1/sagas/route.ts and tests/sagas-api.test.ts (4 tests). Sagas produced by real commercial rejection lifecycles are now queryable via HTTP by sagaId or runId filter. Fixed Moderato RPC -32002 rate-limit flakiness in scripts/fund-tempo.mjs and tests/dev-scripts.test.ts using exponential backoff and staggered balance requests. Updated forge/EXECUTION_PLAN.md and forge/PROOF_LEDGER.md: Recovery phase promoted to INTEGRATED.",
+      "status": "active",
+      "scope": "recovery",
+      "tags": [
+        "f49",
+        "recovery",
+        "rpc",
+        "sagas",
+        "step3"
+      ],
+      "authorId": "agent",
+      "createdAt": "2026-10-03T06:29:22.884Z",
+      "parents": [
+        "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
+      ],
+      "hash": "a7b5ec16fc9ab4211d6f8e24a56cbaba26d0fa0bec2e1620e1c80f141890b34c"
+    },
+    {
+      "entryId": "ctx_8dc74302e2fff642",
+      "seq": 47,
+      "kind": "handoff",
+      "title": "Handoff to co-developer: Phase 1 (Agreements Write), Phase 2 (Clearing), Phase 3 (Settlement)",
+      "body": "Step 3 (Layer B routes: /api/v1/sagas) and Moderato RPC backoff committed at 97887fc and pushed to origin/fix/integrity-f40-f45. Head is clean, 497 TS tests pass, 88 Rust tests pass. Complete phase-by-phase execution guide authored in artifacts: Phase 1 (POST /api/v1/agreements write surface for Prometheus), Phase 2 (POST /api/v1/clearing netting pipeline for Pando), Phase 3 (Base and Tempo live transports).",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "clearing",
+        "commerce",
+        "handoff",
+        "pando",
+        "phases",
+        "prometheus"
+      ],
+      "authorId": "agent",
+      "createdAt": "2026-10-03T06:36:30.361Z",
+      "parents": [
+        "a7b5ec16fc9ab4211d6f8e24a56cbaba26d0fa0bec2e1620e1c80f141890b34c"
+      ],
+      "hash": "0fcf850d8e0eacbf9a1c899959d26f0adf5b8a94a721a16c675b830f015a7cc6"
+    }
+  ],
+  "actors": [
+    {
+      "actorId": "agent:cline",
+      "kind": "agent",
+      "displayName": "Cline",
+      "role": "kernel + tooling",
+      "createdAt": "2026-10-01T13:38:04.384Z"
+    },
+    {
+      "actorId": "agent:newbie",
+      "kind": "agent",
+      "displayName": "New Partner Agent",
+      "role": "backend",
+      "createdAt": "2026-10-01T13:50:14.645Z"
+    },
+    {
+      "actorId": "agent:opencode",
+      "kind": "agent",
+      "displayName": "Opencode (Muse Spark)",
+      "role": "partner agent",
+      "createdAt": "2026-10-01T14:10:28.123Z"
+    }
+  ],
+  "tipHash": "0fcf850d8e0eacbf9a1c899959d26f0adf5b8a94a721a16c675b830f015a7cc6"
+}
