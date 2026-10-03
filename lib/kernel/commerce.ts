@@ -261,3 +261,48 @@ export function evaluateDeliverable(
   if (!deliverable.artifactRefs.length) return fail("DELIVERABLE_HAS_NO_ARTIFACTS");
   return pass(true);
 }
+
+/**
+ * Binds a settlement to the exact terms of the agreement it claims to pay.
+ *
+ * ## Why this exists (`docs/SECURITY.md` line 10)
+ *
+ * > An agreement cannot settle against a different provider without explicit
+ * > reassignment/amendment.
+ *
+ * There was **no guard for this anywhere**. `SettlementAdapter.settle()` carries
+ * only `from`, `to`, `amount` and `commitmentHash` — the provider is not part of the
+ * settlement input at all, so a settlement could be attributed to an agreement whose
+ * provider it had nothing to do with. Nothing rejected it.
+ *
+ * Two properties are deliberate:
+ *
+ * 1. **Provider is matched, not merely present.** A settlement that names a
+ *    different provider fails with `PROVIDER_SUBSTITUTION`. There is no
+ *    `allowReassignment` flag here on purpose: PRD §11 makes reassignment an
+ *    explicit amendment, so accepting one here would create a second, silent path
+ *    to the same state change. A caller that legitimately reassigns must amend the
+ *    agreement first, and then this check passes because the terms moved
+ *    deliberately and are visible.
+ * 2. **Amount and asset must match exactly.** Not "at most" — a settlement for less
+ *    than the agreed price is a different economic event and needs its own
+ *    agreement, not a partial payment inferred from a smaller transfer.
+ *
+ * Settlement state is also required. A settlement attempted before the agreement is
+ * `ACCEPTED` is `SETTLEMENT_NOT_DUE`: acceptance is what makes the price owed, and
+ * permitting settlement against, say, a merely `SUBMITTED` agreement would let a
+ * deliverable pay out before anyone evaluated it.
+ */
+export function assertSettlementBinding(
+  agreement: Agreement,
+  settlement: { provider: string; amount: Money; settlementRef?: string },
+): Result<true> {
+  if (agreement.status !== "ACCEPTED") return fail("SETTLEMENT_NOT_DUE");
+  if (settlement.provider !== agreement.provider) return fail("PROVIDER_SUBSTITUTION");
+  if (settlement.amount.asset !== agreement.price.asset) return fail("ASSET_SUBSTITUTION");
+  if (settlement.amount.amount !== agreement.price.amount) return fail("AMOUNT_MISMATCH");
+  // NOT `escrowReleased`: escrow is released on acceptance, and settlement happens
+  // after it. Using the wrong flag here refused every legitimate settlement.
+  if (agreement.settledRef) return fail("ALREADY_SETTLED");
+  return pass(true);
+}

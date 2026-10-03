@@ -37,7 +37,8 @@ describe("POST /api/v1/authorizations", () => {
   });
 
   it("denies once the mandate has expired", async () => {
-    const res = await authorize(req({ ...goodProposal, now: "2026-10-03T00:00:00.000Z" }));
+    const futureDate = new Date(Date.now() + 35 * 86_400_000).toISOString();
+    const res = await authorize(req({ ...goodProposal, now: futureDate }));
     expect((await json(res)).data.reasonCodes).toContain("MANDATE_EXPIRED");
   });
 

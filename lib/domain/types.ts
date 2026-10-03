@@ -368,6 +368,17 @@ export interface Agreement {
    * and never decremented — so a Space could spend its budget exactly once over.
    */
   escrowReleased?: boolean;
+  /**
+   * The settlement that discharged this agreement, once one has occurred.
+   *
+   * Separate from `escrowReleased` because the two happen at different moments:
+   * escrow is released on ACCEPTANCE (F42), while settlement is the act of paying
+   * and can happen later, exactly once. Collapsing them means either an accepted
+   * agreement can never be settled, or it can be settled repeatedly — the first
+   * version of `assertSettlementBinding` had exactly that bug, and the test caught
+   * it rather than the reasoning.
+   */
+  settledRef?: string;
   version: number;
 }
 

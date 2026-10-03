@@ -1987,6 +1987,89 @@ anything.
     signature-grade" was true and hid an ambiguity that would have survived the
     obvious fix.
 
+## F46 — the test suite was a clock bomb, and provider substitution had no guard
+
+**Status:** `FAILED` — three Postgres tests broke at an instant unrelated to any code change; one security invariant had no implementation at all.
+**Found:** 2026-10-03, while closing the `docs/SECURITY.md` rows.
+
+### The clock bomb
+
+Three `tests/persistence.test.ts` cases began failing with:
+
+```
+expected 403 to be 201
+AssertionError: expected undefined to be 'postgres'
+```
+
+403 is `POLICY_DENIED` from the reservations route. The cause was not policy:
+
+```
+mandate_research_v7 | expires_at = 2026-10-02 23:59:59+00 | ACTIVE
+now                                             2026-10-03 04:12 UTC
+```
+
+**The seeded mandate had expired.** `evaluateProposal` correctly denied it; the
+route correctly returned 403; and three tests that had been green for the life of
+the repository failed, with a message pointing at policy and nowhere near the
+calendar.
+
+A fixture with a hardcoded expiry is a **clock bomb**: green until a date, then
+permanently broken, for a cause that reads like a regression in the system under
+test. The suite's greenness was a statement about the calendar, not about the code.
+
+Fix: `expiresAt` is computed as `inDays(30|60|90)` from module load. Historical
+*reservations* keep their literal dates — a SETTLED reservation with a past expiry
+is correct history — and the regression test is bounded to the mandates array so it
+does not "fix" that by making every fixture look fresh.
+
+`tests/seed-freshness.test.ts` asserts: every mandate valid now, valid for 24 hours
+(a short fuse is still a fuse), ACTIVE mandates not expired, and **no hardcoded
+expiry literal in the seed source**.
+
+Two earlier attempts at that last test were unsound and are recorded: asserting no
+expiry "looks like a literal ISO string" fails against the *correct* implementation,
+because `inDays()` returns one; and re-importing the module under a mocked clock
+needs a cache-busting suffix the `@/` alias does not resolve.
+
+### Provider substitution had no guard
+
+`docs/SECURITY.md` line 10:
+
+> An agreement cannot settle against a different provider without explicit
+> reassignment/amendment.
+
+Nothing implemented this. `SettlementAdapter.settle()` takes `from`, `to`, `amount`
+and `commitmentHash` — **the provider is not part of the settlement input at all**, so
+a settlement could be attributed to an agreement whose provider it had nothing to do
+with. `assertSettlementBinding` now exists, and matches provider, asset and amount
+exactly. There is deliberately no `allowReassignment` flag: PRD §11 makes
+reassignment an amendment, so a flag here would create a second, silent path to the
+same state change.
+
+**The first version had a bug the tests caught.** It gated settlement on
+`escrowReleased`, but escrow is released at *acceptance* while settlement happens
+*after* it — so every legitimate settlement was refused. `settledRef` is now separate
+from `escrowReleased` because they are different moments.
+
+Mutation check: removing the three guards fails 5 of the new tests.
+
+### Two errors of my own, recorded
+
+- I reported "`transition()` has no callers outside tests" for several turns. It came
+  from grepping for `agent(` / `mandate(` — a search that could not have found its
+  own answer. The machines are wired; the real gap is that `recovery`,
+  `policy-engine` and `space-assets` are imported only by their own tests.
+- I then claimed `docs/SECURITY.md` did not exist, from a `find | head -3` that
+  truncated before reaching it. It exists, and all seven citations were correct. I
+  was one edit away from "fixing" good citations.
+
+### Rules added
+
+17. **A negative claim must come from a search that could have found its opposite.**
+18. **A fixture with an absolute date is a clock bomb.** Test fixtures must be
+    relative to now, and `head`/`tail` truncation must never be the basis of a claim
+    about what exists.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

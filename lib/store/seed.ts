@@ -150,6 +150,27 @@ export const agents: Agent[] = [
   },
 ];
 
+/**
+ * Fixture expiry, as an offset rather than a literal date.
+ *
+ * ## F46 — the reference mandates carried absolute expiry timestamps
+ *
+ * `mandate_research_v7` expired `2026-10-02T23:59:59Z`. Nothing was wrong until the
+ * clock passed it: after that, `evaluateProposal` correctly returned DENY for an
+ * expired mandate, the reservations route returned **403 POLICY_DENIED**, and three
+ * `tests/persistence.test.ts` cases failed.
+ *
+ * The suite had been green for months because "green" was a statement about the
+ * calendar, not about the code. A fixture that expires turns the test suite into a
+ * clock bomb: it passes until a date and then fails forever, with an error message
+ * about policy that points nowhere near the cause.
+ *
+ * Expiry is therefore computed from `Date.now()` at module load. The seed describes
+ * a *world*, and a world whose mandates have all lapsed is not one any test can
+ * exercise. The offsets are generous so nothing expires mid-session either.
+ */
+const inDays = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString();
+
 export const mandates: Mandate[] = [
   {
     mandateId: "mandate_research_v7",
@@ -167,7 +188,7 @@ export const mandates: Mandate[] = [
     prohibitedCapabilities: ["unsecured_credit", "arbitrary_transfer"],
     approvedChains: ["solana"],
     policyVersion: "policy-v3.4",
-    expiresAt: "2026-10-02T23:59:59Z",
+    expiresAt: inDays(30),
     nonce: 19,
     status: "ACTIVE",
     confidentialPolicy: true,
@@ -188,7 +209,7 @@ export const mandates: Mandate[] = [
     prohibitedCapabilities: ["arbitrary_transfer"],
     approvedChains: ["solana", "base"],
     policyVersion: "policy-v2.9",
-    expiresAt: "2026-10-08T23:59:59Z",
+    expiresAt: inDays(60),
     nonce: 8,
     status: "ACTIVE",
     confidentialPolicy: false,
@@ -208,7 +229,7 @@ export const mandates: Mandate[] = [
     prohibitedCapabilities: ["bridge_unbounded"],
     approvedChains: ["base"],
     policyVersion: "policy-v1.6",
-    expiresAt: "2026-10-10T23:59:59Z",
+    expiresAt: inDays(90),
     nonce: 3,
     status: "ACTIVE",
     confidentialPolicy: false,

@@ -106,8 +106,8 @@ in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpar
 | FR-COM-002 | Escrow release depends on agreement/deliverable state | **§13.4** (was §12) | `VERIFIED` | `tests/commerce-escrow.test.ts` → *acceptance releases the committed amount*, *refund releases the committed amount*, *a Space can fund its budget repeatedly*. **Was false — see F42** |
 | FR-COM-003 | Duplicate delivery/evaluation events cannot cause duplicate capital release | **§13.4** (was §12) | `VERIFIED` | `tests/commerce-escrow.test.ts` → *a chargeback after acceptance does not return the budget twice*, plus replay and duplicate-evaluation cases. The chargeback test kills a guard-removal mutation; see F42 |
 | — | A Space's budget is a concurrency limit, not a lifetime cap | §13.1 | `VERIFIED` | 12 sequential accepted agreements against a 100 budget. **Was false — see F42** |
-| — | A rejected deliverable cannot trigger normal payment release | SECURITY.md | `UNTESTED` |
-| — | An agreement cannot settle against a different provider without reassignment | SECURITY.md | `UNTESTED` |
+| — | A rejected deliverable cannot trigger normal payment release | SECURITY.md | `VERIFIED` | `tests/security-invariants.test.ts` → *a rejected deliverable cannot be accepted afterwards*; *settlement is refused until the agreement is ACCEPTED*. Structurally guaranteed: the machine has no `REJECTED -> ACCEPTED` edge, and the test pins that table |
+| — | An agreement cannot settle against a different provider without reassignment | SECURITY.md | `VERIFIED` — guard added | `assertSettlementBinding` **did not exist**; `SettlementAdapter.settle()` did not even carry a provider. Now matched exactly, with an impostor-case test. Mutation check: removing the guard fails 5 |
 
 ## IV. Recovery
 
