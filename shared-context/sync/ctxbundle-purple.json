@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 53,
+  "highSeq": 54,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1042,6 +1042,28 @@
         "dd6b377bf5994a67846da1cbb00e8b9625d33766139b623f3f67efc28a7da633"
       ],
       "hash": "ec7fff6d870e4617f64143d6e60ad5ce39e5573730801c6f3ad179b741f1b2bb"
+    },
+    {
+      "entryId": "ctx_034bc2b5fbec3b30",
+      "seq": 54,
+      "kind": "handoff",
+      "title": "READ FIRST (lead): purple session 2026-10-03 — vault drain vulnerability fixed but not deployed; Base and Tempo settle live; three branches",
+      "body": "Index of everything human:purple + agent:claude-purple did on 2026-10-03. Detail is in seq 48-53. Nothing here was merged to main or to fix/integrity-f40-f45. This bundle commit is the only thing pushed to your branch.\n\n1. SECURITY: ACTION NEEDED (seq 51, 53; forge/FAILURES.md F51 on fix/vault-permit-binding)\nThe deployed mitra-vault (GkQQtmVX... on devnet) lets a stranger move any principal's capital. Three ways: (a) spend_authorized debits whatever vault the caller names; (b) authorize accepts ANY signer as the policy engine; (c) spend_authorized has no signer and the caller picks the payee, so anyone can redeem anyone's unspent permit. Underneath: the agent grants and widens its own mandate, and no mandate names a vault or principal. Each was reproduced against the real dispatch. The existing spend fixtures built vaults unrelated to the mandate, so the suite asserted the attack as success.\nFIX: branch fix/vault-permit-binding @ 6464bb1, cut from your branch. Principal-signed, vault-bound mandates; an engine named on the mandate; the recipient bound into the permit; the holder may only revoke. Rust 103/103, mutation 14/14, TS 497 pass.\nNEEDS YOU: review 3 design choices (listed in seq 53), an SBF build, a redeploy (you hold the upgrade key C4ZoTdNS...), and updating authority-devnet.mjs to the new layouts.\n\n2. SETTLEMENT TRANSPORTS (seq 48-50), branch feat/settlement-transports\n- Tempo: ModeratoTransport. transferWithMemo carries the EIP-712 commitment on-chain. verify reads decoded logs only. Backoff on -32002. LIVE on Moderato, 2 txs.\n- Base: BaseRpcTransport (viem, EOA). An ERC-20 transfer with the commitment appended to the calldata. LIVE on Base Sepolia, 1 tx, 0.01 USDC.\n- Fixed along the way: BASE_ASSETS had mainnet USDC on Sepolia (no contract there); the Base commitment signed whole units and threw on fractions; fund-tempo.mjs crashed on null receipts; package-lock was out of sync (npm ci failed).\n- Phases 8/9 are TESTED/PARTIAL: no route or kernel code calls any settlement adapter yet. The Base ERC-4337 path is not wired.\n- Solana binding is PARKED until F51 is reviewed, because its instruction layout depends on the fix.\n\n3. QUESTION FOR YOU before we wire settlement into the execute path: who holds EVM vault signing keys (server custody vs external signer), and which agreement states may release payment (Prometheus)? We will not decide either for you.\n\nNew dev keys on purple's machine (testnet only): EVM 0x7823d6bea51cc21c5d8588c7ff72e33130848116, Solana ETjm3HV8RpKkGdWNShv2GZsL9ricWnVnnLqoK5QnWBf1.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F51",
+        "needs-lead",
+        "security",
+        "settlement",
+        "summary"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T14:54:00.697Z",
+      "parents": [
+        "ec7fff6d870e4617f64143d6e60ad5ce39e5573730801c6f3ad179b741f1b2bb"
+      ],
+      "hash": "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
     }
   ],
   "actors": [
@@ -1079,5 +1101,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "ec7fff6d870e4617f64143d6e60ad5ce39e5573730801c6f3ad179b741f1b2bb"
+  "tipHash": "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
 }
