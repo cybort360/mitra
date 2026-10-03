@@ -2485,6 +2485,31 @@ script's ABI and `initCode` or delete it in favour of `lib/adapters/base-4337-tr
 **RULE ADDED:** (16) a hash that some other system must reproduce is tested against
 that system's hash, not only against itself.
 
+## F55 — the API has no caller identity, so any caller can act as any party to an agreement
+
+**Status:** `BLOCKED_INTERNAL` — open, for the lead. Contained on the MCP surface, not
+fixed: `mitra_fund_agreement`, `mitra_accept_deliverable` and `mitra_reject_deliverable`
+are withheld from the live MCP server (decided by human:purple, 2026-10-04).
+**Found:** 2026-10-04, before exposing the agreement verbs to external agents (sprint item 4).
+
+No route in `app/api` authenticates its caller — there is no middleware, header check or
+actor binding anywhere. `/api/v1/agreements` therefore applies `acceptDeliverable` for
+whoever asks, including the agreement's own **provider**. Before sprint item 1 that was a
+state change with no consequence outside Mitra; since item 1 an `ACCEPTED` agreement is
+one `POST /api/v1/settlements` will pay. So a provider that can reach the API can approve
+its own payout.
+
+What bounds it today: settlement pays only the agreement's `payTo` term, from a
+reservation policy already approved for that provider and price; the x402 gateway pays
+only the payee a reservation's digest names. A caller can trigger these, not redirect
+them. That is containment, not authorization.
+
+**What closing it needs (lead's decision):** a caller identity on the API (per-agent
+credentials, or signed requests — `verifyAuthorisation` + `RpcSignatureVerifier` now
+verify EOA, ERC-1271 and ERC-6492 signatures on chain), and role checks in the kernel:
+only the client or evaluator may accept or reject, only the provider may submit, only the
+client may fund. Then the three MCP tools can move from `withheld` to `served`.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

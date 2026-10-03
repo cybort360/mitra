@@ -9,9 +9,14 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "mcp": "tsx scripts/mitra-mcp.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "@x402/core": "2.28.0",
+    "@x402/evm": "2.28.0",
+    "@x402/fetch": "2.28.0",
     "lucide-react": "1.48.0",
     "next": "16.3.7",
     "pg": "^8.23.1",
@@ -27,6 +32,7 @@
     "@types/react-dom": "^19.1.9",
     "bs58": "^6.0.0",
     "js-sha3": "^0.13.0",
+    "tsx": "^4.23.15",
     "tweetnacl": "^1.0.3",
     "typescript": "^5.9.2",
     "viem": "^2.57.2",
