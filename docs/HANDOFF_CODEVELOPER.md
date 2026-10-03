@@ -72,6 +72,32 @@ Wire `SolanaSettlementAdapter` to interact directly with the deployed `programs/
 
 ---
 
+## Status — 2026-10-03 (human:purple / agent:claude-purple)
+
+Each line is backed by `forge/PROOF_LEDGER.md`; shared context seq 48–58 has the reasoning.
+
+| Item | State | Where |
+|---|---|---|
+| 1. Base — concrete transport (viem) | ✅ **Live** on Base Sepolia, 0.01 USDC; EOA path | `lib/adapters/base-transport.ts`, `BASE_LIVE=1` |
+| 1. Base — no fabricated hash / unconfigured throws | ✅ mutation-tested | `tests/base-transport.test.ts` |
+| 1. Base — `sendUserOp` (ERC-4337) | ❌ **Not done.** Envelope exists (`lib/evm/erc4337.ts`), `scripts/base-4337.mjs` acts as its own bundler, but neither is wired through the transport and the script has no live ledger row. Production Phase 8 is ERC-4337 (seq 55) | — |
+| 1. Base — `verify1271` (ERC-1271) | ❌ **Not done.** `SignatureVerifier` interface exists in `lib/evm/eip712.ts`; no implementation calls `isValidSignature` on chain | — |
+| 2. Tempo — transport, TIP-20 only, `-32002` backoff, log-derived confirmation | ✅ **Live** on Moderato, commitment on chain as the `transferWithMemo` memo | `lib/adapters/tempo-transport.ts`, `TEMPO_LIVE=1` |
+| 3. Solana — bind adapter to `mitra-vault` | ✅ **Live** on devnet against the F51 redeploy; `authorize`+`spend_authorized` in one tx | `lib/adapters/solana-transport.ts`, `lib/solana/vault-program.ts`, `SOLANA_LIVE=1` |
+| 3. Solana — "dispatch for `withdraw`" | ⚠️ **Deliberately not bound.** `withdraw` returns capital to the principal; it is not a settlement. Settlement is `spend_authorized` | — |
+
+**Found and fixed along the way:** F51 (any signer could drain any vault — fixed, redeployed, refusal `6015` observed live); Base USDC registry held the mainnet address on Sepolia; Base commitments signed whole units and threw on fractions; the Solana adapter listed a mainnet SPL mint and used a 32-bit FNV commitment; `fund-tempo.mjs` crashed on a fresh address; `npm ci` failed on an out-of-sync lockfile.
+
+**Still open, outside the three items:**
+- **No caller.** No route or kernel code constructs a settlement adapter, so phases 8/9 stay `PARTIAL`. Unblocked by the lead's answers (seq 55): settle only from `ACCEPTED`; testnet signs with the relayer key.
+- **`getEvidence()` returns `null` on all three rails** (PRD §21.4). Live transactions now exist to build bundles from.
+- **Mandate PDA reseed** to `[b"mandate", principal, holder]` — approved (seq 55), not implemented; needs a program change and redeploy.
+- **`scripts/authority-devnet.mjs` still encodes the pre-F51 layouts** and fails against the redeployed program. `lib/solana/vault-program.ts` has the correct builders (pinned to Rust golden bytes) to port it to.
+- **`context audit` fails at seq 29** — a lead entry damaged at write time (shell backticks); identical in every bundle, not tampering.
+- **Live-network tests can time out**: `tests/dev-scripts.test.ts` hit 30s+ RPC timeouts in one run. The "zero flakes" baseline above holds only on a good network day.
+
+---
+
 ### Working Agreement & Commands for the Co-Developer
 
 ```bash
