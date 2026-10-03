@@ -14,6 +14,12 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 solana-program = { version = "2.3", features = ["borsh"] }
 
+# Embeds a `security.txt` section in the ELF so block explorers (SolanaFM,
+# OtterSec, Solana Explorer) render a disclosure contact and policy link without the
+# repository having to be found first. Version pinned exactly: a floating minor could
+# change the macro's required fields and break the SBF build at a distance.
+solana-security-txt = "=1.1.0"
+
 # NOTE: `solana-program-test` is deliberately NOT a dependency.
 #
 # It would give the strongest local evidence (the compiled `.so` in a real BPF
