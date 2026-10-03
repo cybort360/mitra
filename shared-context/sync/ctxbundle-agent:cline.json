@@ -1,6 +1,6 @@
 {
   "fromNodeId": "agent:cline",
-  "highSeq": 43,
+  "highSeq": 44,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -823,6 +823,27 @@
         "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
       ],
       "hash": "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
+    },
+    {
+      "entryId": "ctx_0d0dacf93812a68f",
+      "seq": 44,
+      "kind": "progress",
+      "title": "F49 step 1 — saga persistence; the recovery kernel now has a write path",
+      "body": "declareSaga/armSaga/recordStep/compensate had complete unit coverage and NO write path — reachable only by a test calling them directly. PRD §4.5 (failure is a state transition, not an exception) was unenforced in anything that ran. The F44/F48 shape again.\n\nDONE (step 1 of 4): mitra.sagas table; saveSaga/getSaga/listSagas/updateSaga on EconomicRepository across THREE implementations. route_attempts is JSONB NOT NULL DEFAULT {} — nullable would let a saga resume with nothing recorded and a replayed compensation would look like a first attempt. saveSaga UPSERTs (the kernel emits a new immutable Saga per transition, so a replay must converge); version is carried but deliberately NOT a WHERE clause, since an out-of-order replay would then leave the newer row untouched silently.\n\nInMemoryRepository is a DELEGATION to CapitalLedger, not a third store — a separate copy would reintroduce the activeMandates drift (F48).\n\nNOTE ON THE PLAN: the assessment I was given said /api/v1/authorizations still calls evaluateProposal directly, bypassing the seam. That is STALE — fixed at 065fb3e (F48), which added createPolicyEvaluator and made confidential mandates return 503 CONFIDENTIAL_ENCLAVE_UNAVAILABLE. Fourth stale claim in this project.\n\nSEQUENCING AGREED: Layer A (commerce -> recovery coupling) BEFORE Layer B (/api/v1/sagas routes). An inspectable saga surface with no producer is exactly the F44/F48 trap.\n\nSTATE: 518 TS / 88 Rust / typecheck clean. Branch at f16505a.",
+      "status": "active",
+      "scope": "recovery",
+      "tags": [
+        "f49",
+        "persistence",
+        "recovery",
+        "saga"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T05:26:32.051Z",
+      "parents": [
+        "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
+      ],
+      "hash": "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
     }
   ],
   "actors": [
@@ -848,5 +869,5 @@
       "createdAt": "2026-10-01T14:10:28.123Z"
     }
   ],
-  "tipHash": "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
+  "tipHash": "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
 }
