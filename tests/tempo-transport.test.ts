@@ -273,7 +273,8 @@ describe("live Moderato settlement (TEMPO_LIVE=1)", () => {
       to: live.address,
       amount: { asset: "PathUSD" as AssetSymbol, amount: 0.01 },
     };
-    const { txHash } = await adapter.settle({ ...input, commitmentHash: tempoCommitment({ ...input, network: "moderato" }) });
+    const commitment = tempoCommitment({ ...input, network: "moderato" });
+    const { txHash } = await adapter.settle({ ...input, commitmentHash: commitment });
 
     let confirmed = false;
     for (let i = 0; i < 30 && !confirmed; i++) {
@@ -282,5 +283,12 @@ describe("live Moderato settlement (TEMPO_LIVE=1)", () => {
     }
     console.log(`live tempo settlement ${txHash} confirmed=${confirmed}`);
     expect(confirmed).toBe(true);
+
+    // The commitment must be ON-CHAIN, not only in our calldata: Moderato emits
+    // TransferWithMemo(from, to, amount, bytes32 indexed memo), observed live.
+    const MEMO_TOPIC = "0x57bc7354aa85aed339e000bccffabbc529466af35f0772c8f8ee1145927de7f0";
+    const receipt = (await rpc("eth_getTransactionReceipt", [txHash])) as { logs: Array<{ topics: string[] }> };
+    const memoLog = receipt.logs.find((l) => l.topics[0] === MEMO_TOPIC);
+    expect(memoLog?.topics[3]).toBe(commitment);
   }, 60_000);
 });
