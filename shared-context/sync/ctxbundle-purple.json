@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 68,
+  "highSeq": 70,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1372,6 +1372,52 @@
         "649e5f55b61ab2516b63f495c7aa602143084a3f2d42d1cf244b4a35c21f0994"
       ],
       "hash": "7fdd724153855a36803b80b9b139f8ae7ff142bc0dad098e9e2e2bb2b0676b5c"
+    },
+    {
+      "entryId": "ctx_871aeabc10febca9",
+      "seq": 69,
+      "kind": "blocker",
+      "title": "The API has no caller identity: any caller can accept any deliverable, and since item 1 an ACCEPTED agreement gets paid (F55). Accept, reject and fund are withheld from MCP until this is fixed",
+      "body": "NEEDS LEAD. No route in app/api authenticates its caller. There is no middleware, no header check and no actor binding. So /api/v1/agreements applies acceptDeliverable for anyone, including the agreement's own provider. Since sprint item 1, POST /api/v1/settlements pays an ACCEPTED agreement. A provider that can reach the API can therefore approve its own payout.\n\nCURRENT CONTAINMENT (this is not authorization): settlement pays only the agreement's payTo term, from a reservation that policy approved for that provider and price. The x402 gateway pays only the payee bound into a reservation's digest. A caller can trigger these payments but cannot redirect them.\n\nDECISION (human:purple, 2026-10-04): the live MCP server withholds mitra_fund_agreement, mitra_accept_deliverable and mitra_reject_deliverable until the API identifies callers.\n\nPROPOSED FIX, which is the lead's call:\n- A caller identity on the API: per-agent credentials, or signed requests. verifyAuthorisation plus RpcSignatureVerifier now verify EOA, ERC-1271 and ERC-6492 signatures on chain.\n- Kernel role checks: only the client or evaluator may accept or reject, only the provider may submit, only the client may fund.\n\nAfter that, the three tools move from withheld to served in lib/mcp/server.ts MCP_TOOL_STATUS.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "auth",
+        "blocker",
+        "mcp",
+        "needs-lead",
+        "security"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T23:52:05.223Z",
+      "parents": [
+        "7fdd724153855a36803b80b9b139f8ae7ff142bc0dad098e9e2e2bb2b0676b5c"
+      ],
+      "hash": "f2cea1859b94cdcf5d6355670a02ad6f70fa5e6385a8e6380128c6b4d1dcee24"
+    },
+    {
+      "entryId": "ctx_72eca62186e43478",
+      "seq": 70,
+      "kind": "decision",
+      "title": "Live MCP server (stdio, thin client of the API) and x402 V2 gateway (reference SDK plus Mitra guard) are shipped; x402 is live via the public facilitator (sprint item 4)",
+      "body": "feat/settlement-caller @ 11f3216.\n\nMCP: lib/mcp/server.ts and scripts/mitra-mcp.ts. Run with: MITRA_API_URL=… npx tsx scripts/mitra-mcp.ts. Every tool is a call to the HTTP API; the MCP process holds no store and no keys. MCP_TOOL_STATUS gives every surface tool exactly one status; the Record type forces this, and a mismatch check throws at module load.\n- Served (9): get_obligations, get_recovery, get_settlement (with settlementId it returns the evidence bundle), get_receipt (new GET /api/v1/receipts), get_exposure (/accounting), request_authorization, create_agreement, submit_deliverable, request_clearing (the action is fixed to \"net\", preview only).\n- Withheld (3): fund, accept, reject. See F55.\n- Unbacked (6): register_agent, get_agent, find_agents, create_intent, get_intent, get_timeline. There is no agent registry, no intent store and no event-read route. The server instructions tell agents each reason.\n- Verified through the real protocol in-process, by spawning the stdio entry, and over HTTP against next start.\n\nx402 (PRD §12.1): POST /api/v1/x402, lib/payments/x402-gateway.ts, lib/kernel/x402.ts.\n- The protocol is @x402/fetch, @x402/core and @x402/evm 2.28.0; Mitra writes no verifier.\n- Mitra's planX402Payment runs in onBeforePaymentCreation, so it runs before signing. It checks resource identity, scheme, network and asset; the payee is bound by the reservation digest (counterparty \"x402:<payTo>\", capability \"x402_payment\"); then the execution guard; then the claim and nonce.\n- A signed but unsettled EIP-3009 authorization stays PENDING with AUTHORIZATION_OUTSTANDING_UNTIL <validBefore>, because it is live money until it expires.\n- Origin allow-list MITRA_X402_ALLOWED_ORIGINS, because the route fetches server-side and the API has no auth.\n- LIVE: tx 0x1d9cfb8a6f0bbce49c1007f7f65019e99113c39342759a7cf8a000b16aad963a, submitted by the x402.org facilitator signer 0xd407…; 0.01 USDC from the relayer.\n\nAlso corrected: EXECUTION_PLAN row 5 called \"no live MCP transport\" BLOCKED_EXTERNAL. It was internal work.",
+      "status": "active",
+      "scope": "architecture",
+      "tags": [
+        "item-4",
+        "live",
+        "mcp",
+        "phase-5",
+        "sprint",
+        "x402"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T23:52:05.253Z",
+      "parents": [
+        "f2cea1859b94cdcf5d6355670a02ad6f70fa5e6385a8e6380128c6b4d1dcee24"
+      ],
+      "hash": "77be4adc22fd4f6c19de6a7bd05dc91dc122e6e90376e5c91c1670f42585ae23"
     }
   ],
   "actors": [
@@ -1409,5 +1455,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "7fdd724153855a36803b80b9b139f8ae7ff142bc0dad098e9e2e2bb2b0676b5c"
+  "tipHash": "77be4adc22fd4f6c19de6a7bd05dc91dc122e6e90376e5c91c1670f42585ae23"
 }
