@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 61,
+  "highSeq": 65,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1223,6 +1223,85 @@
       ],
       "hash": "9f3c707b07d2c59a1aad3441f3293a3d22b0d6a72d2818ddb881539a6c2383ee",
       "supersedesId": "ctx_1aa5daf0657367b3"
+    },
+    {
+      "entryId": "ctx_195124298177bc07",
+      "seq": 62,
+      "kind": "note",
+      "title": "Merged Solana VaultTransport & executed live Solana devnet test",
+      "body": "",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T16:26:01.250Z",
+      "parents": [
+        "5455c61a671c7b135cb8888d5f3a0c3ecff64a1242a7dae3f2cffd8ee4fd1c51"
+      ],
+      "hash": "26640faf6a3b6ab292ad8be36a4a70d977879d40e1185e2b4607fb675a105425"
+    },
+    {
+      "entryId": "ctx_03a8b82c8a2f781a",
+      "seq": 63,
+      "kind": "note",
+      "title": "Engineering handoff: Solana verification & EVM MitraVault",
+      "body": "",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T16:51:54.769Z",
+      "parents": [
+        "26640faf6a3b6ab292ad8be36a4a70d977879d40e1185e2b4607fb675a105425"
+      ],
+      "hash": "1294cb6efcb5a5e3714ec7ca411b9b5c3028aa7f5655c9d63b55d28cff690f25"
+    },
+    {
+      "entryId": "ctx_2257268c1b4c4bd5",
+      "seq": 64,
+      "kind": "task",
+      "title": "Starting: wire a settlement caller so an ACCEPTED agreement reaches a SettlementAdapter (sprint item 1)",
+      "body": "human:purple + agent:claude-purple, branch feat/settlement-caller (cut from feat/solana-settlement-binding @ 17b5b4c, which fast-forwards onto fix/integrity-f40-f45).\n\nSprint plan written to docs/HANDOFF_CODEVELOPER.md \"Sprint plan — 2026-10-03\": 1 settlement caller, 2 getEvidence on three rails, 3 ERC-4337 + ERC-1271, 4 live MCP server + x402 gateway, 5 Console on real data + event stream, 6 MitraVault.sol, 7 security.txt + mandate reseed in one redeploy (build/upgrade needs the lead's key C4ZoTdNS...).\n\nItem 1 constraints, from the lead's seq 55: payment releases only from ACCEPTED; testnet signs with the relayer key. The call must go through the execution guard. ACCEPTED is not by itself permission to move value.\n\nCorrections to the incoming scope (detail in the doc): MitraVault.sol sketch keys mandates by holder alone, which repeats F51. Package A names our key as the upgrade authority, but on-chain it is C4ZoTdNS.... No Arcium source exists in the repo despite EXECUTION_PLAN row 3. Arcium is left for the lead.",
+      "status": "superseded",
+      "scope": "settlement",
+      "tags": [
+        "phase-8",
+        "phase-9",
+        "plan",
+        "settlement",
+        "sprint"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T20:44:12.065Z",
+      "parents": [
+        "1294cb6efcb5a5e3714ec7ca411b9b5c3028aa7f5655c9d63b55d28cff690f25"
+      ],
+      "hash": "2b38db3b799f6a3e409b4e282cda45c71980b6b52f64deb201b381432882bb3a"
+    },
+    {
+      "entryId": "ctx_4fbeb5f470256ff7",
+      "seq": 65,
+      "kind": "decision",
+      "title": "An ACCEPTED agreement now settles through POST /api/v1/settlements; live on Base Sepolia (tx 0x65c481e9…, block 47646830)",
+      "body": "Sprint item 1 is done on feat/settlement-caller (uncommitted at time of writing). Nothing is merged.\n\nHOW IT WORKS\n- The caller supplies agreementId + reservationId. Amount, asset, chain, payee and digest are all re-derived from the agreement.\n- lib/kernel/settlement.ts runs, in order: assertSettlementBinding (ACCEPTED, not already settled); payTo present; reservation.agreementId matches; the mandate is the client's, on this vault, ACTIVE and unexpired; the vault is not frozen; the vault's chain is the payTo chain. Then it re-runs validateExecutionBinding against agreementPaymentDigest (capability fixed to \"payment\"; agreementId bound into actionDigestFor, and omitted when absent so existing digests are unchanged).\n- lib/settlement/settle-agreement.ts then: checks the rail exists and vault.address === rail.payer; claims the settlement (id = set_<agreementId>, insert-only, so the primary key gives at most one per agreement); consumes the nonce; broadcasts; verifies; sets agreement.settledRef.\n- A transport error leaves the settlement PENDING (outcome unknown) and blocks retries. FAILED is written only when nothing can have been sent. An unconfirmed transfer returns 202 SUBMITTED, and op=confirm re-checks it.\n- Rails come from the environment only (lib/settlement/rails.ts). An unconfigured rail returns 503 before anything is claimed. There is no fallback transport.\n\nDESIGN CHOICES FOR THE LEAD TO REVIEW\n(1) The payee is a TERM: Agreement.payTo {chain, address}, set at open and admitted against Space.settlementChains (new refusal: SETTLEMENT_CHAIN_NOT_ALLOWED_IN_SPACE).\n(2) Settling is an explicit step after acceptDeliverable, not automatic on accept.\n(3) Settlement.receiptId is now optional, because receipts have no store and an invented id would be the F24 pattern.\n\nEVIDENCE\n- Live: BASE_LIVE=1 npx vitest run tests/settlement-caller.test.ts -t live. Receipt status 1, one Transfer of 10000 atomic USDC, the calldata commitment equals the settlement's, TESTNET_PASS.\n- Offline: 20 tests, mutation 14/14. Postgres: 9 tests; full suite 678 pass / 0 fail serially, twice.\n\nF52 (fixed): PostgresRepository had no getAgreement/saveAgreement/updateAgreement/getSpace/updateSpace, and the agreements route skipped writes with if (repo.x). So on Postgres every agreement op returned 2xx and persisted nothing. Your agreements-api lifecycle test failed on Postgres at 17b5b4c and passes now. The route now returns 501 instead of skipping. The fixture now also truncates sagas, settlements and agreements, which fixes the sagas-api failures on Postgres.\n\nSTILL OPEN: vault.reserved is not drawn down on settlement (/reservations/execute does not draw it down either). Tempo and Solana through this path are not shown live. getEvidence is next (item 2).",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F52",
+        "base",
+        "item-1",
+        "live",
+        "needs-lead",
+        "settlement",
+        "sprint"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T21:17:04.505Z",
+      "parents": [
+        "2b38db3b799f6a3e409b4e282cda45c71980b6b52f64deb201b381432882bb3a"
+      ],
+      "hash": "9b8229c359ec5a2c4242497dc4e9792199859786049818193c3ef6a61fb18122",
+      "supersedesId": "ctx_2257268c1b4c4bd5"
     }
   ],
   "actors": [
@@ -1260,5 +1339,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "9f3c707b07d2c59a1aad3441f3293a3d22b0d6a72d2818ddb881539a6c2383ee"
+  "tipHash": "9b8229c359ec5a2c4242497dc4e9792199859786049818193c3ef6a61fb18122"
 }
