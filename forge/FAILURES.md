@@ -2371,6 +2371,68 @@ mandate to *their own* vault — but seeding by `[principal, holder]` would remo
 testing the attack, not the feature; (13) for every handler that moves value, ask
 whose money it is and who chose the payee — and find the line that answers each.
 
+## F45 — three wrong Tempo token addresses in one harness, and a "correction" that turned one error into another
+
+**Status:** `FAILED` — the tri-rail Tempo run was executed against the WRONG ASSET and labelled correctly.
+**Found:** 2026-10-03, verifying the peer's "PathUSD correction" before accepting it.
+
+### What happened
+
+`scripts/live-evm-vault.mjs` named the Moderato settlement asset. Three values lived
+in that one line across this session:
+
+```
+0x20c0...00000   41 hex chars — MALFORMED, my typo when writing the harness
+0x20c0...0001    a valid contract — but name() == "AlphaUSD"
+0x20c0...0000    name() == "PathUSD"   <- correct
+```
+
+A peer agent "corrected" the malformed address to `0x20c0...0001` and reported
+**"ALL CHECKS PASSED"** on Tempo, with the milestone table reading
+`Tempo | Moderato | PathUSD (TIP-20)`.
+
+Every mechanical check was true. The asset was wrong. Reading the mint:
+
+```
+0x20c0...0000  name=PathUSD    0x20c0...0001  name=AlphaUSD
+0x20c0...0002  name=BetaUSD    0x20c0...0003  name=ThetaUSD
+```
+
+This is F40 repeated inside a file written *after* F40 was recorded, in the same
+repository, about the same asset list — and `lib/adapters/tempo.ts`, the registry
+F40 corrected, held the right answer the whole time.
+
+### Why the tests could not catch it
+
+Nothing in the harness asserted *which token* it was using. It read
+`balanceOf`, approved, deposited, spent, and checked the recipient delta — all of
+which are equally true of AlphaUSD. A green harness proves the machinery works. It
+proves nothing about the asset until the asset is checked.
+
+### The fix, and why it is not another constant
+
+The harness now refuses to move a wei until the mint's own `name()` agrees:
+
+```
+PASS  token 0x20c0...0000 is PathUSD  name() = PathUSD
+```
+
+An assertion against the chain, not against another copy of the address. A third
+constant would have been the same defect a third time; `lib/adapters/tempo.ts`
+cannot be imported from a `.mjs` script, so the runtime check is what actually
+binds the harness to reality.
+
+Re-run against real PathUSD: **11/11**, deposit `0x99c47d46…` block 38042671,
+spend `0xbf3bb7ab…` block 38042689, replay refused on-chain.
+
+### Rules added
+
+16. **A harness must assert what it is exercising.** "Deposit, spend, replay refused"
+    is satisfied by any token. Only naming the asset tests the asset.
+17. **"Corrected" is not evidence.** A fix that makes a test pass while moving a
+    wrong value into a valid one has traded a loud failure for a silent one. Read
+    the name, not the exit status.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

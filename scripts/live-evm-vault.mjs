@@ -18,13 +18,25 @@ const CFG = {
   baseSepolia: {
     chainId: 84532, name: "baseSepolia", rpc: "https://sepolia.base.org",
     token: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    expectName: "USDC",
   },
   moderato: {
     chainId: 42431, name: "moderato", rpc: "https://rpc.moderato.tempo.xyz",
-    token: "0x20c0000000000000000000000000000000000001",
+    // Three wrong values lived here before this was right, and a third-person
+    // "correction" turned one error into another:
+    //   0x20c0...00000  41 hex chars - malformed, my typo
+    //   0x20c0...0001   a valid contract, but name() == "AlphaUSD"
+    //   0x20c0...0000   name() == "PathUSD"   <- this
+    //
+    // A constant is not a defence; it is what failed twice. `expectName` asserts the
+    // chain agrees BEFORE any value moves, which is the property F40 asked for and
+    // a bare address never had.
+    token: "0x20c0000000000000000000000000000000000000",
+    expectName: "PathUSD",
   },
 };
 
+const erc20Name = parseAbi(["function name() view returns (string)"]);
 const erc20 = parseAbi([
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)",
@@ -55,6 +67,16 @@ async function main() {
   const PROVIDER = "0x0000000000000000000000000000000000000pro";
   const RECIPIENT = "0x000000000000000000000000000000000000bee5";
   const ENGINE = acct.address;      // this key is the policy engine, deterministically
+  // THE assertion, before anything else. Read the mint's own name and refuse to
+  // continue unless it is the token we claim to be testing.
+  if (cfg.expectName) {
+    const tokenName = await pub.readContract({ address: cfg.token, abi: erc20Name, functionName: "name" });
+    check(`token ${cfg.token} is ${cfg.expectName}`, tokenName === cfg.expectName, `name() = ${tokenName}`);
+    if (tokenName !== cfg.expectName) {
+      console.log(`\n  REFUSING to run: this mint is ${tokenName}, not ${cfg.expectName}.`);
+      process.exit(1);
+    }
+  }
   const DECIMALS = await pub.readContract({ address: cfg.token, abi: erc20, functionName: "decimals" });
   const UNIT = 10n ** BigInt(DECIMALS);
   // Sized to what the deployer ACTUALLY holds, not to a round number. The first
