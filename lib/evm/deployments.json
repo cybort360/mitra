@@ -1,0 +1,16 @@
+{
+  "baseSepolia": {
+    "chainId": 84532,
+    "address": "0x6a731a654423d64afb9839742c3e48c6c54eea9c",
+    "deployTx": "0xf3682dde6c5d3b059e9962dfa99448baa05d8852f5c5c64d51a8c522128ed93a",
+    "deployBlock": 47644607,
+    "deployedAt": "2026-10-03T19:58:20.273Z"
+  },
+  "moderato": {
+    "chainId": 42431,
+    "address": "0x19b3c58d85114bcc9451cff83e9c09c10986fcb0",
+    "deployTx": "0x169eb2faa167b7512f0e6f675d5171c7ed63fad56306edd4f58e57e3c829a6ee",
+    "deployBlock": 38035296,
+    "deployedAt": "2026-10-03T19:58:25.584Z"
+  }
+}

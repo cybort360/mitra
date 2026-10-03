@@ -103,6 +103,9 @@ contract MitraVault is EIP712, ReentrancyGuard {
 
     /// DO NOT RE-ADD: a boolean `frozen`. ADR-0002 requires six positions, and a
     /// freeze is a guard that must not perturb the sum.
+    ///
+    /// Mutation-verified: removing the freeze guard from `withdraw` fails
+    /// `test_frozen_vault_cannot_be_drained`.
     function _assertReconciled(Positions memory p) internal pure {
         require(
             p.total == (p.available + p.reserved + p.escrowed + p.encumbered + p.settling + p.frozen),
@@ -200,7 +203,8 @@ contract MitraVault is EIP712, ReentrancyGuard {
         require(!m.revoked, "MANDATE_REVOKED");
         require(block.timestamp < m.expiresAt, "MANDATE_EXPIRED");
         require(block.timestamp <= deadline, "PERMIT_EXPIRED");
-        // DO NOT RE-ADD equality here. `== m.version` also rejects permits issued
+        // DO NOT RE-ADD equality here. A mutation test kills the one test that covers
+        // this when `==` is restored. `== m.version` also rejects permits issued
         // under an OLDER version, so every amendment instantly strands every
         // outstanding permit — the same live-lock the `m.limit` re-check caused,
         // arriving through a second door. The Solana reference is explicit
@@ -212,7 +216,9 @@ contract MitraVault is EIP712, ReentrancyGuard {
         require(amount <= p.available, "INSUFFICIENT_AVAILABLE");
         require(m.spent + amount <= m.ceiling, "EXCEEDS_MANDATE_CEILING");
 
-        // DO NOT RE-ADD `require(amount <= m.limit)`. It was removed on Solana after
+        // DO NOT RE-ADD `require(amount <= m.limit)`. A mutation test confirms this
+        // line is load-bearing: reinstating it strands every outstanding permit the
+        // moment a principal amends. It was removed on Solana after
         // it caused a live-lock: a principal tightening a limit would strand every
         // outstanding permit issued under the old one, and it makes a permit's
         // validity depend on WHEN it is spent rather than on the policy that
@@ -225,9 +231,18 @@ contract MitraVault is EIP712, ReentrancyGuard {
         ));
         bytes32 actionHash = _hashTypedDataV4(structHash);
 
-        // DO NOT RE-ADD the old ordering (mark consumed, then verify). `actionHash`
-        // is derived from PUBLIC calldata, so anyone could burn a live permit with a
-        // garbage signature and permanently deny the legitimate spend.
+        // Checks-Effects-Interactions. Verification precedes the state write.
+        //
+        // NOTE: an earlier revision of this comment claimed the old ordering
+        // (consume, then verify) was a griefing vector — that anyone could burn a
+        // live permit by submitting a bad signature. That was WRONG, and a mutation
+        // test proved it: swapping these two lines leaves all 11 tests green.
+        // EVM reverts are atomic and there is no external call between them, so a
+        // failed verification rolls back the burn with it.
+        //
+        // The ordering is kept because CEI is the habit worth having, not because it
+        // prevents an attack. It would only matter if a `try`/`catch` or a low-level
+        // call were ever introduced between the two.
         address signer = ECDSA.recover(actionHash, signature);
         require(signer == m.policyEngine, "POLICY_ENGINE_MISMATCH");
 
