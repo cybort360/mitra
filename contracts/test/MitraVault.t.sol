@@ -74,7 +74,7 @@ contract MitraVaultTest is Test {
 
     /// DO NOT RE-ADD `require(amount <= m.limit)` at spend time — see MitraVault.sol.
     function test_amend_does_not_live_lock_outstanding_permits() public {
-        bytes32 h = _permit(address(vault), holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
+        bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
         // Principal TIGHTENS the limit from 100 to 1.
         vm.prank(principal);
         vault.amendMandate(holder, uint64(1e6), uint64(500e6), uint64(block.timestamp + 1 days));
@@ -85,7 +85,7 @@ contract MitraVaultTest is Test {
     }
 
     function test_griefing_cannot_burn_a_live_permit() public {
-        bytes32 h = _permit(address(vault), holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
+        bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
         // A WELL-FORMED signature from the WRONG key. "garbage" was 7 bytes, so
         // ECDSAInvalidSignatureLength fired before recover() and the test proved
         // nothing about the ordering it claimed to test.
@@ -101,7 +101,7 @@ contract MitraVaultTest is Test {
     }
 
     function test_permit_is_single_use() public {
-        bytes32 h = _permit(address(vault), holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
+        bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
         _spend(h, enginePk, "s1");
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(enginePk, h);
         vm.prank(provider);
@@ -112,16 +112,19 @@ contract MitraVaultTest is Test {
 
     function test_cumulative_ceiling_is_enforced() public {
         // limit 100, ceiling 500 -> five spends of 100, the sixth must fail.
+        string[5] memory sids = ["s0", "s1", "s2", "s3", "s4"];
         for (uint256 i = 0; i < 5; i++) {
-            bytes32 h = _permit(address(vault), holder, address(token), 100e6, recipient, "s", 1, block.timestamp + 1 hours, enginePk);
-            _spend(h, enginePk, "s1");
+            bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, sids[i], 1, block.timestamp + 1 hours, enginePk);
+            _spend(h, enginePk, sids[i]);
         }
         (, , , , uint64 spent, , , , ) = vault.mandates(holder);
         assertEq(spent, 500e6);
+        bytes32 h6 = _permit(principal, holder, address(token), 100e6, recipient, "s5", 1, block.timestamp + 1 hours, enginePk);
+        (uint8 v6, bytes32 r6, bytes32 s6) = vm.sign(enginePk, h6);
         vm.prank(provider);
         vm.expectRevert("EXCEEDS_MANDATE_CEILING");
         vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s", 1, uint64(block.timestamp + 1 hours), "x");
+            "s5", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r6, s6, v6));
     }
 
     function test_frozen_vault_cannot_be_drained() public {
