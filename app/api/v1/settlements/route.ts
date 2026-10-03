@@ -47,9 +47,10 @@ export async function POST(req: Request) {
   const { repo, backend } = await getStore();
   const now = body.now ? new Date(body.now) : new Date();
 
+  const rails = await getRails();
   const outcome = body.op === "settle"
-    ? await settleAgreement(repo, getRails(), { agreementId: body.agreementId, reservationId: body.reservationId, now })
-    : await confirmSettlement(repo, getRails(), { settlementId: body.settlementId, now });
+    ? await settleAgreement(repo, rails, { agreementId: body.agreementId, reservationId: body.reservationId, now })
+    : await confirmSettlement(repo, rails, { settlementId: body.settlementId, now });
 
   if (!outcome.ok) {
     return NextResponse.json(

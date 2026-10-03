@@ -77,7 +77,13 @@ export function packUserOperation(u: UserOperation, initCode: `0x${string}` = "0
 export const USEROP_TYPEHASH =
   "PackedUserOperation(address sender,uint256 nonce,bytes initCode,bytes callData,uint256 callGasLimit,uint256 verificationGasLimit,uint256 preVerificationGas,uint256 maxFeePerGas,uint256 maxPriorityFeePerGas,bytes paymasterAndData,bytes signature)";
 
-/** keccak256 of the ABI-encoded operation — what the EntryPoint hashes. */
+/**
+ * keccak256 of the ABI-encoded operation.
+ *
+ * **NOT the hash an EntryPoint signs or checks (F54):** it includes the signature
+ * and binds neither the EntryPoint nor the chain id. Do not sign it. The live 4337
+ * path (`lib/adapters/base-4337-transport.ts`) uses viem's UserOperation signing.
+ */
 export function userOperationHash(op: PackedUserOperation): `0x${string}` {
   return keccak256(
     encodeAbiParameters(

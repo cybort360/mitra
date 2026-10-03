@@ -28,7 +28,7 @@ export async function GET(req: Request) {
 
   const settlement = await repo.getSettlement(settlementId);
   if (!settlement) return NextResponse.json({ error: "SETTLEMENT_NOT_FOUND", settlementId, backend }, { status: 404 });
-  const rail = getRails()[settlement.chain];
+  const rail = (await getRails())[settlement.chain];
   if (!rail) return NextResponse.json({ error: "SETTLEMENT_RAIL_NOT_CONFIGURED", backend }, { status: 503 });
 
   let bundle;

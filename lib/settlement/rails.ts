@@ -14,13 +14,16 @@
  * mainnet RPC URL in the wrong variable cannot turn this into a mainnet payer: the
  * adapters check chain ids and commitments bind them.
  *
- * Signing on testnet uses the relayer key (lead, seq 55). Production Phase 8 moves
- * to ERC-4337, where the server packages UserOperations and holds no root key;
- * that is sprint item 3 and is not wired here.
+ * Signing on testnet uses the relayer key (lead, seq 55). With
+ * `MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337` the Base payer is instead a smart account
+ * (Coinbase Smart Wallet) owned by that key, settling through UserOperations the
+ * relayer submits to the EntryPoint (`base-4337-transport.ts`) — the production
+ * Phase 8 shape. Its address is read from the factory, which is why building the
+ * rails is async.
  *
  * | Rail   | Variables |
  * |--------|-----------|
- * | base   | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `BASE_RPC_URL` |
+ * | base   | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `BASE_RPC_URL`; optional `MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337` |
  * | tempo  | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `TEMPO_RPC_URL` |
  * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
  */
@@ -31,8 +34,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "@/lib/adapters/types";
-import { BaseSettlementAdapter, settlementCommitment } from "@/lib/adapters/base";
+import { BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
 import { BaseRpcTransport } from "@/lib/adapters/base-transport";
+import { Erc4337Transport } from "@/lib/adapters/base-4337-transport";
 import { TEMPO_CHAIN_IDS, TempoSettlementAdapter, tempoCommitment } from "@/lib/adapters/tempo";
 import { networkName } from "@/lib/evm/evidence";
 import { ModeratoTransport, createTempoRpc } from "@/lib/adapters/tempo-transport";
@@ -72,18 +76,27 @@ function readEvmKey(path: string) {
 }
 
 /** Builds whichever rails the environment fully configures. A partial config builds nothing. */
-export function railsFromEnv(env: Record<string, string | undefined> = process.env): Rails {
+export async function railsFromEnv(env: Record<string, string | undefined> = process.env): Promise<Rails> {
   const rails: Rails = {};
 
   if (env.MITRA_EVM_SETTLEMENT_KEY_FILE && env.BASE_RPC_URL) {
     const account = readEvmKey(env.MITRA_EVM_SETTLEMENT_KEY_FILE);
+    const mode = env.MITRA_BASE_SETTLEMENT_ACCOUNT ?? "eoa";
+    if (mode !== "eoa" && mode !== "erc4337") throw new Error(`MITRA_BASE_SETTLEMENT_ACCOUNT must be eoa or erc4337, not ${mode}`);
+    let transport: BaseTransport;
+    let payer: string;
+    if (mode === "erc4337") {
+      const t = new Erc4337Transport({ owner: account, relayer: account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) });
+      transport = t;
+      payer = (await t.account()).address;
+    } else {
+      transport = new BaseRpcTransport({ account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) });
+      payer = account.address;
+    }
     rails.base = {
       chain: "base",
-      adapter: new BaseSettlementAdapter({
-        chainId: BASE_SEPOLIA,
-        transport: new BaseRpcTransport({ account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) }),
-      }),
-      payer: account.address,
+      adapter: new BaseSettlementAdapter({ chainId: BASE_SEPOLIA, transport }),
+      payer,
       commitment: (i) => settlementCommitment({
         settlementId: i.settlementId, from: i.from, to: i.to,
         amount: i.amount.amount, asset: i.amount.asset, chainId: BASE_SEPOLIA,
@@ -133,12 +146,12 @@ export function railsFromEnv(env: Record<string, string | undefined> = process.e
 
 declare global {
   // eslint-disable-next-line no-var
-  var __mitraRails: Rails | undefined;
+  var __mitraRails: Promise<Rails> | undefined;
 }
 
 /** The rails for this process, built once from the environment. */
-export function getRails(): Rails {
-  if (!globalThis.__mitraRails) globalThis.__mitraRails = railsFromEnv();
+export function getRails(): Promise<Rails> {
+  globalThis.__mitraRails ??= railsFromEnv();
   return globalThis.__mitraRails;
 }
 
@@ -148,5 +161,5 @@ export function getRails(): Rails {
  * contains one. `null` restores environment-built rails on next use.
  */
 export function __setRailsForTests(rails: Rails | null): void {
-  globalThis.__mitraRails = rails ?? undefined;
+  globalThis.__mitraRails = rails ? Promise.resolve(rails) : undefined;
 }

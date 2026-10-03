@@ -12,13 +12,19 @@
  * to have sent NOTHING, which is the half of the property a happy-path test cannot
  * see.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createPublicClient, createWalletClient, erc20Abi, http, type PublicClient } from "viem";
+import { baseSepolia } from "viem/chains";
+import { privateKeyToAccount } from "viem/accounts";
+import { toCoinbaseSmartAccount } from "viem/account-abstraction";
+import { RpcSignatureVerifier, isErc6492Signature } from "@/lib/evm/erc1271";
+import { SETTLEMENT_TYPES, settlementDigest, settlingDomain, verifyAuthorisation } from "@/lib/evm/eip712";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Agreement, Mandate, Reservation, Space } from "@/lib/domain/types";
 import { CapitalLedger } from "@/lib/store/ledger";
 import { InMemoryRepository } from "@/lib/store/provider";
 import { vaults as seedVaults } from "@/lib/store/seed";
-import { BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
+import { BASE_ASSETS, BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
 import { toAtomic } from "@/lib/evm/eip712";
 import { __setRailsForTests, railsFromEnv, type Rails } from "@/lib/settlement/rails";
 import { commitmentFromCalldata } from "@/lib/adapters/base-transport";
@@ -450,7 +456,7 @@ describe("settlement caller — never pays twice", () => {
 const LIVE_KEY = ".dev-keys/evm-testnet.key";
 describe.skipIf(!(process.env.BASE_LIVE === "1" && existsSync(LIVE_KEY)))("live: an ACCEPTED agreement settles on Base Sepolia (BASE_LIVE=1)", () => {
   it("settles through /api/v1/settlements and confirms from the chain", async () => {
-    const rails = railsFromEnv({
+    const rails = await railsFromEnv({
       MITRA_EVM_SETTLEMENT_KEY_FILE: LIVE_KEY,
       BASE_RPC_URL: process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org",
     });
@@ -509,4 +515,100 @@ describe.skipIf(!(process.env.BASE_LIVE === "1" && existsSync(LIVE_KEY)))("live:
     expect(verifyEvidenceBundle(bundleFromJson(evBody.data.bundle))).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
     expect(evBody.data.receiptChain.verdict).toEqual({ ok: true });
   }, 120_000);
+});
+
+/**
+ * LIVE, sprint item 3: the same Mitra path, but the payer is a SMART ACCOUNT
+ * (Coinbase Smart Wallet v1) settling through a UserOperation the relayer submits
+ * to the real EntryPoint v0.6 — and the account's signatures checked on chain via
+ * ERC-6492 (before deployment) and ERC-1271 (after).
+ *
+ * Provisioning is one-time and conditional: the relayer tops the account up with a
+ * little ETH (its own UserOperation gas) and USDC only when it is short.
+ */
+describe.skipIf(!(process.env.BASE_LIVE === "1" && existsSync(LIVE_KEY)))("live: ERC-4337 smart account settles, ERC-1271/6492 verify (BASE_LIVE=1)", () => {
+  const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
+
+  it("ERC-6492: an undeployed smart account's settlement signature verifies on chain; a stranger's does not", async () => {
+    const client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) }) as PublicClient;
+    const owner = privateKeyToAccount(`0x${readFileSync(LIVE_KEY, "utf8").trim().replace(/^0x/, "")}`);
+    // A fresh account nonce, so this account is guaranteed undeployed.
+    const fresh = await toCoinbaseSmartAccount({ client, owners: [owner], version: "1", nonce: BigInt(Date.now()) });
+    expect(await fresh.isDeployed()).toBe(false);
+    const domain = settlingDomain(84532, "0x0000000000000000000000000000000000000000");
+    const typed = { settlementId: `live-6492-${Date.now()}`, from: fresh.address, to: PAYEE as `0x${string}`, amountAtomic: 10_000n, asset: BASE_ASSETS[84532].USDC.address };
+    const message = { settlementId: typed.settlementId, from: typed.from, to: typed.to, amount: typed.amountAtomic, asset: typed.asset };
+    const signature = await fresh.signTypedData({ domain, types: SETTLEMENT_TYPES, primaryType: "Settlement", message } as never);
+    expect(isErc6492Signature(signature)).toBe(true);
+    const verifier = new RpcSignatureVerifier(client);
+    const digest = settlementDigest(domain, typed);
+    const ok = await verifyAuthorisation({ digest, signature, expectedSigner: fresh.address, domain, typed, verifier });
+    console.log(`live 6492 ${fresh.address}: ${JSON.stringify(ok)}`);
+    expect(ok).toEqual({ ok: true, mode: "contract" });
+
+    const stranger = await toCoinbaseSmartAccount({ client, owners: [privateKeyToAccount(`0x${"44".repeat(32)}`)], version: "1" });
+    const forged = await stranger.signTypedData({ domain, types: SETTLEMENT_TYPES, primaryType: "Settlement", message } as never);
+    expect((await verifyAuthorisation({ digest, signature: forged, expectedSigner: fresh.address, domain, typed, verifier })).ok).toBe(false);
+  }, 60_000);
+
+  it("an ACCEPTED agreement is paid by the smart account through the EntryPoint; evidence verifies; then ERC-1271", async () => {
+    const rails = await railsFromEnv({
+      MITRA_EVM_SETTLEMENT_KEY_FILE: LIVE_KEY, BASE_RPC_URL: rpcUrl, MITRA_BASE_SETTLEMENT_ACCOUNT: "erc4337",
+    });
+    const smart = rails.base!.payer as `0x${string}`;
+    const relayer = privateKeyToAccount(`0x${readFileSync(LIVE_KEY, "utf8").trim().replace(/^0x/, "")}`);
+    expect(smart.toLowerCase(), "the payer is the smart account, not the relayer").not.toBe(relayer.address.toLowerCase());
+
+    // One-time, conditional provisioning from the relayer.
+    const client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) }) as PublicClient;
+    const wallet = createWalletClient({ chain: baseSepolia, transport: http(rpcUrl), account: relayer });
+    const usdc = BASE_ASSETS[84532].USDC.address;
+    if ((await client.getBalance({ address: smart })) < 200_000_000_000_000n) {
+      await client.waitForTransactionReceipt({ hash: await wallet.sendTransaction({ to: smart, value: 500_000_000_000_000n }) });
+    }
+    if ((await client.readContract({ address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [smart] })) < 10_000n) {
+      await client.waitForTransactionReceipt({ hash: await wallet.writeContract({ address: usdc, abi: erc20Abi, functionName: "transfer", args: [smart, 100_000n] }) });
+    }
+
+    __setRailsForTests(rails);
+    repo = new TestRepo(new CapitalLedger(seedVaults.map((v) => (v.vaultId === VAULT_ID ? { ...v, address: smart } : v)), []));
+    repo.extraMandates.set("mandate_pay_base_v1", mandate());
+    await repo.updateSpace(space);
+    globalThis.__mitraStore = Promise.resolve({ repo, backend: "memory" as const, close: async () => {} });
+
+    const id = `ag_live4337_${Date.now()}`;
+    const price = { asset: "USDC" as const, amount: 0.01 };
+    await repo.saveAgreement(accepted(id, { price, payTo: { chain: "base", address: relayer.address } }));
+    const now = new Date().toISOString();
+    const { res: rr, body: r } = await reserveFor(id, { amount: price.amount, now });
+    expect(rr.status, JSON.stringify(r)).toBe(201);
+
+    const first = await post(settlementsPOST, { op: "settle", agreementId: id, reservationId: r.data.reservationId, now });
+    let body = await first.json();
+    expect([200, 202], JSON.stringify(body)).toContain(first.status);
+    for (let i = 0; i < 30 && body.data.settlement.status !== "CONFIRMED"; i++) {
+      await new Promise((ok) => setTimeout(ok, 2000));
+      body = await (await post(settlementsPOST, { op: "confirm", settlementId: settlementIdFor(id), now: new Date().toISOString() })).json();
+    }
+    const s = body.data.settlement;
+    console.log(`live 4337 settlement ${s.settlementId} handleOps tx ${s.txHash} from ${s.from} status ${s.status}`);
+    expect(s.status).toBe("CONFIRMED");
+    expect(s.from.toLowerCase()).toBe(smart.toLowerCase());
+
+    const ev = await (await evidenceGET(new Request(`http://localhost/api/v1/settlements/evidence?settlementId=${s.settlementId}`))).json();
+    console.log(`live 4337 evidence: ${JSON.stringify(ev.data?.verdict ?? ev)} block ${ev.data?.bundle?.confirmation?.blockNumber}`);
+    expect(ev.data.verdict).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+    expect(verifyEvidenceBundle(bundleFromJson(ev.data.bundle))).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+
+    // ERC-1271 against the now-deployed account: a plain (not 6492) signature.
+    const account = await toCoinbaseSmartAccount({ client, owners: [relayer], version: "1" });
+    expect(await account.isDeployed()).toBe(true);
+    const domain = settlingDomain(84532, "0x0000000000000000000000000000000000000000");
+    const typed = { settlementId: s.settlementId, from: smart, to: relayer.address, amountAtomic: 10_000n, asset: usdc };
+    const sig = await account.signTypedData({ domain, types: SETTLEMENT_TYPES, primaryType: "Settlement", message: { settlementId: typed.settlementId, from: typed.from, to: typed.to, amount: typed.amountAtomic, asset: typed.asset } } as never);
+    expect(isErc6492Signature(sig), "a deployed account signs plain ERC-1271").toBe(false);
+    const v1271 = await verifyAuthorisation({ digest: settlementDigest(domain, typed), signature: sig, expectedSigner: smart, domain, typed, verifier: new RpcSignatureVerifier(client) });
+    console.log(`live 1271 ${smart}: ${JSON.stringify(v1271)}`);
+    expect(v1271).toEqual({ ok: true, mode: "contract" });
+  }, 180_000);
 });

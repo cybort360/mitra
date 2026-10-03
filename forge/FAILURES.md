@@ -2454,6 +2454,37 @@ signature that does not exist. Signing them is open work.
 **RULE ADDED:** (15) a field reused across vocabularies (`"base"` the rail, `"base"`
 the network) is a grading bug waiting for a caller; convert at the boundary, by name.
 
+## F54 — the repository's ERC-4337 code could not have reached any EntryPoint
+
+**Status:** worked around, not fixed — the live 4337 path (sprint item 3) does not use
+either artifact below; it uses viem's `toCoinbaseSmartAccount` and EntryPoint v0.6, and
+settled live on Base Sepolia (PROOF_LEDGER). Both artifacts are left as they are and
+marked here, because nothing in production imports them.
+**Found:** 2026-10-03, while wiring `sendUserOp` through the Base transport.
+
+1. **`lib/evm/erc4337.ts` `userOperationHash` is not the hash an EntryPoint checks.**
+   It is `keccak256(abi.encode(op))` over the full operation INCLUDING `signature`, and
+   binds neither the EntryPoint address nor the chain id. Every EntryPoint signs and
+   verifies `keccak256(abi.encode(keccak256(pack(op without signature)), entryPoint,
+   chainId))`. An account signing this module's hash would be refused by any
+   EntryPoint, and the omission of chain id and EntryPoint is exactly the cross-domain
+   replay class `assertExpectedDomain` exists to stop. Its tests only assert that the
+   hash is stable and input-sensitive, which it is — they never compared it with an
+   EntryPoint. The module also declares v0.7 while its `PackedUserOperation` is the
+   v0.6 field layout (separate gas fields, no `accountGasLimits`/`gasFees` packing).
+2. **`scripts/base-4337.mjs` calls EntryPoint v0.7 with a v0.6-shaped `handleOps`.**
+   Its `EP_ABI` is the 11-field v0.6 tuple; v0.7 takes the 9-field packed form, so the
+   call cannot decode. It also passes raw SimpleAccount creation bytecode as
+   `initCode`, where an EntryPoint expects `factory ++ factoryCalldata`. Consistent with
+   the script having no PROOF_LEDGER row.
+
+**Fix, when someone needs either:** delegate `userOperationHash` to viem's
+`getUserOperationHash` (which binds EntryPoint and chain id), and either fix the
+script's ABI and `initCode` or delete it in favour of `lib/adapters/base-4337-transport.ts`.
+
+**RULE ADDED:** (16) a hash that some other system must reproduce is tested against
+that system's hash, not only against itself.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
