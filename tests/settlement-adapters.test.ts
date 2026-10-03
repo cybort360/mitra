@@ -39,7 +39,7 @@ const AMOUNT = { asset: "USDC" as AssetSymbol, amount: 12 };
 
 function baseCommitment(settlementId: string, from = EVM_FROM, to = EVM_TO) {
   return settlementCommitment({
-    settlementId, from, to, amount: AMOUNT.amount.toString(), asset: AMOUNT.asset, chainId: CHAIN,
+    settlementId, from, to, amount: AMOUNT.amount, asset: AMOUNT.asset, chainId: CHAIN,
   });
 }
 function solCommitment(settlementId: string) {

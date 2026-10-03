@@ -30,7 +30,7 @@ import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
 import type { EvidenceBundle } from "@/lib/evm/evidence";
-import { settlementDigest, settlingDomain } from "@/lib/evm/eip712";
+import { settlementDigest, settlingDomain, toAtomic } from "@/lib/evm/eip712";
 
 export type BaseChainId = 8453 | 84532; // mainnet, sepolia
 
@@ -40,10 +40,32 @@ export interface Erc20Asset {
   decimals: number;
 }
 
-/** Assets the adapter will settle in. Address constants, not configuration. */
-export const BASE_ASSETS: Record<string, Erc20Asset> = {
-  USDC: { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
-  WETH: { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
+/**
+ * Assets the adapter will settle in, **per chain id**.
+ *
+ * This was one flat map holding Base MAINNET USDC (`0x8335…2913`) while the
+ * adapter ran on Base Sepolia. On Sepolia that address has no code at all
+ * (`eth_getCode` → 0 bytes), so a USDC settlement would have targeted an address
+ * with no contract — the F39/F40 class: a registry wrong for its chain, pinned
+ * by nothing that could contradict it. Keyed by chain id, a symbol can no longer
+ * resolve to another network's contract.
+ *
+ * Sepolia entries were read from `sepolia.base.org` on 2026-10-03:
+ * `0x036C…CF7e` → `symbol()` USDC, `decimals()` 6; `0x4200…0006` → WETH, 18 (the
+ * OP-stack predeploy, same address on both chains). `BASE_LIVE=1` re-reads them.
+ *
+ * Still module constants — ADR-0011 moves asset admission into the Space
+ * (`lib/kernel/space-assets.ts`); this is the adapter's own floor, not that.
+ */
+export const BASE_ASSETS: Record<BaseChainId, Record<string, Erc20Asset>> = {
+  8453: {
+    USDC: { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
+    WETH: { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
+  },
+  84532: {
+    USDC: { symbol: "USDC", address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", decimals: 6 },
+    WETH: { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
+  },
 };
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -77,23 +99,32 @@ export interface BaseSettlementOptions {
  *
  * The commitment is still re-derived inside `settle()` rather than trusted, so a
  * caller cannot present one settlement's authorisation for another's transfer.
+ *
+ * **`amountAtomic` used to hold whole units.** It was `BigInt("12")` for 12 USDC,
+ * so a wallet signed `12` for a transfer of 12,000,000, and any fractional amount
+ * threw `SyntaxError: Cannot convert 0.5 to a BigInt` — Base could settle whole
+ * dollars only. It is now scaled by the asset's decimals on THIS chain, and
+ * `asset` is the token contract rather than its symbol, so the digest names the
+ * exact contract the transfer calls.
  */
 export function settlementCommitment(input: {
   settlementId: string;
   from: string;
   to: string;
-  amount: string;
+  amount: number;
   asset: string;
-  chainId: number;
+  chainId: BaseChainId;
   verifyingContract?: `0x${string}`;
 }): `0x${string}` {
+  const token = BASE_ASSETS[input.chainId]?.[input.asset];
+  if (!token) throw new Error("UNSUPPORTED_ASSET_ON_BASE");
   const contract = input.verifyingContract ?? ZERO_ADDRESS;
   return settlementDigest(settlingDomain(input.chainId, contract), {
     settlementId: input.settlementId,
     from: input.from as `0x${string}`,
     to: input.to as `0x${string}`,
-    amountAtomic: BigInt(input.amount),
-    asset: input.asset,
+    amountAtomic: toAtomic(input.amount, token.decimals),
+    asset: token.address,
   });
 }
 
@@ -117,7 +148,7 @@ export class BaseSettlementAdapter implements SettlementAdapter {
     if (!EVM_ADDRESS.test(input.recipient)) throw new Error("INVALID_RECIPIENT_ADDRESS");
     if (!(input.amount > 0) || !Number.isFinite(input.amount)) throw new Error("INVALID_AMOUNT");
     if (!Number.isInteger(input.amount * 10 ** 6)) throw new Error("AMOUNT_BELOW_ATOMIC_PRECISION");
-    if (!BASE_ASSETS[input.asset]) throw new Error("UNSUPPORTED_ASSET_ON_BASE");
+    if (!BASE_ASSETS[this.opts.chainId]?.[input.asset]) throw new Error("UNSUPPORTED_ASSET_ON_BASE");
   }
 
   async settle(input: {
@@ -139,7 +170,7 @@ export class BaseSettlementAdapter implements SettlementAdapter {
       settlementId: input.settlementId,
       from: input.from,
       to: input.to,
-      amount: input.amount.amount.toString(),
+      amount: input.amount.amount,
       asset: input.amount.asset,
       chainId: this.opts.chainId,
     });
@@ -151,10 +182,10 @@ export class BaseSettlementAdapter implements SettlementAdapter {
       throw new UnconfiguredAdapterError("base settlement");
     }
 
-    const asset = BASE_ASSETS[input.amount.asset] ?? null;
+    const asset = BASE_ASSETS[this.opts.chainId][input.amount.asset];
     const { txHash } = await this.opts.transport.send({
       to: input.to as `0x${string}`,
-      amountAtomic: (input.amount.amount * 10 ** asset!.decimals).toFixed(0),
+      amountAtomic: toAtomic(input.amount.amount, asset.decimals).toString(),
       asset,
       chainId: this.opts.chainId,
       data: input.commitmentHash,
