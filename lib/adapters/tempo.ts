@@ -23,9 +23,10 @@
  */
 
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
-import type { SettlementAdapter } from "./types";
+import type { ChainObservation, EvidenceRequest, SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
-import type { EvidenceBundle } from "@/lib/evm/evidence";
+import { buildEvidenceBundle, networkName, type EvidenceBundle } from "@/lib/evm/evidence";
+import { assertObservationMatches } from "./observation";
 import { settlementDigest, settlingDomain, toAtomic } from "@/lib/evm/eip712";
 
 /** TIP-20 mints on Tempo. TIP-20 is the settlement asset; native balance is not usable (F12). */
@@ -152,6 +153,8 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 export interface TempoTransport {
   send(input: { to: string; mint: string; amountAtomic: string; commitment: string }): Promise<{ txHash: string }>;
   verify(txHash: string): Promise<{ confirmed: boolean }>;
+  /** What the chain shows for the tx; null unless it is a confirmed settlement. Optional: without it, no evidence. */
+  observe?(txHash: string): Promise<ChainObservation | null>;
 }
 
 export class TempoSettlementAdapter implements SettlementAdapter {
@@ -203,12 +206,46 @@ export class TempoSettlementAdapter implements SettlementAdapter {
     return this.opts.transport.verify(txHash);
   }
   /**
-   * PRD 21.4 `getEvidence`. Returns null rather than a bundle assembled from
-   * nothing: a bundle with no observed chain behind it is indistinguishable from
-   * one that watched a transfer, and the counterparty has no way to tell.
+   * PRD 21.4 `getEvidence`, from the chain (sprint item 2). Same contract as the
+   * Base adapter; the commitment is found in the `transferWithMemo` memo.
    */
-  async getEvidence(_ref: { settlementId: string }): Promise<EvidenceBundle | null> {
-    return null;
+  async getEvidence({ settlement, observedAt }: EvidenceRequest): Promise<EvidenceBundle | null> {
+    if (settlement.chain !== "tempo") throw new Error("EVIDENCE_WRONG_RAIL");
+    if (!settlement.txHash || !this.opts.transport?.observe) return null;
+    if (!settlement.receiptId) throw new Error("EVIDENCE_WITHOUT_RECEIPT");
+    const token = TEMPO_TOKENS[settlement.asset];
+    if (!token) throw new Error("TEMPO_SETTLES_IN_TIP20_ONLY");
+
+    const chainId = TEMPO_CHAIN_IDS[this.opts.network];
+    const typed = {
+      settlementId: settlement.settlementId,
+      from: settlement.from as `0x${string}`,
+      to: settlement.to as `0x${string}`,
+      amountAtomic: toAtomic(settlement.amount, token.decimals),
+      asset: token.mint,
+    };
+    const domain = settlingDomain(chainId, "0x0000000000000000000000000000000000000000");
+    const commitment = settlementDigest(domain, typed);
+    if (settlement.commitment && settlement.commitment.toLowerCase() !== commitment.toLowerCase()) {
+      throw new Error("EVIDENCE_RECORD_INCONSISTENT");
+    }
+
+    const obs = await this.opts.transport.observe(settlement.txHash);
+    if (!obs || obs.block <= 0) return null;
+    assertObservationMatches(
+      obs,
+      { commitment, from: typed.from, to: typed.to, amountAtomic: typed.amountAtomic, asset: token.mint },
+      { caseInsensitiveAddresses: true },
+    );
+    return buildEvidenceBundle({
+      evidenceId: `evd_${settlement.settlementId}`,
+      receiptId: settlement.receiptId,
+      settlementId: settlement.settlementId,
+      chain: networkName("tempo", chainId),
+      typed,
+      domain,
+      confirmation: { txHash: obs.txHash, blockNumber: obs.block, observedAt },
+    });
   }
 
 }

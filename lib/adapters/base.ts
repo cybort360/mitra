@@ -27,9 +27,10 @@
  */
 
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
-import type { SettlementAdapter } from "./types";
+import type { ChainObservation, EvidenceRequest, SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
-import type { EvidenceBundle } from "@/lib/evm/evidence";
+import { buildEvidenceBundle, networkName, type EvidenceBundle } from "@/lib/evm/evidence";
+import { assertObservationMatches } from "./observation";
 import { settlementDigest, settlingDomain, toAtomic } from "@/lib/evm/eip712";
 
 export type BaseChainId = 8453 | 84532; // mainnet, sepolia
@@ -80,6 +81,8 @@ export interface BaseTransport {
     data: string;
   }): Promise<{ txHash: `0x${string}` }>;
   verify(txHash: string, chainId: BaseChainId): Promise<{ confirmed: boolean }>;
+  /** What the chain shows for the tx; null unless it is a confirmed settlement. Optional: without it, no evidence. */
+  observe?(txHash: string, chainId: BaseChainId): Promise<ChainObservation | null>;
 }
 
 export interface BaseSettlementOptions {
@@ -198,12 +201,49 @@ export class BaseSettlementAdapter implements SettlementAdapter {
     return this.opts.transport.verify(txHash, this.opts.chainId);
   }
   /**
-   * PRD 21.4 `getEvidence`. Returns null rather than a bundle assembled from
-   * nothing: a bundle with no observed chain behind it is indistinguishable from
-   * one that watched a transfer, and the counterparty has no way to tell.
+   * PRD 21.4 `getEvidence`, from the chain (sprint item 2).
+   *
+   * The commitment is re-derived from the record's terms and then looked for IN THE
+   * TRANSACTION the chain returns, together with payer, payee, amount and token. The
+   * confirmation's block number is the node's, not the record's. Nothing observed
+   * is `null`; anything observed that disagrees throws (see `SettlementAdapter`).
    */
-  async getEvidence(_ref: { settlementId: string }): Promise<EvidenceBundle | null> {
-    return null;
+  async getEvidence({ settlement, observedAt }: EvidenceRequest): Promise<EvidenceBundle | null> {
+    if (settlement.chain !== "base") throw new Error("EVIDENCE_WRONG_RAIL");
+    if (!settlement.txHash || !this.opts.transport?.observe) return null;
+    if (!settlement.receiptId) throw new Error("EVIDENCE_WITHOUT_RECEIPT");
+    const token = BASE_ASSETS[this.opts.chainId]?.[settlement.asset];
+    if (!token) throw new Error("UNSUPPORTED_ASSET_ON_BASE");
+
+    const typed = {
+      settlementId: settlement.settlementId,
+      from: settlement.from as `0x${string}`,
+      to: settlement.to as `0x${string}`,
+      amountAtomic: toAtomic(settlement.amount, token.decimals),
+      asset: token.address,
+    };
+    const domain = settlingDomain(this.opts.chainId, ZERO_ADDRESS);
+    const commitment = settlementDigest(domain, typed);
+    if (settlement.commitment && settlement.commitment.toLowerCase() !== commitment.toLowerCase()) {
+      throw new Error("EVIDENCE_RECORD_INCONSISTENT");
+    }
+
+    const obs = await this.opts.transport.observe(settlement.txHash, this.opts.chainId);
+    if (!obs || obs.block <= 0) return null;
+    assertObservationMatches(
+      obs,
+      { commitment, from: typed.from, to: typed.to, amountAtomic: typed.amountAtomic, asset: token.address },
+      { caseInsensitiveAddresses: true },
+    );
+    return buildEvidenceBundle({
+      evidenceId: `evd_${settlement.settlementId}`,
+      receiptId: settlement.receiptId,
+      settlementId: settlement.settlementId,
+      chain: networkName("base", this.opts.chainId),
+      typed,
+      domain,
+      confirmation: { txHash: obs.txHash, blockNumber: obs.block, observedAt },
+    });
   }
 
 }

@@ -2416,6 +2416,44 @@ throw are both killed.
 write path is a silent success on any store that lacks it. Refuse, or make it
 required.
 
+## F53 — `getEvidence()` existed on every rail and could not produce evidence; the obvious fix would have overclaimed
+
+**Status:** fixed on `feat/settlement-caller` (sprint item 2), live on all three rails
+(PROOF_LEDGER). One part open: receipts are unsigned.
+**Found:** 2026-10-03.
+
+Three gaps stood between `getEvidence()` returning `null` and returning something a
+stranger could check:
+
+1. **No observation.** `verify(txHash)` answered a yes/no and kept what it read. A
+   bundle's confirmation could therefore only have come from Mitra's own record — the
+   inference-as-fact upgrade §17.5 forbids. Each transport's `verify` is now
+   `observe(txHash) !== null`, and `observe` returns what the node reported: block or
+   slot, the commitment the transaction carried, payer, payee, amount, token. The
+   refactor is behaviour-preserving for `verify` (its existing mutation-audited tests
+   pass unchanged).
+2. **No receipts.** `verifyEvidenceBundle` refuses a bundle without a `receiptId`, and
+   nothing in the repository had ever written a receipt. Settlement confirmation now
+   appends a SettlementReceipt to a per-run hash chain (`lib/kernel/receipts.ts`,
+   `mitra.receipts`).
+3. **EIP-712 only.** The bundle type could not express Solana, whose commitment is a
+   sha256 over an ABI encoding. Bundles now carry a `scheme`.
+
+**The trap avoided.** `observedLevel()` keys on a NETWORK name and returns
+`LIVE_PUBLIC_PASS` for `"base"` — correct, because there `"base"` means Base mainnet,
+and `tests/evidence.test.ts` pins it. But `Settlement.chain` is also `"base"` for a
+Sepolia settlement. Passing the record's `chain` into a bundle would have graded every
+testnet settlement as public-network evidence. Bundles now take their `chain` from
+`networkName(chain, chainId)` (`"base-sepolia"`), and a mutation reverting to the raw
+chain is killed.
+
+**Still open — receipts are unsigned.** §17.4 lists `signer`; these receipts carry
+`signer: "unsigned:mitra-settlement-service"` so the field cannot be read as a
+signature that does not exist. Signing them is open work.
+
+**RULE ADDED:** (15) a field reused across vocabularies (`"base"` the rail, `"base"`
+the network) is a grading bug waiting for a caller; convert at the boundary, by name.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

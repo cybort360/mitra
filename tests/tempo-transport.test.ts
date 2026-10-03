@@ -12,6 +12,11 @@
  * by the chain rather than by this file.
  */
 import { existsSync, readFileSync } from "node:fs";
+import type { Settlement } from "@/lib/domain/types";
+import { InMemoryRepository } from "@/lib/store/provider";
+import { CapitalLedger } from "@/lib/store/ledger";
+import { settlementReceipt } from "@/lib/kernel/receipts";
+import { verifyEvidenceBundle } from "@/lib/evm/evidence";
 import { describe, expect, it } from "vitest";
 import { decodeFunctionData, encodeFunctionData, parseTransaction, type TransactionSerialized } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -290,5 +295,21 @@ describe("live Moderato settlement (TEMPO_LIVE=1)", () => {
     const receipt = (await rpc("eth_getTransactionReceipt", [txHash])) as { logs: Array<{ topics: string[] }> };
     const memoLog = receipt.logs.find((l) => l.topics[0] === MEMO_TOPIC);
     expect(memoLog?.topics[3]).toBe(commitment);
+
+    // Sprint item 2: evidence from the chain, for the transfer just made. The
+    // receipt is a real one, minted by the receipt store; the block is the node's.
+    const record: Settlement = {
+      settlementId: input.settlementId, runId: `run_${input.settlementId}`, obligationIds: [], chain: "tempo",
+      asset: "PathUSD", amount: 0.01, from: input.from, to: input.to, txHash, commitment,
+      status: "CONFIRMED", submittedAt: new Date().toISOString(), evidenceLevel: "TESTNET_PASS",
+    };
+    const store = new InMemoryRepository(new CapitalLedger([], []));
+    const rcpt = await store.appendReceipt(settlementReceipt(record, "tempo-moderato", new Date()));
+    const bundle = await adapter.getEvidence({ settlement: { ...record, receiptId: rcpt.receiptId }, observedAt: new Date().toISOString() });
+    const node = (await rpc("eth_getTransactionReceipt", [txHash])) as { blockNumber: string };
+    console.log(`live tempo evidence block ${bundle?.confirmation?.blockNumber} verdict ${JSON.stringify(bundle && verifyEvidenceBundle(bundle))}`);
+    expect(bundle!.chain).toBe("tempo-moderato");
+    expect(bundle!.confirmation!.blockNumber).toBe(Number(BigInt(node.blockNumber)));
+    expect(verifyEvidenceBundle(bundle!)).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
   }, 60_000);
 });

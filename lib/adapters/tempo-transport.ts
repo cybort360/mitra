@@ -34,6 +34,7 @@
 
 import { decodeFunctionData, encodeFunctionData, parseAbi, type LocalAccount } from "viem";
 import { TEMPO_TOKENS, type TempoTransport } from "./tempo";
+import type { ChainObservation } from "./types";
 
 export const MODERATO_CHAIN_ID = 42431;
 export const MODERATO_RPC_URL = "https://rpc.moderato.tempo.xyz";
@@ -120,11 +121,13 @@ export interface ModeratoTransportOptions {
 
 interface RpcReceipt {
   status: string;
+  blockNumber?: string;
   to: string | null;
   logs: Array<{ address: string; topics: string[]; data: string }>;
 }
 
 interface RpcTransaction {
+  from?: string;
   to: string | null;
   input: string;
   value: string;
@@ -189,17 +192,26 @@ export class ModeratoTransport implements TempoTransport {
    * successful transaction can still deliver nothing to the address it was for.
    */
   async verify(txHash: string): Promise<{ confirmed: boolean }> {
-    if (!BYTES32.test(txHash)) return { confirmed: false };
+    return { confirmed: (await this.observe(txHash)) !== null };
+  }
+
+  /**
+   * What the chain shows for a settlement, or null if it is not a confirmed one.
+   * `verify` is exactly `observe(...) !== null`. The carried commitment is the
+   * `transferWithMemo` memo, decoded from the calldata the node returned.
+   */
+  async observe(txHash: string): Promise<ChainObservation | null> {
+    if (!BYTES32.test(txHash)) return null;
 
     const receipt = (await this.opts.rpc("eth_getTransactionReceipt", [txHash])) as RpcReceipt | null;
-    if (!receipt || BigInt(receipt.status) !== 1n) return { confirmed: false };
+    if (!receipt || BigInt(receipt.status) !== 1n) return null;
 
     const tx = (await this.opts.rpc("eth_getTransactionByHash", [txHash])) as RpcTransaction | null;
-    if (!tx?.to || !REGISTERED_MINTS.has(tx.to.toLowerCase())) return { confirmed: false };
-    if (BigInt(tx.value) !== 0n) return { confirmed: false };
+    if (!tx?.to || !REGISTERED_MINTS.has(tx.to.toLowerCase())) return null;
+    if (BigInt(tx.value) !== 0n) return null;
 
     const intent = decodeIntent(tx.input);
-    if (!intent) return { confirmed: false };
+    if (!intent) return null;
 
     const mint = tx.to.toLowerCase();
     const delivered = receipt.logs.some(
@@ -210,7 +222,16 @@ export class ModeratoTransport implements TempoTransport {
         topicAddress(l.topics[2]) === intent.to &&
         BigInt(l.data) === intent.amount,
     );
-    return { confirmed: delivered };
+    if (!delivered) return null;
+    return {
+      txHash,
+      block: receipt.blockNumber ? Number(BigInt(receipt.blockNumber)) : 0,
+      carriedCommitment: intent.memo,
+      from: (tx.from ?? "").toLowerCase(),
+      to: intent.to,
+      amountAtomic: intent.amount,
+      asset: mint,
+    };
   }
 }
 
@@ -224,10 +245,10 @@ function topicAddress(topic: string): string {
  * no commitment, so it cannot be a Mitra settlement even if it moved the right
  * amount to the right place.
  */
-function decodeIntent(input: string): { to: string; amount: bigint } | null {
+function decodeIntent(input: string): { to: string; amount: bigint; memo: string } | null {
   try {
     const { args } = decodeFunctionData({ abi: TIP20_ABI, data: input as `0x${string}` });
-    return { to: args[0].toLowerCase(), amount: args[1] };
+    return { to: args[0].toLowerCase(), amount: args[1], memo: String(args[2]).toLowerCase() };
   } catch {
     return null;
   }

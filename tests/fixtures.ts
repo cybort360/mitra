@@ -55,7 +55,7 @@ export async function prepareStore(): Promise<void> {
     // opened by one run collided with the same id on the next.
     await pool.query(`TRUNCATE mitra.reservations, mitra.consumed_nonces, mitra.authorizations, mitra.event_log,
       mitra.mandates, mitra.vaults, mitra.sagas, mitra.settlements, mitra.agreement_spaces, mitra.agreements,
-      mitra.spaces CASCADE`);
+      mitra.spaces, mitra.receipts CASCADE`);
     await repo.seedReferenceData();
   } finally {
     await pool.end();

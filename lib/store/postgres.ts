@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
+import { linkReceipt, type ReceiptDraft } from "@/lib/kernel/receipts";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
 const num = (v: unknown): number => Number(v);
@@ -128,6 +129,49 @@ export class PostgresRepository implements EconomicRepository {
         settlement.status, JSON.stringify(settlement)],
     );
     return rowCount === 1;
+  }
+
+  /**
+   * Link and insert under a per-run advisory lock, on one connection. Without the
+   * lock two appends could read the same latest receipt and both link to it; the
+   * UNIQUE (run_id, seq) constraint would then refuse one, but as an error rather
+   * than a queue.
+   */
+  async appendReceipt(draft: ReceiptDraft): Promise<Receipt> {
+    const run = draft.runId ?? "";
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`mitra.receipts:${run}`]);
+      const existing = await client.query("SELECT document FROM mitra.receipts WHERE receipt_id = $1", [draft.receiptId]);
+      if (existing.rows[0]) { await client.query("COMMIT"); return existing.rows[0].document as Receipt; }
+      const last = await client.query(
+        "SELECT seq, document FROM mitra.receipts WHERE run_id = $1 ORDER BY seq DESC LIMIT 1", [run],
+      );
+      const previous = last.rows[0] ? (last.rows[0].document as Receipt) : null;
+      const receipt = linkReceipt(draft, previous);
+      await client.query(
+        "INSERT INTO mitra.receipts (receipt_id, run_id, seq, document) VALUES ($1,$2,$3,$4::jsonb)",
+        [receipt.receiptId, run, last.rows[0] ? num(last.rows[0].seq) + 1 : 1, JSON.stringify(receipt)],
+      );
+      await client.query("COMMIT");
+      return receipt;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getReceipt(receiptId: string): Promise<Receipt | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.receipts WHERE receipt_id = $1", [receiptId]);
+    return rows[0] ? (rows[0].document as Receipt) : null;
+  }
+
+  async listReceipts(runId: string): Promise<Receipt[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.receipts WHERE run_id = $1 ORDER BY seq ASC", [runId]);
+    return rows.map((r) => r.document as Receipt);
   }
 
   async updateSettlement(settlement: Settlement): Promise<void> {

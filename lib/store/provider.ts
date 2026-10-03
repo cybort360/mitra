@@ -43,9 +43,10 @@
 // already enforced by the fact that only app/api routes import this module.
 import type { Pool } from "pg";
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent,
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
+import { linkReceipt, type ReceiptDraft } from "@/lib/kernel/receipts";
 import type {
   CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts,
 } from "@/lib/store/repository";
@@ -68,6 +69,8 @@ export class InMemoryRepository implements EconomicRepository {
   private readonly spacesMap = new Map<string, Space>();
   private readonly agreementsMap = new Map<string, Agreement>();
   private readonly settlementsMap = new Map<string, Settlement>();
+  /** Per run, oldest first. Appends are synchronous, so the chain cannot fork. */
+  private readonly receiptsByRun = new Map<string, Receipt[]>();
 
   constructor(ledger: CapitalLedger = getLedger()) {
     this.ledger = ledger;
@@ -180,6 +183,28 @@ export class InMemoryRepository implements EconomicRepository {
     if (existing && existing.status !== "FAILED") return false;
     this.settlementsMap.set(settlement.settlementId, { ...settlement });
     return true;
+  }
+
+  async appendReceipt(draft: ReceiptDraft): Promise<Receipt> {
+    const existing = await this.getReceipt(draft.receiptId);
+    if (existing) return existing;
+    const run = draft.runId ?? "";
+    const chain = this.receiptsByRun.get(run) ?? [];
+    const receipt = linkReceipt(draft, chain.at(-1) ?? null);
+    this.receiptsByRun.set(run, [...chain, receipt]);
+    return { ...receipt };
+  }
+
+  async getReceipt(receiptId: string): Promise<Receipt | null> {
+    for (const chain of this.receiptsByRun.values()) {
+      const r = chain.find((x) => x.receiptId === receiptId);
+      if (r) return { ...r };
+    }
+    return null;
+  }
+
+  async listReceipts(runId: string): Promise<Receipt[]> {
+    return (this.receiptsByRun.get(runId) ?? []).map((r) => ({ ...r }));
   }
 
   async updateSettlement(settlement: Settlement): Promise<void> {

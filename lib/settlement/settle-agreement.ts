@@ -27,14 +27,15 @@
  *
  * Vault capital positions are not moved: the reservation goes
  * `RESERVED → COMMITTED → SETTLING → SETTLED`, but `vault.reserved` is not drawn
- * down, exactly as `/reservations/execute` does not draw it down today. No receipt
- * is written (receipts have no store), and `getEvidence()` still returns null on
- * every rail (sprint item 2).
+ * down, exactly as `/reservations/execute` does not draw it down today. A
+ * SettlementReceipt is written on confirmation (`lib/kernel/receipts.ts`); it is
+ * hash-chained per run but not yet signed.
  */
 
 import type { Agreement, Settlement } from "@/lib/domain/types";
 import type { EconomicRepository } from "@/lib/store/repository";
 import { planAgreementSettlement } from "@/lib/kernel/settlement";
+import { settlementReceipt } from "@/lib/kernel/receipts";
 import type { Rails, SettlementRail } from "@/lib/settlement/rails";
 
 export type SettleOutcome =
@@ -191,12 +192,18 @@ async function finish(
     return { ok: true, httpStatus: 202, settlement: submitted, agreement };
   }
 
-  const settlement: Settlement = {
+  const confirmedRecord: Settlement = {
     ...submitted,
     status: "CONFIRMED",
     confirmedAt: now.toISOString(),
     evidenceLevel: rail.confirmedEvidence,
   };
+  // The receipt is written before the record names it, so a settlement never
+  // points at a receipt that does not exist. A crash in between leaves a receipt
+  // for a transfer the chain confirmed — true, and re-used on the next confirm,
+  // because appendReceipt returns an existing receipt id unchanged.
+  const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now));
+  const settlement: Settlement = { ...confirmedRecord, receiptId: receipt.receiptId };
   await repo.updateSettlement(settlement);
   if (settlement.reservationId) await repo.setReservationStatus(settlement.reservationId, "SETTLED");
   const settled: Agreement = { ...agreement, settledRef: settlement.settlementId, version: agreement.version + 1 };

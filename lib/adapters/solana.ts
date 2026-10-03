@@ -14,12 +14,14 @@
  */
 
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
-import type { SettlementAdapter } from "./types";
+import type { ChainObservation, EvidenceRequest, SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
-import type { EvidenceBundle } from "@/lib/evm/evidence";
-import { encodeAbiParameters, sha256 } from "viem";
+import { buildSolanaEvidenceBundle, networkName, type EvidenceBundle } from "@/lib/evm/evidence";
+import { assertObservationMatches } from "./observation";
+
 import { toAtomic } from "@/lib/evm/eip712";
 import { VAULT_PROGRAM_ID } from "@/lib/solana/vault-program";
+import { solanaCommitmentAtomic } from "@/lib/solana/commitment";
 
 /**
  * What this adapter can settle: native SOL, and only SOL.
@@ -49,6 +51,8 @@ export interface SolanaTransport {
     commitment: string;
   }): Promise<{ txHash: string }>;
   verify(txHash: string): Promise<{ confirmed: boolean }>;
+  /** What the chain shows for the tx; null unless it is a confirmed settlement. Optional: without it, no evidence. */
+  observe?(txHash: string): Promise<ChainObservation | null>;
 }
 
 export interface SolanaSettlementOptions {
@@ -98,12 +102,46 @@ export class SolanaSettlementAdapter implements SettlementAdapter {
     return this.opts.transport.verify(txHash);
   }
   /**
-   * PRD 21.4 `getEvidence`. Returns null rather than a bundle assembled from
-   * nothing: a bundle with no observed chain behind it is indistinguishable from
-   * one that watched a transfer, and the counterparty has no way to tell.
+   * PRD 21.4 `getEvidence`, from the chain (sprint item 2). Same contract as the
+   * EVM adapters; the commitment is the permit's `action_hash`, and the bundle uses
+   * the Solana scheme because EIP-712 has no meaning on this rail.
    */
-  async getEvidence(_ref: { settlementId: string }): Promise<EvidenceBundle | null> {
-    return null;
+  async getEvidence({ settlement, observedAt }: EvidenceRequest): Promise<EvidenceBundle | null> {
+    if (settlement.chain !== "solana") throw new Error("EVIDENCE_WRONG_RAIL");
+    if (!settlement.txHash || !this.opts.transport?.observe) return null;
+    if (!settlement.receiptId) throw new Error("EVIDENCE_WITHOUT_RECEIPT");
+    const asset = SOLANA_ASSETS[settlement.asset];
+    if (!asset) throw new Error("UNSUPPORTED_ASSET_ON_SOLANA");
+
+    const typed = {
+      settlementId: settlement.settlementId,
+      from: settlement.from,
+      to: settlement.to,
+      amountAtomic: toAtomic(settlement.amount, asset.decimals),
+      asset: settlement.asset,
+      programId: VAULT_PROGRAM_ID.toBase58(),
+    };
+    const commitment = solanaCommitmentAtomic(typed);
+    if (settlement.commitment && settlement.commitment.toLowerCase() !== commitment.toLowerCase()) {
+      throw new Error("EVIDENCE_RECORD_INCONSISTENT");
+    }
+
+    const obs = await this.opts.transport.observe(settlement.txHash);
+    if (!obs || obs.block <= 0) return null;
+    // Base58 is case-sensitive: addresses are compared exactly.
+    assertObservationMatches(
+      obs,
+      { commitment, from: typed.from, to: typed.to, amountAtomic: typed.amountAtomic, asset: null },
+      { caseInsensitiveAddresses: false },
+    );
+    return buildSolanaEvidenceBundle({
+      evidenceId: `evd_${settlement.settlementId}`,
+      receiptId: settlement.receiptId,
+      settlementId: settlement.settlementId,
+      chain: networkName("solana"),
+      typed,
+      confirmation: { txHash: obs.txHash, blockNumber: obs.block, observedAt },
+    });
   }
 
 }
@@ -132,15 +170,11 @@ export function solanaCommitment(input: {
 }): `0x${string}` {
   const asset = SOLANA_ASSETS[input.amount.asset];
   if (!asset) throw new Error("UNSUPPORTED_ASSET_ON_SOLANA");
-  return sha256(encodeAbiParameters(
-    [
-      { type: "string" }, { type: "string" }, { type: "string" }, { type: "string" },
-      { type: "string" }, { type: "string" }, { type: "uint64" }, { type: "string" },
-    ],
-    [
-      "MitraSettlement/v1", "solana", input.programId ?? VAULT_PROGRAM_ID.toBase58(),
-      input.settlementId, input.from, input.to,
-      toAtomic(input.amount.amount, asset.decimals), input.amount.asset,
-    ],
-  ));
+  return solanaCommitmentAtomic({
+    settlementId: input.settlementId, from: input.from, to: input.to,
+    amountAtomic: toAtomic(input.amount.amount, asset.decimals), asset: input.amount.asset,
+    programId: input.programId ?? VAULT_PROGRAM_ID.toBase58(),
+  });
 }
+
+export { solanaCommitmentAtomic };

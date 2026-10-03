@@ -8,6 +8,7 @@ import { BaseSettlementAdapter, settlementCommitment, type BaseTransport } from 
 import { agreementPaymentDigest, AGREEMENT_PAYMENT_CAPABILITY, settlementIdFor } from "@/lib/kernel/settlement";
 import { settleAgreement } from "@/lib/settlement/settle-agreement";
 import type { Rails } from "@/lib/settlement/rails";
+import { receiptHash, settlementReceipt, verifyReceiptChain } from "@/lib/kernel/receipts";
 
 /**
  * Sprint item 1 against a real PostgreSQL instance.
@@ -65,7 +66,7 @@ describeDb("settlement persistence on postgres (sprint item 1)", () => {
 
   beforeEach(async () => {
     await pool.query(`TRUNCATE mitra.reservations, mitra.consumed_nonces, mitra.settlements,
-      mitra.agreement_spaces, mitra.agreements, mitra.event_log, mitra.mandates, mitra.vaults CASCADE`);
+      mitra.agreement_spaces, mitra.agreements, mitra.event_log, mitra.mandates, mitra.vaults, mitra.receipts, mitra.spaces CASCADE`);
     await pool.query(
       `INSERT INTO mitra.vaults
          (vault_id, name, principal, controller_ref, chain, asset, address,
@@ -125,6 +126,28 @@ describeDb("settlement persistence on postgres (sprint item 1)", () => {
     });
   });
 
+  describe("receipts (sprint item 2)", () => {
+    const draft = (id: string) => settlementReceipt(
+      { ...pending(id), runId: "run_r", status: "CONFIRMED", txHash: `0x${"ef".repeat(32)}` },
+      "base-sepolia", NOW,
+    );
+
+    it("ten concurrent appends to one run form one unbroken chain, not a fork", async () => {
+      await Promise.all(Array.from({ length: 10 }, (_, i) => repo.appendReceipt(draft(`set_${i}`))));
+      const chain = await repo.listReceipts("run_r");
+      expect(chain).toHaveLength(10);
+      expect(verifyReceiptChain(chain)).toEqual({ ok: true });
+    });
+
+    it("concurrent appends of the same receipt id store it once", async () => {
+      const results = await Promise.all(Array.from({ length: 5 }, () => repo.appendReceipt(draft("set_same"))));
+      // Compared by hash: the winner returns its own object, the others the stored
+      // JSONB document, whose key order Postgres normalises.
+      expect(new Set(results.map((r) => receiptHash(r))).size).toBe(1);
+      expect(await repo.listReceipts("run_r")).toHaveLength(1);
+    });
+  });
+
   it("a reservation's agreementId round-trips", async () => {
     const r = await repo.reserveCapital({
       vaultId: "v_base", amount: 15, reservationId: "res_rt", runId: "r", intentId: "i", mandateId: "m_pay",
@@ -143,7 +166,7 @@ describeDb("settlement persistence on postgres (sprint item 1)", () => {
     };
     const rails: Rails = {
       base: {
-        chain: "base", payer: VAULT_ADDRESS, confirmedEvidence: "LOCAL_PASS",
+        chain: "base", payer: VAULT_ADDRESS, confirmedEvidence: "LOCAL_PASS", network: "base-sepolia",
         adapter: new BaseSettlementAdapter({ chainId: 84532, transport }),
         commitment: (i) => settlementCommitment({ ...i, amount: i.amount.amount, asset: i.amount.asset, chainId: 84532 }),
       },

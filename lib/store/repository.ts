@@ -25,9 +25,10 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Reservation, Run, RunEvent, Saga,
+  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
+import type { ReceiptDraft } from "@/lib/kernel/receipts";
 
 /** Counts reported by seeding. Widened when spaces and agreements were added. */
 export interface SeedCounts {
@@ -142,6 +143,20 @@ export interface EconomicRepository {
   getSettlement(settlementId: string): Promise<Settlement | null>;
   claimSettlement(settlement: Settlement): Promise<boolean>;
   updateSettlement(settlement: Settlement): Promise<void>;
+
+  /**
+   * Receipts (PRD §17), chained per run (`lib/kernel/receipts.ts`).
+   *
+   * `appendReceipt` links the draft to the run's latest receipt and stores it in
+   * one step, so two concurrent appends cannot both claim the same predecessor and
+   * fork the chain. Receipts are terminal records: there is no update.
+   * A receipt id that already exists is returned unchanged rather than re-linked,
+   * so a retried confirmation does not mint a second receipt for one settlement.
+   */
+  appendReceipt(draft: ReceiptDraft): Promise<Receipt>;
+  getReceipt(receiptId: string): Promise<Receipt | null>;
+  /** One run's receipts, oldest first: the order `verifyReceiptChain` walks. */
+  listReceipts(runId: string): Promise<Receipt[]>;
 
   listRuns(): Promise<Run[]>;
   listDeliverables(): Promise<Deliverable[]>;

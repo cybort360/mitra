@@ -40,6 +40,7 @@ import {
 } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import { BASE_ASSETS, type BaseChainId, type BaseTransport, type Erc20Asset } from "./base";
+import type { ChainObservation } from "./types";
 
 const CHAINS = { 8453: base, 84532: baseSepolia } as const;
 
@@ -112,7 +113,16 @@ export class BaseRpcTransport implements BaseTransport {
   }
 
   async verify(txHash: string, chainId: BaseChainId): Promise<{ confirmed: boolean }> {
-    if (chainId !== this.opts.chainId || !BYTES32.test(txHash)) return { confirmed: false };
+    return { confirmed: (await this.observe(txHash, chainId)) !== null };
+  }
+
+  /**
+   * What the chain shows for a settlement transaction, or null if it is not a
+   * confirmed Mitra settlement. `verify` is exactly `observe(...) !== null`, so the
+   * two can never disagree about what counts as confirmed.
+   */
+  async observe(txHash: string, chainId: BaseChainId): Promise<ChainObservation | null> {
+    if (chainId !== this.opts.chainId || !BYTES32.test(txHash)) return null;
     const hash = txHash as Hex;
 
     let receipt;
@@ -122,24 +132,24 @@ export class BaseRpcTransport implements BaseTransport {
       tx = await this.publicClient.getTransaction({ hash });
     } catch {
       // Not found is "not confirmed", not an error the settlement record should carry.
-      return { confirmed: false };
+      return null;
     }
-    if (receipt.status !== "success") return { confirmed: false };
+    if (receipt.status !== "success") return null;
 
     const tokens = new Set(Object.values(BASE_ASSETS[this.opts.chainId]).map((a) => a.address.toLowerCase()));
-    if (!tx.to || !tokens.has(tx.to.toLowerCase())) return { confirmed: false };
-    if (tx.value !== 0n) return { confirmed: false };
+    if (!tx.to || !tokens.has(tx.to.toLowerCase())) return null;
+    if (tx.value !== 0n) return null;
 
     // A transfer without the commitment suffix is not a Mitra settlement, even if
     // it moved the right amount to the right place.
-    if (size(tx.input) !== TRANSFER_CALLDATA_BYTES + 32) return { confirmed: false };
+    if (size(tx.input) !== TRANSFER_CALLDATA_BYTES + 32) return null;
     let intent: { to: string; amount: bigint };
     try {
       const { functionName, args } = decodeFunctionData({ abi: erc20Abi, data: sliceHex(tx.input, 0, TRANSFER_CALLDATA_BYTES) });
-      if (functionName !== "transfer") return { confirmed: false };
+      if (functionName !== "transfer") return null;
       intent = { to: args[0].toLowerCase(), amount: args[1] };
     } catch {
-      return { confirmed: false };
+      return null;
     }
 
     const token = tx.to.toLowerCase();
@@ -151,7 +161,16 @@ export class BaseRpcTransport implements BaseTransport {
         `0x${l.topics[2]!.slice(-40)}`.toLowerCase() === intent.to &&
         BigInt(l.data) === intent.amount,
     );
-    return { confirmed: delivered };
+    if (!delivered) return null;
+    return {
+      txHash,
+      block: Number(receipt.blockNumber),
+      carriedCommitment: sliceHex(tx.input, TRANSFER_CALLDATA_BYTES),
+      from: tx.from.toLowerCase(),
+      to: intent.to,
+      amountAtomic: intent.amount,
+      asset: token,
+    };
   }
 }
 

@@ -11,6 +11,11 @@
  * the F51 layout. Until then it is UNTESTED, and says so.
  */
 import { existsSync, readFileSync } from "node:fs";
+import type { Settlement } from "@/lib/domain/types";
+import { InMemoryRepository } from "@/lib/store/provider";
+import { CapitalLedger } from "@/lib/store/ledger";
+import { settlementReceipt } from "@/lib/kernel/receipts";
+import { verifyEvidenceBundle } from "@/lib/evm/evidence";
 import { createHash } from "node:crypto";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
@@ -322,6 +327,22 @@ describe.skipIf(!live)("live Solana devnet (SOLANA_LIVE=1)", () => {
     }
     console.log(`live solana settlement ${txHash} confirmed=${ok}`);
     expect(ok).toBe(true);
+
+    // Sprint item 2: evidence from the cluster for the transfer just made; the
+    // receipt is minted by the receipt store and the slot is the node's.
+    const record: Settlement = {
+      settlementId: intent.settlementId, runId: `run_${intent.settlementId}`, obligationIds: [], chain: "solana",
+      asset: "SOL", amount: 0.000003, from: intent.from, to: intent.to, txHash, commitment: solanaCommitment(intent),
+      status: "CONFIRMED", submittedAt: new Date().toISOString(), evidenceLevel: "TESTNET_PASS",
+    };
+    const store = new InMemoryRepository(new CapitalLedger([], []));
+    const rcpt = await store.appendReceipt(settlementReceipt(record, "solana-devnet", new Date()));
+    const bundle = await adapter.getEvidence({ settlement: { ...record, receiptId: rcpt.receiptId }, observedAt: new Date().toISOString() });
+    const nodeTx = await conn.getTransaction(txHash, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    console.log(`live solana evidence slot ${bundle?.confirmation?.blockNumber} verdict ${JSON.stringify(bundle && verifyEvidenceBundle(bundle))}`);
+    expect(bundle!.chain).toBe("solana-devnet");
+    expect(bundle!.confirmation!.blockNumber).toBe(nodeTx!.slot);
+    expect(verifyEvidenceBundle(bundle!)).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
   }, 180_000);
 
   /**

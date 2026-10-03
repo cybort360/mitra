@@ -279,5 +279,17 @@ export const MIGRATIONS: string[] = [
   -- pay no agreement. ADD COLUMN IF NOT EXISTS so a database created earlier
   -- gains it on the next migrate, which CREATE TABLE IF NOT EXISTS cannot do.
   ALTER TABLE mitra.reservations ADD COLUMN IF NOT EXISTS agreement_id TEXT;
+
+  -- Receipts (PRD §17), hash-chained per run. Terminal records: the application
+  -- has no UPDATE or DELETE path. UNIQUE (run_id, seq) is the backstop against a
+  -- forked chain; appendReceipt also takes a per-run advisory lock.
+  CREATE TABLE IF NOT EXISTS mitra.receipts (
+    receipt_id  TEXT PRIMARY KEY,
+    run_id      TEXT NOT NULL,
+    seq         INTEGER NOT NULL,
+    document    JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, seq)
+  );
   `,
 ];

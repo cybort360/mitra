@@ -26,6 +26,8 @@ import { AGREEMENT_PAYMENT_CAPABILITY, settlementIdFor } from "@/lib/kernel/sett
 import { POST as agreementsPOST } from "@/app/api/v1/agreements/route";
 import { POST as reservationsPOST } from "@/app/api/v1/reservations/route";
 import { GET as settlementsGET, POST as settlementsPOST } from "@/app/api/v1/settlements/route";
+import { GET as evidenceGET } from "@/app/api/v1/settlements/evidence/route";
+import { bundleFromJson, verifyEvidenceBundle } from "@/lib/evm/evidence";
 
 const NOW = "2026-10-01T12:00:00.000Z";
 const VAULT_ID = "vault_base_ops";
@@ -78,6 +80,16 @@ function recorder(opts: { confirm?: boolean; throwOnSend?: Error } = {}) {
       return { txHash: `0x${sends.length.toString(16).padStart(64, "0")}` as `0x${string}` };
     },
     async verify() { return { confirmed: confirm }; },
+    // Reports back exactly what was recorded, as a faithful chain would. Test-only.
+    async observe(txHash) {
+      const i = Number.parseInt(txHash.slice(2), 16) - 1;
+      const sent = sends[i];
+      if (!confirm || !sent) return null;
+      return {
+        txHash, block: 100 + i, carriedCommitment: sent.data, from: VAULT_ADDRESS,
+        to: sent.to, amountAtomic: BigInt(sent.amountAtomic), asset: sent.asset!.address,
+      };
+    },
   };
   return { transport, sends, setConfirm: (v: boolean) => { confirm = v; } };
 }
@@ -89,7 +101,7 @@ function baseRail(transport: BaseTransport, payer = VAULT_ADDRESS): Rails {
       adapter: new BaseSettlementAdapter({ chainId: 84532, transport }),
       payer,
       commitment: (i) => settlementCommitment({ ...i, amount: i.amount.amount, asset: i.amount.asset, chainId: 84532 }),
-      confirmedEvidence: "LOCAL_PASS",
+      confirmedEvidence: "LOCAL_PASS", network: "base-sepolia",
     },
   };
 }
@@ -182,6 +194,56 @@ describe("settlement caller — the happy path", () => {
     const paid = await settle("ag_e2e", early.data.reservationId);
     expect(paid.status).toBe(200);
     expect(rec.sends).toHaveLength(1);
+  });
+});
+
+describe("settlement evidence through the route (sprint item 2)", () => {
+  const getEvidence = (id: string) => evidenceGET(new Request(`http://localhost/api/v1/settlements/evidence?settlementId=${id}`));
+
+  it("a confirmed settlement has a receipt, and its evidence verifies — including after a JSON round trip", async () => {
+    const rec = recorder();
+    __setRailsForTests(baseRail(rec.transport));
+    await repo.saveAgreement(accepted("ag_ev"));
+    const { body: r } = await reserveFor("ag_ev");
+    const paid = await (await settle("ag_ev", r.data.reservationId)).json();
+    const receiptId = paid.data.settlement.receiptId;
+    expect(receiptId, "confirmation writes a receipt").toBe(`rcpt_${settlementIdFor("ag_ev")}`);
+
+    const res = await getEvidence(settlementIdFor("ag_ev"));
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    // The stub transport's network is named base-sepolia, so the verifier grades
+    // it TESTNET_PASS: this asserts the grading, not that a chain was observed.
+    expect(body.data.verdict).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+    expect(body.data.bundle.receiptId).toBe(receiptId);
+    expect(body.data.receipt.receiptId).toBe(receiptId);
+    expect(body.data.receiptChain.verdict).toEqual({ ok: true });
+    // A third party re-verifies from the JSON alone.
+    expect(verifyEvidenceBundle(bundleFromJson(body.data.bundle))).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+  });
+
+  it("a submitted-but-unconfirmed settlement has no evidence yet (404), and no receipt", async () => {
+    const rec = recorder({ confirm: false });
+    __setRailsForTests(baseRail(rec.transport));
+    await repo.saveAgreement(accepted("ag_ev2"));
+    const { body: r } = await reserveFor("ag_ev2");
+    const sub = await (await settle("ag_ev2", r.data.reservationId)).json();
+    expect(sub.data.settlement.receiptId).toBeUndefined();
+    const res = await getEvidence(settlementIdFor("ag_ev2"));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error, "no receipt yet, so it cannot be evidenced").toBe("EVIDENCE_WITHOUT_RECEIPT");
+  });
+
+  it("if the chain later shows something else, the route reports the contradiction", async () => {
+    const rec = recorder();
+    __setRailsForTests(baseRail(rec.transport));
+    await repo.saveAgreement(accepted("ag_ev3"));
+    const { body: r } = await reserveFor("ag_ev3");
+    await settle("ag_ev3", r.data.reservationId);
+    rec.sends[0] = { ...rec.sends[0], to: "0x2222222222222222222222222222222222222222" };
+    const res = await getEvidence(settlementIdFor("ag_ev3"));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("EVIDENCE_CONTRADICTED:to");
   });
 });
 
@@ -430,5 +492,21 @@ describe.skipIf(!(process.env.BASE_LIVE === "1" && existsSync(LIVE_KEY)))("live:
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getTransactionByHash", params: [s.txHash] }),
     })).json() as { result: { input: `0x${string}` } };
     expect(commitmentFromCalldata(tx.result.input)).toBe(s.commitment);
+
+    // Sprint item 2: evidence, re-observed from the chain through the route. The
+    // block number must be the node's, and the bundle must verify from JSON alone.
+    const receiptRes = await (await fetch(rpc, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "eth_getTransactionReceipt", params: [s.txHash] }),
+    })).json() as { result: { blockNumber: string } };
+    const ev = await evidenceGET(new Request(`http://localhost/api/v1/settlements/evidence?settlementId=${s.settlementId}`));
+    const evBody = await ev.json();
+    console.log(`live evidence ${s.settlementId}: ${JSON.stringify(evBody.data?.verdict ?? evBody)} block ${evBody.data?.bundle?.confirmation?.blockNumber} receipt ${evBody.data?.receipt?.receiptId}`);
+    expect(ev.status, JSON.stringify(evBody)).toBe(200);
+    expect(evBody.data.verdict).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+    expect(evBody.data.bundle.chain).toBe("base-sepolia");
+    expect(evBody.data.bundle.confirmation.blockNumber).toBe(Number(BigInt(receiptRes.result.blockNumber)));
+    expect(verifyEvidenceBundle(bundleFromJson(evBody.data.bundle))).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+    expect(evBody.data.receiptChain.verdict).toEqual({ ok: true });
   }, 120_000);
 });

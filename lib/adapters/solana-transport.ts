@@ -33,6 +33,7 @@
 
 import { PublicKey, Transaction, type Keypair } from "@solana/web3.js";
 import type { SolanaTransport } from "./solana";
+import type { ChainObservation } from "./types";
 import {
   IX, VAULT_PROGRAM_ID,
   authorizationPda, authorizeIx, decodeAuthorization, decodeMandate, mandatePda, spendAuthorizedIx, vaultPda,
@@ -47,6 +48,8 @@ export interface SolanaTxView {
   instructions: Array<{ programIdIndex: number; accounts: number[]; data: Buffer }>;
   preBalances: number[];
   postBalances: number[];
+  /** The slot the transaction landed in, as the node reported it. Used as the evidence "block". */
+  slot?: number;
 }
 
 /** The RPC surface the transport needs. `connectionRpc` adapts a web3.js `Connection`. */
@@ -120,20 +123,29 @@ export class VaultTransport implements SolanaTransport {
   }
 
   async verify(txHash: string): Promise<{ confirmed: boolean }> {
-    if (!BASE58_SIG.test(txHash)) return { confirmed: false };
+    return { confirmed: (await this.observe(txHash)) !== null };
+  }
+
+  /**
+   * What the chain shows for a settlement, or null if it is not a confirmed one.
+   * `verify` is exactly `observe(...) !== null`. The carried commitment is the
+   * permit's `action_hash`, read from the authorize instruction's own data.
+   */
+  async observe(txHash: string): Promise<ChainObservation | null> {
+    if (!BASE58_SIG.test(txHash)) return null;
     const tx = await this.opts.rpc.getTransaction(txHash);
-    if (!tx || tx.err !== null || tx.usesLookupTables) return { confirmed: false };
+    if (!tx || tx.err !== null || tx.usesLookupTables) return null;
 
     const ours = tx.instructions.filter((i) => tx.accountKeys[i.programIdIndex] === this.programId.toBase58());
     const auth = ours.find((i) => i.data.subarray(0, 8).equals(IX.authorize));
     const spend = ours.find((i) => i.data.subarray(0, 8).equals(IX.spendAuthorized));
-    if (!auth || !spend || auth.data.length < 80 || spend.data.length !== 40) return { confirmed: false };
+    if (!auth || !spend || auth.data.length < 80 || spend.data.length !== 40) return null;
 
     // What the permit said, from the authorize instruction's own data.
     const action = auth.data.subarray(8, 40);
     const amount = auth.data.readBigUInt64LE(40);
     const permitRecipient = new PublicKey(auth.data.subarray(48, 80)).toBase58();
-    if (!spend.data.subarray(8, 40).equals(action)) return { confirmed: false };
+    if (!spend.data.subarray(8, 40).equals(action)) return null;
 
     const key = (ix: { accounts: number[] }, n: number) => tx.accountKeys[ix.accounts[n]];
     // The permit address is a PDA of (holder, action), and the program refuses an
@@ -141,31 +153,40 @@ export class VaultTransport implements SolanaTransport {
     // permit matching OUR holder's PDA is what proves the holder; a separate check
     // of the holder account would be redundant and is not repeated here.
     const [permitKey] = authorizationPda(this.opts.holder, action, this.programId);
-    if (key(auth, 3) !== permitKey.toBase58() || key(spend, 2) !== permitKey.toBase58()) return { confirmed: false };
-    if (key(spend, 0) !== permitRecipient) return { confirmed: false };
+    if (key(auth, 3) !== permitKey.toBase58() || key(spend, 2) !== permitKey.toBase58()) return null;
+    if (key(spend, 0) !== permitRecipient) return null;
 
     // The vault debited must be the vault of the principal that granted the mandate.
     const mAcct = await this.opts.rpc.getAccountInfo(mandatePda(this.opts.holder, this.programId)[0]);
-    if (!mAcct) return { confirmed: false };
+    if (!mAcct) return null;
     const binding = decodeMandate(mAcct.data).binding;
-    if (!binding) return { confirmed: false };
+    if (!binding) return null;
     const vault = vaultPda(binding.principal, this.programId)[0].toBase58();
-    if (key(spend, 1) !== vault) return { confirmed: false };
+    if (key(spend, 1) !== vault) return null;
 
     // Exact lamport movement, from this transaction's runtime-recorded balances.
     const delta = (addr: string) => {
       const i = tx.accountKeys.indexOf(addr);
       return i < 0 ? null : BigInt(tx.postBalances[i]) - BigInt(tx.preBalances[i]);
     };
-    if (delta(permitRecipient) !== amount) return { confirmed: false };
-    if (delta(vault) !== -amount) return { confirmed: false };
+    if (delta(permitRecipient) !== amount) return null;
+    if (delta(vault) !== -amount) return null;
 
     // Single use: the permit exists, is this permit, and is consumed.
     const pAcct = await this.opts.rpc.getAccountInfo(permitKey);
-    if (!pAcct || !pAcct.owner.equals(this.programId)) return { confirmed: false };
+    if (!pAcct || !pAcct.owner.equals(this.programId)) return null;
     const permit = decodeAuthorization(pAcct.data);
     const consistent = permit.consumed && permit.amount === amount && permit.recipient.toBase58() === permitRecipient;
-    return { confirmed: consistent };
+    if (!consistent) return null;
+    return {
+      txHash,
+      block: tx.slot ?? 0,
+      carriedCommitment: `0x${Buffer.from(action).toString("hex")}`,
+      from: vault,
+      to: permitRecipient,
+      amountAtomic: amount,
+      asset: null,
+    };
   }
 }
 
@@ -183,6 +204,7 @@ export function connectionRpc(conn: import("@solana/web3.js").Connection): Solan
       if (!r || !r.meta) return null;
       const msg = r.transaction.message;
       return {
+        slot: r.slot,
         err: r.meta.err,
         usesLookupTables: msg.addressTableLookups.length > 0,
         accountKeys: msg.staticAccountKeys.map((k) => k.toBase58()),

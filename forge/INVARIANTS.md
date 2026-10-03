@@ -136,6 +136,8 @@ in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpar
 | FR-INT-002 | MCP remains the control surface and cannot bypass authority | §24 | `PARTIAL` — the shared-context server holds notes, not authority; it cannot move capital |
 | — | Settlement chain and asset match authorized terms | SECURITY.md | `VERIFIED` — `CHAIN_MISMATCH` / `ASSET_MISMATCH` |
 | — | External identities cannot be silently remapped | SECURITY.md | `VERIFIED` — guard added | `marketplaceRefs` was a plain array. `assertNoIdentityRemap` / `mergeRefs` refuse a `(system,id)` already bound to another agent |
+| — | An ACCEPTED agreement is paid only through the execution guard, at most once, to its agreed payee | AGENTS.md mechanism; lead seq 55 | `evidence: LIVE_DEMONSTRATED, blocker: —` — Base Sepolia 2026-10-03 (PROOF_LEDGER). `lib/kernel/settlement.ts` re-derives the digest from the agreement; `claimSettlement` is the at-most-once boundary (Postgres race test) |
+| §21.4 / FR-PROV-001 | Settlement evidence is built from the chain, re-derivable by a third party, and never upgraded from Mitra's own record | §17, §21.4 | `evidence: LIVE_DEMONSTRATED, blocker: —` for the evidence leg on all three rails (Base Sepolia, Tempo Moderato, Solana devnet; 2026-10-03, PROOF_LEDGER). Receipts are hash-chained per run but **unsigned** — the signing half of §17.4 is `PARTIAL`, see FAILURES F53 |
 
 ## VII. Evidence honesty
 

@@ -33,7 +33,8 @@ import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "@/lib/adapters/types";
 import { BaseSettlementAdapter, settlementCommitment } from "@/lib/adapters/base";
 import { BaseRpcTransport } from "@/lib/adapters/base-transport";
-import { TempoSettlementAdapter, tempoCommitment } from "@/lib/adapters/tempo";
+import { TEMPO_CHAIN_IDS, TempoSettlementAdapter, tempoCommitment } from "@/lib/adapters/tempo";
+import { networkName } from "@/lib/evm/evidence";
 import { ModeratoTransport, createTempoRpc } from "@/lib/adapters/tempo-transport";
 import { SolanaSettlementAdapter, solanaCommitment } from "@/lib/adapters/solana";
 import { VaultTransport, connectionRpc } from "@/lib/adapters/solana-transport";
@@ -58,6 +59,8 @@ export interface SettlementRail {
   commitment(input: CommitmentInput): string;
   /** The evidence level a settlement confirmed on this rail has earned. */
   readonly confirmedEvidence: EvidenceLevel;
+  /** The network, from the chain id (`networkName`): what receipts and evidence bundles name. */
+  readonly network: string;
 }
 
 export type Rails = Partial<Record<Chain, SettlementRail>>;
@@ -86,6 +89,7 @@ export function railsFromEnv(env: Record<string, string | undefined> = process.e
         amount: i.amount.amount, asset: i.amount.asset, chainId: BASE_SEPOLIA,
       }),
       confirmedEvidence: "TESTNET_PASS",
+      network: networkName("base", BASE_SEPOLIA),
     };
   }
 
@@ -100,6 +104,7 @@ export function railsFromEnv(env: Record<string, string | undefined> = process.e
       payer: account.address,
       commitment: (i) => tempoCommitment({ ...i, network: "moderato" }),
       confirmedEvidence: "TESTNET_PASS",
+      network: networkName("tempo", TEMPO_CHAIN_IDS.moderato),
     };
   }
 
@@ -119,6 +124,7 @@ export function railsFromEnv(env: Record<string, string | undefined> = process.e
       payer: env.MITRA_SOLANA_VAULT,
       commitment: (i) => solanaCommitment(i),
       confirmedEvidence: "TESTNET_PASS",
+      network: networkName("solana"),
     };
   }
 

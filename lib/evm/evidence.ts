@@ -33,17 +33,19 @@
 
 import type { EvidenceLevel } from "@/lib/domain/types";
 import { settlementDigest, settlingDomain, type SettlementDomain, type TypedSettlement } from "@/lib/evm/eip712";
+import { solanaCommitmentAtomic } from "@/lib/solana/commitment";
 
-export interface EvidenceBundle {
+interface BundleCommon {
   evidenceId: string;
   receiptId: string;
   settlementId: string;
+  /**
+   * The NETWORK, not the domain `Chain`: `"base-sepolia"`, not `"base"`.
+   * `observedLevel` reads it, and `"base"` means Base mainnet there — passing a
+   * Settlement's `chain` straight through would claim public-network evidence for
+   * a testnet transfer. Use `networkName()`.
+   */
   chain: string;
-  /** The typed settlement that was authorised. */
-  typed: TypedSettlement;
-  /** The EIP-712 digest signed for it. Re-derivable, so it can be CHECKED. */
-  commitment: `0x${string}`;
-  domain: SettlementDomain;
   /** Observed confirmation. Absent means nothing was observed. */
   confirmation?: {
     txHash: string;
@@ -51,6 +53,54 @@ export interface EvidenceBundle {
     observedAt: string;
   };
   level: EvidenceLevel;
+}
+
+/** Base and Tempo: an EIP-712 typed-data digest (`lib/evm/eip712.ts`). */
+export interface Eip712EvidenceBundle extends BundleCommon {
+  /** Absent on bundles built before Solana evidence existed; means `"eip712"`. */
+  scheme?: "eip712";
+  /** The typed settlement that was authorised. */
+  typed: TypedSettlement;
+  /** The EIP-712 digest signed for it. Re-derivable, so it can be CHECKED. */
+  commitment: `0x${string}`;
+  domain: SettlementDomain;
+}
+
+/**
+ * Solana: sha256 over the ABI encoding of the settlement (`solanaCommitmentAtomic`),
+ * which the vault program stores as the permit's `action_hash`. EIP-712 has no
+ * meaning there, so it is a separate scheme rather than an EIP-712 bundle with a
+ * fake domain.
+ */
+export interface SolanaEvidenceBundle extends BundleCommon {
+  scheme: "solana-abi-sha256/v1";
+  typed: SolanaTypedSettlement;
+  commitment: `0x${string}`;
+}
+
+export interface SolanaTypedSettlement {
+  settlementId: string;
+  from: string;
+  to: string;
+  amountAtomic: bigint;
+  asset: string;
+  programId: string;
+}
+
+export type EvidenceBundle = Eip712EvidenceBundle | SolanaEvidenceBundle;
+
+/**
+ * The network a bundle's `chain` names, from the chain id the commitment binds.
+ * Unknown ids are refused rather than guessed, because the name decides the
+ * evidence level.
+ */
+export function networkName(chain: "base" | "tempo" | "solana", chainId?: number): string {
+  if (chain === "base" && chainId === 84532) return "base-sepolia";
+  if (chain === "base" && chainId === 8453) return "base";
+  if (chain === "tempo" && chainId === 42431) return "tempo-moderato";
+  if (chain === "tempo" && chainId === 4217) return "tempo";
+  if (chain === "solana") return "solana-devnet"; // the only cluster mitra-vault is deployed to
+  throw new Error(`UNKNOWN_NETWORK: ${chain}/${chainId}`);
 }
 
 /**
@@ -65,7 +115,7 @@ export interface EvidenceBundle {
  */
 export function observedLevel(chainOrBundle: string | EvidenceBundle): EvidenceLevel {
   const chain = typeof chainOrBundle === "string" ? chainOrBundle : chainOrBundle.chain;
-  const isPublic = chain === "mainnet" || chain === "base" || chain === "ethereum";
+  const isPublic = chain === "mainnet" || chain === "base" || chain === "ethereum" || chain === "tempo" || chain === "solana";
   return isPublic ? "LIVE_PUBLIC_PASS" : "TESTNET_PASS";
 }
 
@@ -97,7 +147,9 @@ export function verifyEvidenceBundle(bundle: EvidenceBundle): EvidenceVerdict {
 
   let expected: `0x${string}`;
   try {
-    expected = settlementDigest(bundle.domain, bundle.typed);
+    expected = bundle.scheme === "solana-abi-sha256/v1"
+      ? solanaCommitmentAtomic(bundle.typed)
+      : settlementDigest(bundle.domain, bundle.typed);
   } catch (e) {
     return { ok: false, reason: `EVIDENCE_TYPED_FIELDS_MALFORMED:${e instanceof Error ? e.message : "unknown"}` };
   }
@@ -132,7 +184,7 @@ export function buildEvidenceBundle(input: {
   typed: TypedSettlement;
   domain: SettlementDomain;
   confirmation?: EvidenceBundle["confirmation"];
-}): EvidenceBundle {
+}): Eip712EvidenceBundle {
   const commitment = settlementDigest(input.domain, input.typed);
   return {
     evidenceId: input.evidenceId,
@@ -145,6 +197,42 @@ export function buildEvidenceBundle(input: {
     confirmation: input.confirmation,
     level: input.confirmation ? observedLevel(input.chain) : "DESIGN_ONLY",
   };
+}
+
+/** The Solana counterpart of `buildEvidenceBundle`: the commitment is computed, never accepted. */
+export function buildSolanaEvidenceBundle(input: {
+  evidenceId: string;
+  receiptId: string;
+  settlementId: string;
+  chain: string;
+  typed: SolanaTypedSettlement;
+  confirmation?: EvidenceBundle["confirmation"];
+}): SolanaEvidenceBundle {
+  return {
+    scheme: "solana-abi-sha256/v1",
+    evidenceId: input.evidenceId,
+    receiptId: input.receiptId,
+    settlementId: input.settlementId,
+    chain: input.chain,
+    typed: input.typed,
+    commitment: solanaCommitmentAtomic(input.typed),
+    confirmation: input.confirmation,
+    level: input.confirmation ? observedLevel(input.chain) : "DESIGN_ONLY",
+  };
+}
+
+/**
+ * JSON for a bundle. `amountAtomic` is a bigint, which `JSON.stringify` refuses;
+ * it is written as a decimal string, and `bundleFromJson` restores it so a third
+ * party can hand the parsed bundle straight to `verifyEvidenceBundle`.
+ */
+export function bundleToJson(bundle: EvidenceBundle): unknown {
+  return JSON.parse(JSON.stringify(bundle, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+}
+
+export function bundleFromJson(json: unknown): EvidenceBundle {
+  const b = json as EvidenceBundle & { typed: { amountAtomic: string | bigint } };
+  return { ...b, typed: { ...b.typed, amountAtomic: BigInt(b.typed.amountAtomic) } } as EvidenceBundle;
 }
 
 export { settlingDomain };
