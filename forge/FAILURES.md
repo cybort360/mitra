@@ -2373,6 +2373,49 @@ mandate to *their own* vault — but seeding by `[principal, holder]` would remo
 testing the attack, not the feature; (13) for every handler that moves value, ask
 whose money it is and who chose the payee — and find the line that answers each.
 
+## F52 — on Postgres, every agreement write returned 2xx and persisted nothing
+
+**Status:** fixed on `feat/settlement-caller` (sprint item 1). Demonstrated by an
+existing test, not only by reading: `tests/agreements-api.test.ts` "opens a new
+agreement, funds it, and drives recovery on rejection" FAILED on Postgres at
+`17b5b4c` and passes after the fix (`DATABASE_URL=… npx vitest run
+--no-file-parallelism`: 4 failed → 0 failed; 678 pass).
+**Found:** 2026-10-03, while wiring settlement, which must persist `settledRef`.
+
+`EconomicRepository` declares `getAgreement`, `saveAgreement`, `updateAgreement`,
+`getSpace` and `updateSpace` as OPTIONAL. `InMemoryRepository` implements them;
+`PostgresRepository` implemented none. `/api/v1/agreements` guarded each write with
+`if (repo.saveAgreement) { … }`, so on Postgres an agreement was opened, funded and
+accepted with `201`/`200` while nothing was written, and the next request read the
+seed state back. Same class as F36: the in-memory backend worked, so the suite was
+green whenever `DATABASE_URL` was unset — which is the default.
+
+**Fix.** `PostgresRepository` implements all five (insert-only `saveAgreement`;
+membership written to `mitra.agreement_spaces` only, per F33; `update*` throw when
+no row matched). The route refuses with `501 STORE_CANNOT_PERSIST_AGREEMENTS`
+instead of skipping, so a 2xx means the write happened. `tests/settlement-persistence.test.ts`
+covers the methods; mutations removing the membership strip and the not-found
+throw are both killed.
+
+**Found alongside, both fixed in the same branch:**
+
+1. **Postgres test isolation.** `prepareStore()` truncated reservations and vaults
+   but not sagas, settlements, agreements or spaces. `tests/sagas-api.test.ts`
+   therefore failed on Postgres ("expected 8 to be 0") with sagas left by earlier
+   suites, and once agreements persisted, a second run collided on the same ids.
+   The fixture now truncates the commerce tables; two consecutive Postgres runs
+   pass. Run with `--no-file-parallelism`: in parallel, suites truncate one shared
+   database under each other and the failing set changes from run to run.
+2. **The seed `vault_base_ops` address fails EIP-55.** `0x9EC1A997fF…19dB` is
+   mixed-case with an invalid checksum, so the EIP-712 commitment builder refuses
+   it (`INVALID_ADDRESS:from`). Settlement correctly refuses before anything is
+   sent. Left as is: it is a fixture and was never a real account, and a vault must
+   name the rail's actual payer to settle at all (`VAULT_NOT_BOUND_TO_RAIL`).
+
+**RULE ADDED:** (14) an optional repository method guarded by `if (repo.x)` on a
+write path is a silent success on any store that lacks it. Refuse, or make it
+required.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

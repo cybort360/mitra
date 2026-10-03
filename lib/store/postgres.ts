@@ -106,6 +106,38 @@ export class PostgresRepository implements EconomicRepository {
     return rows.map((r) => r.document as Settlement);
   }
 
+  async getSettlement(settlementId: string): Promise<Settlement | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.settlements WHERE settlement_id = $1", [settlementId]);
+    return rows[0] ? (rows[0].document as Settlement) : null;
+  }
+
+  /**
+   * One statement, so the database decides between racers. The conflict branch
+   * only fires over a FAILED row; over anything else it matches zero rows and the
+   * claim is refused.
+   */
+  async claimSettlement(settlement: Settlement): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `INSERT INTO mitra.settlements (settlement_id, chain, asset, amount, status, document)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+       ON CONFLICT (settlement_id) DO UPDATE SET
+         chain = EXCLUDED.chain, asset = EXCLUDED.asset, amount = EXCLUDED.amount,
+         status = EXCLUDED.status, document = EXCLUDED.document
+       WHERE mitra.settlements.status = 'FAILED'`,
+      [settlement.settlementId, settlement.chain, settlement.asset, settlement.amount,
+        settlement.status, JSON.stringify(settlement)],
+    );
+    return rowCount === 1;
+  }
+
+  async updateSettlement(settlement: Settlement): Promise<void> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE mitra.settlements SET status = $2, document = $3::jsonb WHERE settlement_id = $1",
+      [settlement.settlementId, settlement.status, JSON.stringify(settlement)],
+    );
+    if (rowCount !== 1) throw new Error("SETTLEMENT_NOT_CLAIMED");
+  }
+
   async listRuns(): Promise<Run[]> {
     const { rows } = await this.pool.query("SELECT document FROM mitra.runs ORDER BY created_at DESC");
     return rows.map((r) => r.document as Run);
@@ -121,6 +153,71 @@ export class PostgresRepository implements EconomicRepository {
       "SELECT document FROM mitra.spaces ORDER BY space_id",
     );
     return rows.map((r) => r.document as Space);
+  }
+
+  /**
+   * Single-row reads and the write path for Spaces and agreements.
+   *
+   * These were missing. The interface marks them optional and the agreements route
+   * guarded every write with `if (repo.saveAgreement)`, so on this backend an
+   * agreement was opened, funded and accepted with a 2xx response while NOTHING was
+   * written — the next request read the seed state back. Same class as F36: the
+   * in-memory backend worked, so the suite was green whenever DATABASE_URL was unset.
+   */
+  async getSpace(spaceId: string): Promise<Space | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.spaces WHERE space_id = $1", [spaceId]);
+    return rows[0] ? (rows[0].document as Space) : null;
+  }
+
+  async updateSpace(space: Space): Promise<void> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE mitra.spaces SET owner = $2, status = $3, document = $4::jsonb WHERE space_id = $1",
+      [space.spaceId, space.owner, space.status, JSON.stringify(space)],
+    );
+    if (rowCount !== 1) throw new Error(`SPACE_NOT_FOUND: ${space.spaceId}`);
+  }
+
+  async getAgreement(agreementId: string): Promise<Agreement | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.agreements WHERE agreement_id = $1", [agreementId]);
+    if (!rows[0]) return null;
+    const links = await this.pool.query(
+      "SELECT space_id FROM mitra.agreement_spaces WHERE agreement_id = $1 ORDER BY space_id",
+      [agreementId],
+    );
+    return { ...(rows[0].document as Agreement), spaceIds: links.rows.map((r) => String(r.space_id)) };
+  }
+
+  /** Insert-only: opening an agreement twice under one id is a conflict, not an update. */
+  async saveAgreement(agreement: Agreement): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "INSERT INTO mitra.agreements (agreement_id, status, document) VALUES ($1,$2,$3::jsonb)",
+        [agreement.agreementId, agreement.status, JSON.stringify(withoutMembership(agreement))],
+      );
+      for (const sid of agreement.spaceIds) {
+        await client.query(
+          "INSERT INTO mitra.agreement_spaces (agreement_id, space_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+          [agreement.agreementId, sid],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Membership is not rewritten: no agreement op changes which Spaces it is in. */
+  async updateAgreement(agreement: Agreement): Promise<void> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE mitra.agreements SET status = $2, document = $3::jsonb WHERE agreement_id = $1",
+      [agreement.agreementId, agreement.status, JSON.stringify(withoutMembership(agreement))],
+    );
+    if (rowCount !== 1) throw new Error(`AGREEMENT_NOT_FOUND: ${agreement.agreementId}`);
   }
 
   /**
@@ -197,12 +294,12 @@ export class PostgresRepository implements EconomicRepository {
       const { rows: inserted } = await client.query(
         `INSERT INTO mitra.reservations
            (reservation_id, run_id, vault_id, intent_id, mandate_id, mandate_version,
-            asset, amount, chain, action_digest, expires_at, nonce, status, version)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'RESERVED',1)
+            asset, amount, chain, action_digest, expires_at, nonce, status, version, agreement_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'RESERVED',1,$13)
          RETURNING *`,
         [input.reservationId, input.runId, input.vaultId, input.intentId, input.mandateId,
           input.mandateVersion, input.asset, input.amount, input.chain, input.actionDigest,
-          input.expiresAt, nonce],
+          input.expiresAt, nonce, input.agreementId ?? null],
       );
       // Read the updated vault back on the same connection, inside the
       // transaction, so no second connection is needed while holding the lock.
@@ -273,9 +370,10 @@ export class PostgresRepository implements EconomicRepository {
     await this.pool.query(
       `INSERT INTO mitra.reservations
          (reservation_id, run_id, vault_id, intent_id, mandate_id, mandate_version,
-          asset, amount, chain, action_digest, expires_at, nonce, status, version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          asset, amount, chain, action_digest, expires_at, nonce, status, version, agreement_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (reservation_id) DO UPDATE SET
+         agreement_id = EXCLUDED.agreement_id,
          run_id = EXCLUDED.run_id, vault_id = EXCLUDED.vault_id,
          intent_id = EXCLUDED.intent_id, mandate_id = EXCLUDED.mandate_id,
          mandate_version = EXCLUDED.mandate_version, asset = EXCLUDED.asset,
@@ -285,7 +383,7 @@ export class PostgresRepository implements EconomicRepository {
       [reservation.reservationId, reservation.runId, reservation.vaultId, reservation.intentId,
         reservation.mandateId, reservation.mandateVersion, reservation.asset, reservation.amount,
         reservation.chain, reservation.actionDigest, reservation.expiresAt, reservation.nonce,
-        reservation.status, reservation.version],
+        reservation.status, reservation.version, reservation.agreementId ?? null],
     );
     return reservation;
   }
@@ -446,7 +544,14 @@ function rowToReservation(r: Record<string, unknown>): Reservation {
     chain: String(r.chain) as Reservation["chain"], actionDigest: String(r.action_digest),
     expiresAt: new Date(String(r.expires_at)).toISOString(), nonce: num(r.nonce),
     status: String(r.status) as Reservation["status"], version: num(r.version),
+    ...(r.agreement_id != null ? { agreementId: String(r.agreement_id) } : {}),
   };
+}
+
+/** Membership lives in `mitra.agreement_spaces` only (F33); the document must not carry it. */
+function withoutMembership(agreement: Agreement): Omit<Agreement, "spaceIds"> {
+  const { spaceIds: _spaceIds, ...rest } = agreement;
+  return rest;
 }
 
 function rowToEvent(r: Record<string, unknown>): RunEvent {

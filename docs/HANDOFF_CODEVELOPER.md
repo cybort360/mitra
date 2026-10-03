@@ -98,6 +98,50 @@ Each line is backed by `forge/PROOF_LEDGER.md`; shared context seq 48–58 has t
 
 ---
 
+## Sprint plan — 2026-10-03 (human:purple / agent:claude-purple)
+
+Scope is assembled from four sources, each checked against the code on
+`feat/solana-settlement-binding` @ `17b5b4c`: items 1–3 above; the lead's seq 60
+("Console dashboards (Phase 10) and live MCP server (Phase 5)");
+[`HANDOFF_SOLANA_VERIFICATION_AND_EVM_VAULTS.md`](HANDOFF_SOLANA_VERIFICATION_AND_EVM_VAULTS.md)
+(`9aa644c`, packages A and B); and a four-package list received out of band.
+
+### Order of work
+
+| # | Item | Why it is open (what the code shows) |
+|---|---|---|
+| 1 | ✅ **Settlement caller** — a Mitra obligation reaches a `SettlementAdapter` | **Done on `feat/settlement-caller`; live on Base Sepolia** (PROOF_LEDGER, tx `0x65c481e9…`). `POST /api/v1/settlements` pays an `ACCEPTED` agreement to its `payTo` term; the execution guard re-runs against a digest re-derived from the agreement; one settlement per agreement by primary key; a transport error leaves it `PENDING` (never retried blind). Also fixed F52 (Postgres dropped every agreement write). Still open: vault capital not drawn down; Tempo/Solana via this path not shown live |
+| 2 | **`getEvidence()`** on Base, Tempo, Solana (PRD §21.4) | Returns `null` on every rail. `lib/evm/evidence.ts` already defines the bundle and `verifyEvidenceBundle`; live transactions exist to build from |
+| 3 | **Base: `sendUserOp` (ERC-4337) through the transport, and an on-chain ERC-1271 `SignatureVerifier`** | Remainder of item 1 above |
+| 4 | **Live MCP server** (Phase 5) over the 18 tools in `lib/mcp/surface.ts`, plus an HTTP x402 gateway | No transport serves the tools. `lib/evm/payment.ts` models the challenge; a 402 still requires a reservation and never authorises a spend |
+| 5 | **Console** (Phase 10) on real data, live stream from `mitra.event_log` | All 15 data pages import `lib/store/seed`; no SSE/WebSocket route exists |
+| 6 | **`MitraVault.sol`** (lead's package B) | Not started. Foundry is installed. See correction below |
+| 7 | **`security.txt` + mandate PDA reseed in one redeploy** (lead's package A + seq 55) | Code is ours; the SBF build and `program upgrade` are the lead's (see correction below) |
+
+**For the lead:** Arcium / `FR-VAULT-008/009` (Phase 3) — not assigned in seq 60, and no
+Arcium source exists on any branch (F44 names `arcium-probe/`, which is not in the
+repository); the `context audit` break at seq 29.
+
+### Corrections to the incoming scope
+
+- **Base/Tempo "throw `UnconfiguredAdapterError`"** — only without a transport. Both
+  transports exist and settled live (PROOF_LEDGER). TIP-20 execution and MPP are built.
+- **ERC-8004 "verify agent identity"** — contradicts the lead's recorded decision: the
+  registry is projected *outward*; an inbound registry verdict is never proof of identity
+  and may influence only discovery ranking.
+- **"The Arcium Anchor program compiles"** — F44 says the program is "genuinely
+  unwritten", and no Arcium source is in the repository. `EXECUTION_PLAN.md` row 3
+  ("rewritten and compiles") is unsupported by anything in the tree.
+- **Package A upgrade key** — the doc names `.dev-keys/solana-testnet.json`
+  (`ETjm3HV8…`). The on-chain upgrade authority of `GkQQtmVX…` (ProgramData
+  `9aUb2Zoz…`, read 2026-10-03) is `C4ZoTdNS…`, the lead's key.
+- **Package B `mapping(address => Mandate) mandates`** — keyed by holder alone, so a
+  mandate names no principal or vault. That is F51's root cause and the squatter DoS the
+  lead approved fixing (seq 55). The EVM vault will key mandates by `(principal, holder)`
+  and bind the vault and recipient into the permit.
+
+---
+
 ### Working Agreement & Commands for the Co-Developer
 
 ```bash

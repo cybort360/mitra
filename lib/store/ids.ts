@@ -37,6 +37,15 @@ import { typedHash } from "@/lib/domain/canonical";
 export function actionDigestFor(input: {
   vaultId: string; mandateId: string; mandateVersion: number;
   amount: number; asset: string; chain: string; counterparty: string; capability: string;
+  /**
+   * The agreement this action pays, when it pays one.
+   *
+   * Bound into the digest so a reservation made for one agreement cannot execute
+   * against another with the same provider and price. Omitted from the hashed
+   * object entirely when absent, so every digest that names no agreement is
+   * unchanged (the F11 consequence above does not recur).
+   */
+  agreementId?: string;
 }): string {
   return typedHash("mitra.action.v1", {
     vaultId: input.vaultId,
@@ -47,6 +56,7 @@ export function actionDigestFor(input: {
     chain: input.chain,
     counterparty: input.counterparty,
     capability: input.capability,
+    ...(input.agreementId !== undefined ? { agreementId: input.agreementId } : {}),
   });
 }
 

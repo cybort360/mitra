@@ -67,11 +67,13 @@ export class InMemoryRepository implements EconomicRepository {
   private readonly ledger: CapitalLedger;
   private readonly spacesMap = new Map<string, Space>();
   private readonly agreementsMap = new Map<string, Agreement>();
+  private readonly settlementsMap = new Map<string, Settlement>();
 
   constructor(ledger: CapitalLedger = getLedger()) {
     this.ledger = ledger;
     for (const s of spaces) this.spacesMap.set(s.spaceId, { ...s });
     for (const a of agreements) this.agreementsMap.set(a.agreementId, { ...a });
+    for (const st of settlements) this.settlementsMap.set(st.settlementId, { ...st });
   }
 
   async getVault(vaultId: string): Promise<Vault | null> {
@@ -98,7 +100,7 @@ export class InMemoryRepository implements EconomicRepository {
       spaces: this.spacesMap.size,
       agreements: this.agreementsMap.size,
       obligations: obligations.length,
-      settlements: settlements.length,
+      settlements: this.settlementsMap.size,
       runs: runs.length,
       deliverables: deliverables.length,
     };
@@ -164,7 +166,25 @@ export class InMemoryRepository implements EconomicRepository {
   }
 
   async listSettlements(): Promise<Settlement[]> {
-    return settlements.map((s2) => ({ ...s2 }));
+    return [...this.settlementsMap.values()].map((s2) => ({ ...s2 }));
+  }
+
+  async getSettlement(settlementId: string): Promise<Settlement | null> {
+    const s2 = this.settlementsMap.get(settlementId);
+    return s2 ? { ...s2 } : null;
+  }
+
+  /** Synchronous check-and-set, so two awaiting callers cannot both claim. */
+  async claimSettlement(settlement: Settlement): Promise<boolean> {
+    const existing = this.settlementsMap.get(settlement.settlementId);
+    if (existing && existing.status !== "FAILED") return false;
+    this.settlementsMap.set(settlement.settlementId, { ...settlement });
+    return true;
+  }
+
+  async updateSettlement(settlement: Settlement): Promise<void> {
+    if (!this.settlementsMap.has(settlement.settlementId)) throw new Error("SETTLEMENT_NOT_CLAIMED");
+    this.settlementsMap.set(settlement.settlementId, { ...settlement });
   }
 
   async listRuns(): Promise<Run[]> {
@@ -205,6 +225,7 @@ export class InMemoryRepository implements EconomicRepository {
         chain: input.chain,
         actionDigest: input.actionDigest,
         expiresAt: input.expiresAt,
+        ...(input.agreementId !== undefined ? { agreementId: input.agreementId } : {}),
         nonce: this.ledger.allocateNonce(input.vaultId),
         status: "RESERVED",
         version: 1,

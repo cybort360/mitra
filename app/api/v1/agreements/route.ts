@@ -73,6 +73,11 @@ const OpenAgreementSchema = z.object({
     deadline: z.string().min(1),
     acceptanceCriteria: z.array(z.string()).default([]),
     failurePolicy: z.string().optional(),
+    /** Where the provider is paid. A term, fixed here; settlement never takes a payee from its caller. */
+    payTo: z.object({
+      chain: z.enum(["solana", "base", "tempo"]),
+      address: z.string().min(1),
+    }).optional(),
   }),
   proposal: z.object({
     capability: z.string().min(1),
@@ -121,6 +126,13 @@ export async function POST(req: Request) {
   const body = parsed.data;
   const { repo, backend } = await getStore();
 
+  // These writes used to be skipped with `if (repo.saveAgreement)`, so a store
+  // without them answered 2xx and persisted nothing (the Postgres repository had
+  // none until sprint item 1). Refuse instead: a 2xx must mean it was written.
+  if (!repo.getAgreement || !repo.saveAgreement || !repo.updateAgreement || !repo.getSpace || !repo.updateSpace) {
+    return NextResponse.json({ error: "STORE_CANNOT_PERSIST_AGREEMENTS", backend }, { status: 501 });
+  }
+
   if (body.op === "open") {
     const space = repo.getSpace
       ? await repo.getSpace(body.spaceId)
@@ -146,12 +158,8 @@ export async function POST(req: Request) {
       );
     }
 
-    if (repo.saveAgreement) {
-      await repo.saveAgreement(openResult.value.agreement);
-    }
-    if (repo.updateSpace) {
-      await repo.updateSpace(openResult.value.space);
-    }
+    await repo.saveAgreement(openResult.value.agreement);
+    await repo.updateSpace(openResult.value.space);
 
     return NextResponse.json(
       {
@@ -221,12 +229,8 @@ export async function POST(req: Request) {
     );
   }
 
-  if (repo.updateAgreement) {
-    await repo.updateAgreement(opResult.value.agreement);
-  }
-  if (repo.updateSpace) {
-    await repo.updateSpace(opResult.value.space);
-  }
+  await repo.updateAgreement(opResult.value.agreement);
+  await repo.updateSpace(opResult.value.space);
 
   return NextResponse.json({
     data: {

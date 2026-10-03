@@ -3,6 +3,7 @@ import { z } from "zod";
 import { evaluateProposal } from "@/lib/kernel/authorization";
 import { getStore } from "@/lib/store/provider";
 import { actionDigestFor, newId } from "@/lib/store/ids";
+import { AGREEMENT_PAYMENT_CAPABILITY } from "@/lib/kernel/settlement";
 import type { Reservation } from "@/lib/domain/types";
 
 /**
@@ -24,6 +25,11 @@ export const createReservationSchema = z.object({
   runId: z.string().min(1),
   /** Minutes until the reservation lapses. */
   ttlMinutes: z.number().int().min(1).max(1440).default(30),
+  /**
+   * The agreement this reservation will pay. Bound into the action digest, so the
+   * reservation can settle that agreement and no other (`lib/kernel/settlement.ts`).
+   */
+  agreementId: z.string().min(1).optional(),
   now: z.string().datetime().optional(),
 });
 
@@ -51,11 +57,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "MANDATE_VAULT_MISMATCH", mandateVaultId: mandate.vaultId }, { status: 409 });
   }
 
+  // A reservation for an agreement must carry exactly the terms the settlement will
+  // re-derive. Settlement would refuse a mismatch anyway (ACTION_DIGEST_MISMATCH);
+  // checking here means the capital is never reserved for a payment that cannot
+  // happen, and the caller learns which term is wrong.
+  if (body.agreementId) {
+    const agreement = repo.getAgreement ? await repo.getAgreement(body.agreementId) : null;
+    if (!agreement) return NextResponse.json({ error: "AGREEMENT_NOT_FOUND", agreementId: body.agreementId }, { status: 404 });
+    const mismatch =
+      body.counterparty !== agreement.provider ? "counterparty"
+      : body.amount !== agreement.price.amount ? "amount"
+      : body.asset !== agreement.price.asset ? "asset"
+      : body.chain !== agreement.payTo?.chain ? "chain"
+      : body.capability !== AGREEMENT_PAYMENT_CAPABILITY ? "capability"
+      : mandate.agentId !== agreement.client ? "mandate"
+      : null;
+    if (mismatch) {
+      return NextResponse.json(
+        { error: "RESERVATION_TERMS_DO_NOT_MATCH_AGREEMENT", term: mismatch, note: "No capital was reserved." },
+        { status: 409 },
+      );
+    }
+  }
+
   const now = body.now ? new Date(body.now) : new Date();
   const actionDigest = actionDigestFor({
     vaultId: vault.vaultId, mandateId: mandate.mandateId, mandateVersion: mandate.version,
     amount: body.amount, asset: body.asset, chain: body.chain,
     counterparty: body.counterparty, capability: body.capability,
+    ...(body.agreementId ? { agreementId: body.agreementId } : {}),
   });
 
   // Policy runs before any capital moves. A DENY must leave nothing behind.
@@ -89,6 +119,7 @@ export async function POST(req: Request) {
     chain: body.chain as Reservation["chain"],
     actionDigest,
     expiresAt: new Date(now.getTime() + body.ttlMinutes * 60_000).toISOString(),
+    ...(body.agreementId ? { agreementId: body.agreementId } : {}),
   });
   if (!reserved.ok) {
     return NextResponse.json({ error: reserved.reason, backend }, { status: 409 });

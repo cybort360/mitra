@@ -48,7 +48,14 @@ export async function prepareStore(): Promise<void> {
     const repo = new PostgresRepository(pool);
     // Truncate first: a previous suite's reservations would otherwise make the
     // velocity window non-empty and deny proposals these tests expect to pass.
-    await pool.query("TRUNCATE mitra.reservations, mitra.consumed_nonces, mitra.authorizations, mitra.event_log, mitra.mandates, mitra.vaults CASCADE");
+    //
+    // The commerce tables are truncated too. They were not, so sagas from earlier
+    // suites leaked into tests/sagas-api.test.ts ("expected 8 to be 0" on Postgres),
+    // and once agreement writes actually persisted (sprint item 1), an agreement
+    // opened by one run collided with the same id on the next.
+    await pool.query(`TRUNCATE mitra.reservations, mitra.consumed_nonces, mitra.authorizations, mitra.event_log,
+      mitra.mandates, mitra.vaults, mitra.sagas, mitra.settlements, mitra.agreement_spaces, mitra.agreements,
+      mitra.spaces CASCADE`);
     await repo.seedReferenceData();
   } finally {
     await pool.end();

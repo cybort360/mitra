@@ -380,6 +380,19 @@ export interface Agreement {
    */
   settledRef?: string;
   /**
+   * Where the provider is paid, recorded as a TERM of the agreement.
+   *
+   * Without it the payee would have to come from the settlement request, so
+   * whoever called settle would choose where the money went — the same
+   * caller-chosen-payee defect F51 found on chain (`spend_authorized` let the
+   * caller name the recipient). Fixed at open and changed only by amendment,
+   * like the provider itself (see `assertSettlementBinding`).
+   *
+   * Optional because an agreement may be opened before the rail is known; such an
+   * agreement can be accepted but not settled (`PAYOUT_ADDRESS_MISSING`).
+   */
+  payTo?: { chain: Chain; address: string };
+  /**
    * The saga that governs this agreement's failure path (F49 Step 2).
    *
    * Optional because not every agreement needs recovery machinery, and because an
@@ -475,6 +488,14 @@ export interface Settlement {
   settlementId: string;
   runId?: string;
   epochId?: string;
+  /** The agreement this settlement discharges, when it pays one (sprint item 1). */
+  agreementId?: string;
+  /** The reservation whose nonce this settlement consumed. */
+  reservationId?: string;
+  /** The rail-specific commitment the transfer carries on chain. */
+  commitment?: string;
+  /** Why the settlement stopped, when it did. Machine-readable. */
+  failureReason?: string;
   obligationIds: string[];
   chain: Chain;
   asset: AssetSymbol;
@@ -482,7 +503,13 @@ export interface Settlement {
   from: string;
   to: string;
   txHash?: string;
-  receiptId: string;
+  /**
+   * The receipt for this settlement, once one exists. Optional because receipts
+   * have no store yet: a settlement executed by `lib/settlement/settle-agreement.ts`
+   * has no receipt to point at, and an invented id would be the F24 pattern
+   * (a reference to a record that does not exist).
+   */
+  receiptId?: string;
   status: SettlementStatus;
   submittedAt: string;
   confirmedAt?: string;

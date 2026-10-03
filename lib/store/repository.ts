@@ -72,6 +72,8 @@ export interface ReserveCapitalInput {
   chain: Reservation["chain"];
   actionDigest: string;
   expiresAt: string;
+  /** The agreement this reservation pays, when it pays one. Bound into `actionDigest`. */
+  agreementId?: string;
 }
 
 /**
@@ -126,6 +128,21 @@ export interface EconomicRepository {
    */
   listObligations(): Promise<Obligation[]>;
   listSettlements(): Promise<Settlement[]>;
+
+  /**
+   * Settlement writes (sprint item 1).
+   *
+   * `claimSettlement` is INSERT-only and is the at-most-once boundary for paying an
+   * agreement: the settlement id is derived from the agreement id
+   * (`settlementIdFor`), so a second concurrent claim hits the primary key and
+   * returns false. It may replace an existing row only if that row is `FAILED`,
+   * which `settle-agreement.ts` writes only when nothing can have been broadcast.
+   * A `PENDING` row means "outcome unknown" and is never replaced.
+   */
+  getSettlement(settlementId: string): Promise<Settlement | null>;
+  claimSettlement(settlement: Settlement): Promise<boolean>;
+  updateSettlement(settlement: Settlement): Promise<void>;
+
   listRuns(): Promise<Run[]>;
   listDeliverables(): Promise<Deliverable[]>;
 

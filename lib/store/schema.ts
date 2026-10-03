@@ -274,5 +274,10 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_sagas_run ON mitra.sagas(run_id);
   CREATE INDEX IF NOT EXISTS idx_sagas_status ON mitra.sagas(status);
+
+  -- The agreement a reservation pays (sprint item 1). Nullable: most reservations
+  -- pay no agreement. ADD COLUMN IF NOT EXISTS so a database created earlier
+  -- gains it on the next migrate, which CREATE TABLE IF NOT EXISTS cannot do.
+  ALTER TABLE mitra.reservations ADD COLUMN IF NOT EXISTS agreement_id TEXT;
   `,
 ];

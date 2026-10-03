@@ -82,6 +82,12 @@ export function openAgreement(
   });
   if (!admitted.ok) return fail(admitted.reason);
 
+  // The payout chain is a term, so it is admitted like the others. A Space that
+  // settles only on Solana must not contain an agreement that pays on Base.
+  if (draft.payTo && !space.settlementChains.includes(draft.payTo.chain)) {
+    return fail("SETTLEMENT_CHAIN_NOT_ALLOWED_IN_SPACE");
+  }
+
   if (draft.price.amount !== proposal.amount.amount) {
     // The admitted amount and the recorded price must be the same number. If they
     // diverge, containment was checked against one figure and the agreement
