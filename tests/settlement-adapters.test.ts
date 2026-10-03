@@ -36,6 +36,9 @@ const SOL_TO = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const SOL_FROM = "6dNVEJhTGbLUpFZ8YVhMZ3UhYZcV6rKzWJp1Yq9GY8yW";
 
 const AMOUNT = { asset: "USDC" as AssetSymbol, amount: 12 };
+// The same economic intent in each rail's own settlement asset: the Solana vault
+// moves lamports, so its leg is SOL. Same amount, same settlement id.
+const SOL_AMOUNT = { asset: "SOL" as AssetSymbol, amount: 12 };
 
 function baseCommitment(settlementId: string, from = EVM_FROM, to = EVM_TO) {
   return settlementCommitment({
@@ -43,11 +46,11 @@ function baseCommitment(settlementId: string, from = EVM_FROM, to = EVM_TO) {
   });
 }
 function solCommitment(settlementId: string) {
-  return solanaCommitment({ settlementId, from: SOL_FROM, to: SOL_TO, amount: AMOUNT });
+  return solanaCommitment({ settlementId, from: SOL_FROM, to: SOL_TO, amount: SOL_AMOUNT });
 }
 
-const intent = (settlementId: string, from: string, to: string, commitmentHash: string) =>
-  ({ settlementId, from, to, amount: AMOUNT, commitmentHash });
+const intent = (settlementId: string, from: string, to: string, commitmentHash: string, amount = AMOUNT) =>
+  ({ settlementId, from, to, amount, commitmentHash });
 
 describe("an unconfigured adapter refuses rather than fabricating", () => {
   it("Base throws UnconfiguredAdapterError without a transport", async () => {
@@ -58,7 +61,7 @@ describe("an unconfigured adapter refuses rather than fabricating", () => {
 
   it("Solana likewise", async () => {
     const a = new SolanaSettlementAdapter();
-    await expect(a.settle(intent("s1", SOL_FROM, SOL_TO, solCommitment("s1"))))
+    await expect(a.settle(intent("s1", SOL_FROM, SOL_TO, solCommitment("s1"), SOL_AMOUNT)))
       .rejects.toBeInstanceOf(UnconfiguredAdapterError);
   });
 
@@ -98,6 +101,11 @@ describe("validation refusals are distinct and shared", () => {
     await expect(a.validateTarget({ asset: "USDC", recipient: SOL_TO, amount: 0 }))
       .rejects.toThrow("INVALID_AMOUNT");
     await expect(a.validateTarget({ asset: "DOGE", recipient: SOL_TO, amount: 1 }))
+      .rejects.toThrow("UNSUPPORTED_ASSET_ON_SOLANA");
+  });
+
+  it("Solana refuses USDC: the vault moves lamports and has no SPL instruction", async () => {
+    await expect(new SolanaSettlementAdapter().validateTarget({ asset: "USDC", recipient: SOL_TO, amount: 1 }))
       .rejects.toThrow("UNSUPPORTED_ASSET_ON_SOLANA");
   });
 
@@ -153,7 +161,7 @@ describe("the same intent executes on both rails", () => {
     const b = await new BaseSettlementAdapter({ chainId: CHAIN, transport: baseT })
       .settle(intent("s1", EVM_FROM, EVM_TO, baseCommitment("s1")));
     const s = await new SolanaSettlementAdapter({ transport: solT })
-      .settle(intent("s1", SOL_FROM, SOL_TO, solCommitment("s1")));
+      .settle(intent("s1", SOL_FROM, SOL_TO, solCommitment("s1"), SOL_AMOUNT));
     expect(b.txHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(s.txHash).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64}$/);
     expect(b.evidenceLevel).toBe("LOCAL_PASS");

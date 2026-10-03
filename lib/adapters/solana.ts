@@ -17,21 +17,36 @@ import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
 import type { EvidenceBundle } from "@/lib/evm/evidence";
+import { encodeAbiParameters, sha256 } from "viem";
+import { toAtomic } from "@/lib/evm/eip712";
+import { VAULT_PROGRAM_ID } from "@/lib/solana/vault-program";
 
-/** Solana SPL token mints. Registry, not configuration. */
-export const SOLANA_ASSETS: Record<string, { symbol: string; mint: string; decimals: number }> = {
-  USDC: { symbol: "USDC", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
-  SOL: { symbol: "SOL", mint: "So11111111111111111111111111111111111111112", decimals: 9 },
+/**
+ * What this adapter can settle: native SOL, and only SOL.
+ *
+ * Settlement on Solana is `spend_authorized` on `mitra-vault`, and that handler
+ * moves LAMPORTS. This registry used to list `USDC` at
+ * `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` — the MAINNET SPL mint, which the
+ * vault has no instruction to move on any cluster — and `SOL` at the wrapped-SOL
+ * SPL mint, which is a token account, not lamports. An adapter that accepted USDC
+ * would have validated a settlement no instruction could execute. `mint: null`
+ * means native lamports.
+ */
+export const SOLANA_ASSETS: Record<string, { symbol: string; mint: null; decimals: number }> = {
+  SOL: { symbol: "SOL", mint: null, decimals: 9 },
 };
 
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export interface SolanaTransport {
   send(input: {
+    /** The vault the capital leaves. The transport checks it against the mandate on chain. */
+    from: string;
     to: string;
     amountAtomic: string;
     mint: string | null;
-    signature: string;
+    /** 32-byte hex. Becomes the program's `action_hash`, binding the permit to this settlement. */
+    commitment: string;
   }): Promise<{ txHash: string }>;
   verify(txHash: string): Promise<{ confirmed: boolean }>;
 }
@@ -69,10 +84,11 @@ export class SolanaSettlementAdapter implements SettlementAdapter {
 
     const asset = SOLANA_ASSETS[input.amount.asset];
     const { txHash } = await this.opts.transport.send({
+      from: input.from,
       to: input.to,
-      amountAtomic: (input.amount.amount * 10 ** asset.decimals).toFixed(0),
+      amountAtomic: toAtomic(input.amount.amount, asset.decimals).toString(),
       mint: asset.mint,
-      signature: input.commitmentHash,
+      commitment: input.commitmentHash,
     });
     return { txHash, evidenceLevel: "LOCAL_PASS" as EvidenceLevel };
   }
@@ -92,28 +108,39 @@ export class SolanaSettlementAdapter implements SettlementAdapter {
 
 }
 
-/** Same construction as the Base commitment, namespaced by chain. */
+/**
+ * The settlement commitment, and the program's `action_hash` for it.
+ *
+ * **This was FNV-1a over a `|`-joined string, repeated eight times to look like 32
+ * bytes.** It had 32 bits of entropy, so a second settlement colliding with a
+ * permit's action was a birthday search away, and the join was ambiguous: a
+ * settlement id containing `|` could shift fields (the F45 class). Neither
+ * mattered while nothing consumed it. It now becomes the `action_hash` that
+ * single-use permits are keyed by on chain, so it has to be a real digest.
+ *
+ * sha256 over the ABI encoding of the fields: ABI strings are length-prefixed, so
+ * no field can bleed into its neighbour, and viem's encoder is the one the EVM
+ * rails already use. The program id and the atomic amount are bound, so a
+ * commitment for one deployment or one amount cannot authorize another.
+ */
 export function solanaCommitment(input: {
   settlementId: string;
   from: string;
   to: string;
   amount: Money;
-  commitmentHash?: string;
-}): string {
-  const fields = [
-    "MitraSettlement",
-    "solana",
-    "mitra-v1",
-    input.settlementId,
-    input.from,
-    input.to,
-    input.amount.amount.toString(),
-    input.amount.asset,
-  ].join("|");
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < fields.length; i++) {
-    h ^= fields.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return `0x${h.toString(16).padStart(8, "0").repeat(8)}`;
+  programId?: string;
+}): `0x${string}` {
+  const asset = SOLANA_ASSETS[input.amount.asset];
+  if (!asset) throw new Error("UNSUPPORTED_ASSET_ON_SOLANA");
+  return sha256(encodeAbiParameters(
+    [
+      { type: "string" }, { type: "string" }, { type: "string" }, { type: "string" },
+      { type: "string" }, { type: "string" }, { type: "uint64" }, { type: "string" },
+    ],
+    [
+      "MitraSettlement/v1", "solana", input.programId ?? VAULT_PROGRAM_ID.toBase58(),
+      input.settlementId, input.from, input.to,
+      toAtomic(input.amount.amount, asset.decimals), input.amount.asset,
+    ],
+  ));
 }
