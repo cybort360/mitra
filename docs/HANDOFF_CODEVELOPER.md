@@ -92,7 +92,7 @@ Each line is backed by `forge/PROOF_LEDGER.md`; shared context seq 48–58 has t
 - **No caller.** No route or kernel code constructs a settlement adapter, so phases 8/9 stay `PARTIAL`. Unblocked by the lead's answers (seq 55): settle only from `ACCEPTED`; testnet signs with the relayer key.
 - **`getEvidence()` returns `null` on all three rails** (PRD §21.4). Live transactions now exist to build bundles from.
 - **Mandate PDA reseed** to `[b"mandate", principal, holder]` — approved (seq 55), not implemented; needs a program change and redeploy.
-- **`scripts/authority-devnet.mjs` still encodes the pre-F51 layouts** and fails against the redeployed program. `lib/solana/vault-program.ts` has the correct builders (pinned to Rust golden bytes) to port it to.
+- ~~`scripts/authority-devnet.mjs` encodes the pre-F51 layouts~~ — **done by the lead** in `02f6774` on `fix/integrity-f40-f45`. `lib/solana/vault-program.ts` (pinned to the Rust golden bytes) remains available if the harness ever drifts.
 - **`context audit` fails at seq 29** — a lead entry damaged at write time (shell backticks); identical in every bundle, not tampering.
 - **Live-network tests can time out**: `tests/dev-scripts.test.ts` hit 30s+ RPC timeouts in one run. The "zero flakes" baseline above holds only on a good network day.
 
