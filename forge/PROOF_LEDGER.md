@@ -322,10 +322,17 @@ A deliberately rejected agreement triggers automated compensation: pre-committed
   node scripts/showcase-live-saga.mjs baseSepolia   # 100% PASS
   node scripts/showcase-live-saga.mjs moderato      # 100% PASS (verified PathUSD 0x20c0...0000)
   ```
-- Executed Tx Hashes:
-  - Base Sepolia: `lockEscrow` `0x5983f82b203b6852…` (block 47647239), `refundEscrow` `0xc05bd25c5a108391…` (block 47647243).
-  - Tempo Moderato: `lockEscrow` `0x300a9b685218f9b0…` (block 38044216), `refundEscrow` `0x5881a9ea0823588a…` (block 38044252).
-  - Both chains: Replay `refundEscrow` rejected on-chain (`JOB_ALREADY_SETTLED`). Attempt count recorded on saga (`F47`).
+- Executed Tx Hashes (Run 2, full un-truncated logging):
+  - Base Sepolia (84532):
+    - `lockEscrow`: `0x61fcfb6dba13b7751c65b0d07c943c51d6d22d69923e1fe4f010f72b49d46d0a` (block 47648097)
+    - `refundEscrow`: `0x767b4e30f12e97868c4120ad65878b588e673c8c43e04dce71cc71c15351800b` (block 47648107)
+  - Tempo Moderato (42431):
+    - `lockEscrow`: `0xbd174dd45ce651905ca4d369073f60202cb86c50e495a27df9be3b4be695640b` (block 38046990)
+    - `refundEscrow`: `0xbfd5c584d0e09f8c4da5e896aa52b07d4d3401f77de279d9bab7e3a5d60ed3cc` (block 38047027)
+- Executed Tx Hashes (Run 1, recovered from block tx lists):
+  - Base Sepolia: `lockEscrow` `0x5983f82b203b68523c0696fe609785833559262f9f64c7279c130fc144379e8c` (blk 47647239), `refundEscrow` `0xc05bd25c5a108391b2059447f4ddfda4c52e3598c332eea9cbb8f8a125a316a5` (blk 47647243).
+  - Tempo Moderato: `lockEscrow` `0x300a9b685218f9b0275e935603cea786764e0e6687d6383656482bb6d3b15084` (blk 38044216), `refundEscrow` `0x5881a9ea0823588ab96892ded35340c56e1af3f49b54f95763558d7d2a6ddde8` (blk 38044252).
+  - Both chains: Replay `refundEscrow` rejected on-chain (`JOB_ALREADY_SETTLED`). Attempt count recorded on saga (`F47`). See `F52`.
 | 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
 | 8 Base | "Same economic intent executes on Base through the common API." | `TESTED` | `PARTIAL` — `BaseSettlementAdapter` + `BaseRpcTransport` settle live on Base Sepolia through `SettlementAdapter` with the EIP-712 commitment on-chain as a calldata suffix (see the live row above). EOA path only: the ERC-4337 path (`scripts/base-4337.mjs`) is not wired through the transport. **Not yet an obligation path:** no route or kernel code constructs the adapter |
 | 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `TESTED` | `PARTIAL` — `TempoSettlementAdapter` + `ModeratoTransport` settle live on Moderato through `SettlementAdapter` with the commitment on-chain as the memo (see the live row above). **Not yet an obligation path:** no route or kernel code constructs the adapter, so no Mitra obligation reaches it |

@@ -163,7 +163,7 @@ async function runShowcase(networkKey) {
       chain,
     });
     await pub.waitForTransactionReceipt({ hash: appTx });
-    console.log(`  Approved token transfer: tx ${appTx.slice(0, 18)}...`);
+    console.log(`  Approved token transfer: tx ${appTx}`);
 
     const depTx = await wallet.writeContract({
       address: dep.address,
@@ -228,7 +228,7 @@ async function runShowcase(networkKey) {
     chain,
   });
   const lockRc = await pub.waitForTransactionReceipt({ hash: lockTx });
-  assertCheck("lockEscrow confirmed on-chain", lockRc.status === "success", `tx ${lockTx.slice(0, 18)}... block ${lockRc.blockNumber}`);
+  assertCheck("lockEscrow confirmed on-chain", lockRc.status === "success", `tx ${lockTx} block ${lockRc.blockNumber}`);
 
   await new Promise((r) => setTimeout(r, 2000));
   const posAfterLock = await pub.readContract({
@@ -400,7 +400,7 @@ async function runShowcase(networkKey) {
     chain,
   });
   const refundRc = await pub.waitForTransactionReceipt({ hash: refundTx });
-  assertCheck("refundEscrow confirmed on-chain", refundRc.status === "success", `tx ${refundTx.slice(0, 18)}... block ${refundRc.blockNumber}`);
+  assertCheck("refundEscrow confirmed on-chain", refundRc.status === "success", `tx ${refundTx} block ${refundRc.blockNumber}`);
 
   await new Promise((r) => setTimeout(r, 2000));
   const posAfterRefund = await pub.readContract({

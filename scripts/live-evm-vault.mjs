@@ -107,13 +107,13 @@ async function main() {
   await new Promise((r) => setTimeout(r, 2000));
   const depHash = await run("deposit", [cfg.token, AMOUNT]);
   const depRc = await pub.waitForTransactionReceipt({ hash: depHash });
-  check("deposit confirmed", depRc.status === "success", `tx ${depHash.slice(0, 18)}… block ${depRc.blockNumber}`);
+  check("deposit confirmed", depRc.status === "success", `tx ${depHash} block ${depRc.blockNumber}`);
   await new Promise((r) => setTimeout(r, 2000));
 
   // 2. open a mandate for the holder
   const mh = await run("openMandate", [HOLDER, AMOUNT, AMOUNT * 10n, DEADLINE, ENGINE]);
   const mrc = await pub.waitForTransactionReceipt({ hash: mh });
-  check("openMandate confirmed", mrc.status === "success", `tx ${mh.slice(0, 18)}…`);
+  check("openMandate confirmed", mrc.status === "success", `tx ${mh}`);
   await new Promise((r) => setTimeout(r, 3000));
 
   const mand = await pub.readContract({ address: V, abi: artifact.abi, functionName: "mandates", args: [HOLDER] });
@@ -138,7 +138,7 @@ async function main() {
   const recBefore = await pub.readContract({ address: cfg.token, abi: erc20, functionName: "balanceOf", args: [RECIPIENT] });
   const sh = await run("spendAuthorized", [acct.address, HOLDER, cfg.token, AMOUNT, RECIPIENT, "settle-1", 1, DEADLINE, sig]);
   const src = await pub.waitForTransactionReceipt({ hash: sh });
-  check("spendAuthorized confirmed", src.status === "success", `tx ${sh.slice(0, 18)}… block ${src.blockNumber}`);
+  check("spendAuthorized confirmed", src.status === "success", `tx ${sh} block ${src.blockNumber}`);
   let recAfter = recBefore;
   let spentAmt = 0n;
   for (let i = 0; i < 5; i++) {

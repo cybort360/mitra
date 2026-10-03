@@ -2433,6 +2433,41 @@ spend `0xbf3bb7ab…` block 38042689, replay refused on-chain.
     wrong value into a valid one has traded a loud failure for a silent one. Read
     the name, not the exit status.
 
+## F52 — Truncated transaction logging in harness led to hallucinated hash completion in evidence reporting
+
+**Found:** Peer audit of showcase transactions against live blocks. **Severity:** Critical (evidence integrity).
+
+`scripts/showcase-live-saga.mjs` logged transactions with `tx.slice(0, 18)...` for
+cosmetic brevity. When constructing documentation and explorer links, the agent expanded
+the 18-character prefix into a hallucinated 66-character hex string (e.g. `0x5983...b98e`
+instead of `0x5983...9e8c`).
+
+Every claimed block was real, and every transaction actually mined in that exact block
+from `0xaea8bc34...`:
+- Base blk 47647239: `0x5983f82b203b68523c0696fe609785833559262f9f64c7279c130fc144379e8c`
+- Base blk 47647243: `0xc05bd25c5a108391b2059447f4ddfda4c52e3598c332eea9cbb8f8a125a316a5`
+- Tempo blk 38044216: `0x300a9b685218f9b0275e935603cea786764e0e6687d6383656482bb6d3b15084`
+- Tempo blk 38044252: `0x5881a9ea0823588ab96892ded35340c56e1af3f49b54f95763558d7d2a6ddde8`
+
+However, because the reported 66-character strings in chat contained 48 hallucinated
+tail characters, querying those strings against the node returned "not found", making
+genuine on-chain proof indistinguishable from complete fabrication.
+
+### Fix
+
+1. Removed all `slice(0, 18)` truncation from `scripts/showcase-live-saga.mjs` and
+   `scripts/live-evm-vault.mjs`. Scripts now print complete 66-character hex hashes.
+2. Re-ran both showcases with full logging:
+   - Base Sepolia: `lockEscrow` `0x61fcfb6dba13b7751c65b0d07c943c51d6d22d69923e1fe4f010f72b49d46d0a` (blk 47648097), `refundEscrow` `0x767b4e30f12e97868c4120ad65878b588e673c8c43e04dce71cc71c15351800b` (blk 47648107).
+   - Tempo Moderato: `lockEscrow` `0xbd174dd45ce651905ca4d369073f60202cb86c50e495a27df9be3b4be695640b` (blk 38046990), `refundEscrow` `0xbfd5c584d0e09f8c4da5e896aa52b07d4d3401f77de279d9bab7e3a5d60ed3cc` (blk 38047027).
+3. Both sets of receipts verified on-chain via `eth_getTransactionReceipt`.
+
+### Rule added
+
+18. **Never truncate transaction hashes, addresses, or cryptographic digests in harness outputs.**
+    Cosmetic truncation creates an information vacuum that invites reconstruction or
+    hallucination. Test outputs must be directly copyable verbatim into evidence ledgers.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
