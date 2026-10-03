@@ -1,5 +1,17 @@
 # Mitra Co-Developer Handoff Specification
-## Phase-by-Phase Execution Guide
+## Multi-Rail Settlement Transports & Live Infrastructure
+
+---
+
+### Scope & Division of Labor
+
+> [!NOTE]
+> **Showcase Division:** **Project Prometheus** (Commercial Agreement lifecycle, guarded spend, TALOS saga recovery) and **Project Pando** (Bilateral obligation collection, deterministic conservation netting, epoch clearing) are being handled directly by the lead developer and are **NOT** part of this handoff.
+
+This handoff covers the **Settlement & Live Transport Infrastructure** (PRD Phases 8 & 9 and on-chain adapter integration):
+1. **Base Sepolia Live Transport** (`lib/adapters/base.ts` — EIP-712, ERC-1271, ERC-4337 UserOps)
+2. **Tempo Moderato Live Transport** (`lib/adapters/tempo.ts` — TIP-20 transfers & MPP)
+3. **Solana Devnet Settlement Binding** (`lib/adapters/solana.ts` — `programs/mitra-vault` on-chain interaction)
 
 ---
 
@@ -7,196 +19,81 @@
 
 * **Tests:** 497 TS tests passing (37 files passed, 3 persistence files self-skip cleanly offline), 88 Rust tests passing in `programs/mitra-vault`. Zero RPC flakes.
 * **TypeScript:** `npm run typecheck` (`tsc --noEmit`) passes with 0 errors.
-* **Shared Context:** Sequence 47 audited (`ok=true`).
 * **PRD §4.5 Discharged:** Failure is a state transition, not an exception (`lib/kernel/commerce-recovery.ts` and `app/api/v1/sagas/route.ts`).
 
 ---
 
-### Sequence of Phases for the Co-Developer
+## Assigned Work: Multi-Rail Settlement Transports
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                      CO-DEVELOPER ROADMAP PHASES                       │
-├─────────┬───────────────────────────────────┬──────────────────────────┤
-│ Phase 1 │ Commercial Agreement HTTP Write   │ Prometheus Showcase      │
-│         │ Surface (POST /api/v1/agreements) │ PRD Phase 4              │
-├─────────┼───────────────────────────────────┼──────────────────────────┤
-│ Phase 2 │ Netting & Clearing Pipeline       │ Pando Showcase           │
-│         │ (POST /api/v1/clearing)           │ PRD Phase 7              │
-├─────────┼───────────────────────────────────┼──────────────────────────┤
-│ Phase 3 │ Multi-Rail Settlement Transports  │ Cross-Chain Settlement   │
-│         │ (Base Sepolia & Tempo Moderato)   │ PRD Phases 8 & 9         │
-└─────────┴───────────────────────────────────┴──────────────────────────┘
-```
+### 1. Base Sepolia Transport Driver (`lib/adapters/base.ts`)
 
----
+#### Objective
+Currently, `BaseSettlementAdapter` throws `UnconfiguredAdapterError` when no transport is provided. This task connects live Base Sepolia execution.
 
-## Phase 1: Commercial Agreement Write Surface (`POST /api/v1/agreements`)
+#### Canonical RPC & Environment
+* **RPC Endpoint:** `https://sepolia.base.org` (or Coinbase Developer Platform / Alchemy Base Sepolia)
+* **Chain ID:** `84532`
 
-### 1.1 Objective & Context
-Currently, [`lib/kernel/commerce-recovery.ts`](../lib/kernel/commerce-recovery.ts) exposes `applyAgreementOpWithSaga` which drives the complete commercial and recovery lifecycle. However, [`app/api/v1/agreements/route.ts`](../app/api/v1/agreements/route.ts) only implements `GET`. 
-
-This phase gives `Agreement` its true HTTP mutation surface, allowing human operators, console UIs, and external agents to drive agreements over HTTP.
-
-### 1.2 Target Files
-* **Modify:** `app/api/v1/agreements/route.ts`
-* **New Test File:** `tests/agreements-api.test.ts`
-
-### 1.3 How to Implement
-
-1. **Add Request Validation Schema (Zod):**
-   ```typescript
-   export const agreementActionSchema = z.discriminatedUnion("op", [
-     z.object({
-       op: z.literal("open"),
-       spaceId: z.string().min(1),
-       agreement: z.object({
-         agreementId: z.string().min(1),
-         runId: z.string().min(1),
-         intentId: z.string().min(1),
-         client: z.string().min(1),
-         provider: z.string().min(1),
-         evaluator: z.string().min(1),
-         externalJobRefs: z.array(z.string()).default([]),
-         price: z.object({ asset: z.literal("USDC"), amount: z.number().positive() }),
-         deadline: z.string(),
-         acceptanceCriteria: z.array(z.string()).min(1),
-         failurePolicy: z.string().optional(),
-       }),
-       capability: z.string().min(1),
-       amount: z.object({ asset: z.literal("USDC"), amount: z.number().positive() }),
-     }),
-     z.object({
-       op: z.literal("fund"),
-       spaceId: z.string().min(1),
-       agreementId: z.string().min(1),
-       capability: z.string().min(1),
-       amount: z.object({ asset: z.literal("USDC"), amount: z.number().positive() }),
-     }),
-     z.object({
-       op: z.literal("startExecution"),
-       spaceId: z.string().min(1),
-       agreementId: z.string().min(1),
-     }),
-     z.object({
-       op: z.literal("submitDeliverable"),
-       spaceId: z.string().min(1),
-       agreementId: z.string().min(1),
-       artifactRefs: z.array(z.string()).min(1),
-       contentHash: z.string().min(1),
-     }),
-     z.object({
-       op: z.literal("acceptDeliverable"),
-       spaceId: z.string().min(1),
-       agreementId: z.string().min(1),
-     }),
-     z.object({
-       op: z.literal("rejectDeliverable"),
-       spaceId: z.string().min(1),
-       agreementId: z.string().min(1),
-       failureReason: z.string().optional(),
-     }),
-   ]);
-   ```
-
-2. **Implement `POST(req: Request)` in `app/api/v1/agreements/route.ts`:**
-   - Parse body with `agreementActionSchema`. If invalid, return 400.
-   - For `op === "open"`, call `openAgreement(space, agreementDraft, opts)`.
-   - For subsequent ops, retrieve `space` and `agreement` via `repo.getSpace(spaceId)` and `repo.getAgreement(agreementId)`.
-   - Call `applyAgreementOpWithSaga(repo, space, agreement, body.op, opts)`.
-   - If not `ok`, return 400 `{ error: res.reason }`.
-   - If `ok`, persist changes (`repo.saveSpace`, `repo.saveAgreement`) and return 200 `{ data: res.value, backend, evidenceLevel: "LOCAL_PASS" }`.
-
-### 1.4 Invariants to Protect
-- **Rule 24 (FAILURES.md):** Commercial state transition runs *first*; the saga only follows if the commercial transition succeeded.
-- **Capital Ordering:** Refund releases `space.committed` *before* the saga marks `RECOVERED`.
-- **Default Failure Route:** Empty `failurePolicy` must default to `"refund on expiry"`, never an absent saga.
+#### Implementation Steps
+1. In [`lib/adapters/base.ts`](../lib/adapters/base.ts), implement a concrete `BaseTransport` using `viem`:
+   - `sendUserOp(userOp)`: Packages and submits the UserOperation envelope with the EIP-712 structured mandate authorization hash.
+   - `verify1271(walletAddress, digest, signature)`: Validates smart contract wallet signatures via ERC-1271 `isValidSignature(bytes32,bytes)`.
+2. Guard against false execution: Never return a fabricated transaction hash. If transport fails or is unconfigured, throw `UnconfiguredAdapterError`.
+3. Gate live network probes under `process.env.BASE_LIVE === "1"`.
 
 ---
 
-## Phase 2: Netting & Clearing Pipeline (`POST /api/v1/clearing`)
+### 2. Tempo Moderato Transport Driver (`lib/adapters/tempo.ts`)
 
-### 2.1 Objective & Context
-Mitra has complete, tested deterministic netting algorithms in [`lib/kernel/clearing.ts`](../lib/kernel/clearing.ts). But currently, clearing epochs are not written or finalized through HTTP.
+#### Objective
+Currently, `TempoSettlementAdapter` provides domain definitions, TIP-20 currency discovery, and MPP metadata formatting, but throws `UnconfiguredAdapterError` on `settle()` without a transport.
 
-This phase unlocks **PRD Phase 7** and **Project Pando** by enabling batches of bilateral obligations to be submitted, netted, committed into an epoch with a Merkle digest, and finalized after a challenge window.
+#### Canonical RPC & Environment
+* **RPC Endpoint:** `https://rpc.moderato.tempo.xyz`
+* **Chain ID:** `42431`
 
-### 2.2 Target Files
-* **Modify:** `app/api/v1/clearing/route.ts`
-* **Modify/Extend:** Repository epoch methods in `lib/store/repository.ts`
-* **New Test File:** `tests/clearing-api.test.ts`
-
-### 2.3 How to Implement
-
-1. **Bilateral Collection & Dispute Filtering:**
-   - Read pending obligations from `repo.listObligations()`.
-   - Enforce **FR-CLEAR-003**: Filter out any obligation with status `DISPUTED` or `DEFAULTED` into an `excluded` array.
-2. **Deterministic Netting Calculation:**
-   - Pass valid obligations to `netObligations(obligations)`.
-   - Assert $\sum \text{net} = 0$ (Conservation of Value).
-3. **Epoch Commitment:**
-   - Generate SHA-256 domain-separated receipt digest using `settlementReceiptHash(transfers, epochId, resultHash)` (avoiding F45's string concatenation trap).
-   - Write epoch to repository in `PROVISIONAL` state with `challengeExpiresAt`.
-4. **Finalization Endpoint / Trigger:**
-   - Provide an endpoint or op `finalizeEpoch`: confirms challenge window has expired and no challenges are open.
-   - Advances epoch to `FINALIZED`.
-   - Enforce: An obligation enters at most **one** finalized clearing epoch.
+#### Critical Guards (from `FAILURES.md`)
+* **F12 & F40 Guard:** `eth_getBalance` returns a constant dummy placeholder (`0xa5bf`) on Moderato, not an actual balance. Native value transfers are explicitly refused by the node (`value transfer not allowed`). **Settlement must occur strictly in TIP-20 tokens via contract calls.**
+* **Rate-Limit Guard:** Moderato testnet returns `-32002` ("Resource temporarily unavailable") during bursts. All JSON-RPC requests must use exponential backoff retry (up to 3 attempts with $500\text{ms} \times 2^n$ delay), matching [`scripts/fund-tempo.mjs`](../scripts/fund-tempo.mjs).
+* **Payment Confirmation:** Payment verification must be derived from decoded `Transfer` event logs matching the target address and token mint, **never** from balance deltas (which miss transfers due to TIP-20 transfer fee deductions).
+* Gate live network probes under `process.env.TEMPO_LIVE === "1"`.
 
 ---
 
-## Phase 3: Multi-Rail Settlement Transports (Base & Tempo)
+### 3. Solana Devnet Settlement Binding (`lib/adapters/solana.ts`)
 
-### 3.1 Objective & Context
-Currently, [`lib/adapters/base.ts`](../lib/adapters/base.ts) and [`lib/adapters/tempo.ts`](../lib/adapters/tempo.ts) throw `UnconfiguredAdapterError` when no transport is provided.
+#### Objective
+Wire `SolanaSettlementAdapter` to interact directly with the deployed `programs/mitra-vault` on Solana devnet (`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY`).
 
-This phase wires real testnet transports using the Colosseum Hackathon canonical RPC endpoints identified in our resource audit.
-
-### 3.2 Target Files
-* **Modify:** `lib/adapters/base.ts`
-* **Modify:** `lib/adapters/tempo.ts`
-* **Verify:** `tests/settlement-adapters.test.ts`
-
-### 3.3 How to Implement
-
-1. **Base Sepolia Transport (`lib/adapters/base.ts`):**
-   - Use viem/ethers with RPC `https://sepolia.base.org` (or Alchemy/CDP).
-   - Wire `BaseTransport` interface:
-     - `sendUserOp`: Packages UserOp with EIP-712 structured mandate hash.
-     - `verify1271`: Queries smart contract wallet for ERC-1271 signature validity.
-2. **Tempo Moderato Transport (`lib/adapters/tempo.ts`):**
-   - RPC: `https://rpc.moderato.tempo.xyz` (Chain ID 42431).
-   - **Crucial Guard (F12/F40):** Never read `eth_getBalance` as native balance (it returns a constant 0xa5bf). Only settle in TIP-20 tokens via contract calls.
-   - **Rate-Limit Guard:** Wrap all JSON-RPC calls with exponential backoff on `-32002` (up to 3 retries, $500\text{ms} \times 2^n$ backoff), following the pattern in `scripts/fund-tempo.mjs`.
-   - Payment confirmation: Must parse decoded `Transfer` logs, never rely on account balance deltas.
-3. **Testing Discipline:**
-   - Gate live network tests behind `BASE_LIVE=1` and `TEMPO_LIVE=1`.
-   - The default `npm test` run must remain offline-first and 100% deterministic.
+#### Implementation Steps
+1. Use `@solana/web3.js` with Helius Devnet RPC (or configured `SOLANA_RPC_URL`).
+2. Implement instruction dispatch for `withdraw` and `settle` binding against the vault PDA.
+3. Assert exact amounts and single-use permit consumption.
 
 ---
 
-### Step-by-Step Commands for the Co-Developer
+### Working Agreement & Commands for the Co-Developer
 
 ```bash
 # 1. Pull latest and review context digest
 git pull origin fix/integrity-f40-f45
 node shared-context-mcp/dist/cli.js digest
 
-# 2. Check baseline health
+# 2. Check baseline health before starting
 npm run typecheck
 npm test
 cargo test -p mitra-vault
 
-# 3. Announce start of work
+# 3. Announce start of work in shared context
 node shared-context-mcp/dist/cli.js say \
   --kind progress \
-  --title "Starting Phase 1: Commercial Agreement HTTP Write Surface" \
-  --scope "commerce"
+  --title "Starting Base Sepolia / Tempo transport drivers" \
+  --scope "settlement"
 
-# 4. Implement Phase 1 and run tests
-npx vitest run tests/agreements-api.test.ts
+# 4. Verify live adapter tests (when configured)
+BASE_LIVE=1 npx vitest run tests/settlement-adapters.test.ts
+TEMPO_LIVE=1 npx vitest run tests/tempo-adapter.test.ts
 
-# 5. Commit and audit before handing back
-git add app/ tests/
-git commit -m "feat(commerce): implement POST /api/v1/agreements write surface"
+# 5. Commit and audit
 node shared-context-mcp/dist/cli.js audit
 ```
