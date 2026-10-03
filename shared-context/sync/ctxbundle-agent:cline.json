@@ -1,6 +1,6 @@
 {
   "fromNodeId": "agent:cline",
-  "highSeq": 42,
+  "highSeq": 43,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -802,6 +802,27 @@
         "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
       ],
       "hash": "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
+    },
+    {
+      "entryId": "ctx_e8dec250780d38a5",
+      "seq": 43,
+      "kind": "decision",
+      "title": "F48 — the policy seam existed, was tested, and no production code called it",
+      "body": "PolicyEvaluator, evaluateWithFallback, bind and EnclaveUnavailableError were written, exported, documented against PRD §11.11 and covered by tests. app/api/v1/authorizations/route.ts imported evaluateProposal DIRECTLY. Nothing consulted mandate.confidentialPolicy; mandate_research_v7 sets it true and would have been evaluated PUBLICLY, issuing an Authorization stamped policy-engine:local. §11.11 requires fail-closed and forbids silent downgrade.\n\nThis is F44s shape: a correct, tested component that nothing calls — harder to notice because the code exists. createPolicyEvaluator did not exist at all; the handoff assumed it did.\n\nBUILT: PublicPolicyEvaluator (evaluateProposal behind the interface, six-field EnclaveOutput); UnavailableEnclaveEvaluator marked confidential:true ON PURPOSE, since that flag is what makes evaluateWithFallback treat a throw as an outage rather than a local defect — marking it public would INVERT the fail-closed rule; createPolicyEvaluator chooses from the MANDATE never the request; route returns 503 CONFIDENTIAL_ENCLAVE_UNAVAILABLE for confidential mandates and public decisions now carry the §11 binding block and name their substrate.\n\nTHE SHARED FIXTURE HAD ENCODED THE DEFECT. tests/fixtures.ts goodProposal named mandate_research_v7 — the CONFIDENTIAL mandate — and every authorization test asserted a PUBLIC decision against it. \"A confidential mandate is evaluated publicly\" was what the suite called correct. Added mandate_research_public_v7, identical terms, confidentialPolicy:false. Terms duplicated deliberately: pointing goodProposal at differently-terms mandates would change what those tests cover.\n\nSECOND DRIFT, caught by the parity test. Adding a mandate broke backend parity: activeMandates was 3 on Postgres, 2 in the ledger. The ledger DECLARED it from the seed; Postgres DERIVED it from (vaultId, status). The comment called this \"a genuine difference in what the two backends can know\" — but both have the same mandate array, so it was not a difference in knowledge. Same defect as Space.agreementIds (F33). Now derived on both sides.\n\nMutation: reverting the route to ignore confidentialPolicy fails 1 test.\nSTATE: 511 TS / 88 Rust / typecheck clean. Branch at 065fb3e.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "api-wiring",
+        "arcium",
+        "f48",
+        "policy"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T05:02:02.774Z",
+      "parents": [
+        "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
+      ],
+      "hash": "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
     }
   ],
   "actors": [
@@ -827,5 +848,5 @@
       "createdAt": "2026-10-01T14:10:28.123Z"
     }
   ],
-  "tipHash": "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
+  "tipHash": "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
 }
