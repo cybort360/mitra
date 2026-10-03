@@ -65,9 +65,13 @@ export type Backend = "postgres" | "memory";
  */
 export class InMemoryRepository implements EconomicRepository {
   private readonly ledger: CapitalLedger;
+  private readonly spacesMap = new Map<string, Space>();
+  private readonly agreementsMap = new Map<string, Agreement>();
 
   constructor(ledger: CapitalLedger = getLedger()) {
     this.ledger = ledger;
+    for (const s of spaces) this.spacesMap.set(s.spaceId, { ...s });
+    for (const a of agreements) this.agreementsMap.set(a.agreementId, { ...a });
   }
 
   async getVault(vaultId: string): Promise<Vault | null> {
@@ -91,8 +95,8 @@ export class InMemoryRepository implements EconomicRepository {
       vaults: this.ledger.listVaults().length,
       mandates: mandates.length,
       reservations: this.ledger.listReservations().length,
-      spaces: spaces.length,
-      agreements: agreements.length,
+      spaces: this.spacesMap.size,
+      agreements: this.agreementsMap.size,
       obligations: obligations.length,
       settlements: settlements.length,
       runs: runs.length,
@@ -111,24 +115,39 @@ export class InMemoryRepository implements EconomicRepository {
   }
 
   /**
-   * Spaces and agreements, from the reference fixtures.
-   *
-   * The in-memory backend is a development store, so it reads the same arrays the
-   * seed defines rather than duplicating them. What matters is that the *route*
-   * now goes through the repository: when the Postgres backend is selected the
-   * same call returns rows from the database, and no route changes.
+   * Spaces and agreements, initialized from reference fixtures and updated
+   * by commercial operations.
    */
   async listSpaces(): Promise<Space[]> {
-    return spaces.map((s) => ({ ...s }));
+    return [...this.spacesMap.values()].map((s) => ({ ...s }));
+  }
+
+  async getSpace(spaceId: string): Promise<Space | null> {
+    const s = this.spacesMap.get(spaceId);
+    return s ? { ...s } : null;
+  }
+
+  async updateSpace(space: Space): Promise<void> {
+    this.spacesMap.set(space.spaceId, { ...space });
   }
 
   async listAgreements(spaceId?: string): Promise<Agreement[]> {
-    // An agreement with an EMPTY spaceIds is a valid, non-Mitra-native
-    // engagement and is returned by an unfiltered list. Filtering by a space
-    // simply cannot match it, which is correct.
-    return agreements
+    return [...this.agreementsMap.values()]
       .filter((a) => !spaceId || a.spaceIds.includes(spaceId))
       .map((a) => ({ ...a }));
+  }
+
+  async getAgreement(agreementId: string): Promise<Agreement | null> {
+    const a = this.agreementsMap.get(agreementId);
+    return a ? { ...a } : null;
+  }
+
+  async saveAgreement(agreement: Agreement): Promise<void> {
+    this.agreementsMap.set(agreement.agreementId, { ...agreement });
+  }
+
+  async updateAgreement(agreement: Agreement): Promise<void> {
+    this.agreementsMap.set(agreement.agreementId, { ...agreement });
   }
 
   /**

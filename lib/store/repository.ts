@@ -108,7 +108,12 @@ export interface EconomicRepository {
    * lifecycle be exercised in a unit test and, later, against Solana.
    */
   listSpaces(): Promise<Space[]>;
+  getSpace?(spaceId: string): Promise<Space | null>;
+  updateSpace?(space: Space): Promise<void>;
   listAgreements(spaceId?: string): Promise<Agreement[]>;
+  getAgreement?(agreementId: string): Promise<Agreement | null>;
+  saveAgreement?(agreement: Agreement): Promise<void>;
+  updateAgreement?(agreement: Agreement): Promise<void>;
 
   /**
    * The remaining economic entities.
