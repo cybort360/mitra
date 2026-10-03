@@ -1,6 +1,6 @@
 {
   "fromNodeId": "agent:cline",
-  "highSeq": 44,
+  "highSeq": 45,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -844,6 +844,28 @@
         "a691738b5a28d3b8d38014a194c5522a55499f939d40e67ffa46bff981874e86"
       ],
       "hash": "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
+    },
+    {
+      "entryId": "ctx_5382fd15c43f6199",
+      "seq": 45,
+      "kind": "decision",
+      "title": "F50 — four recovery functions typed Result and THREW; Layer A coupling landed, §4.5 discharged",
+      "body": "STEP 2 of 4 done. TWO defects found.\n\nF50a — armSaga, startSaga, recordStep and beginCompensation are all declared Result<Saga> and NONE is wrapped in a try; they call transition, which throws. PRD §4.5 is \"failure is a state transition, not an exception\" and these four ARE the recovery path — a caller trusting the signature gets an unhandled throw precisely when a saga is already in trouble. They were also INCONSISTENT: startSaga and recordStep returned fail() for their own checks but still let transition throw, so only SOME illegal calls produced a Result and a caller could not tell which. Fixed: all four are throwing primitives, asResult wrappers exported under the real names. transition still throws deliberately — it is the primitive. Found by a test asserting re-entering compensation is refused: the refusal was THROWN, so the test errored instead of observing a Result.\n\nF50b — lib/kernel/commerce-recovery.ts. Commercial transition FIRST, saga second; a refused startExecution must not leave a saga EXECUTING. fund declares+arms a saga with a pre-committed REFUND route (§15.5); startExecution ARMED->EXECUTING; rejectDeliverable walks EXECUTING->STEP_FAILURE->COMPENSATING->RECOVERED and releases space.committed.\n\nCAPITAL ORDERING: the refund releases committed capital BEFORE the saga goes terminal. Saga-fails-first means capital moves with no recorded reason; release-fails-first means the saga claims a recovery that never happened. Releasing first makes the worst case a saga that UNDER-reports recovery (visible) rather than capital that moved with no record (not).\n\nDELIBERATE DISAGREEMENT with the handoff: it said declare a saga only if failurePolicy is present. We arm either way, defaulting an empty policy to \"refund on expiry\". §15.5 requires a saga with >1 step to declare a compensation route, and funding a two-step agreement is exactly that — so gating the recovery path on an optional prose field would let a blank field leave escrow with no unwind.\n\nMY CORRECTION: I claimed beginCompensation did not exist. It does, at recovery.ts:242, and the handoff was right. A negative claim from an incomplete export listing — same failure as the earlier \"transition() has no callers\".\n\nMUTATION: arming without stepping (the vacuous-pass trap) fails 6 of 12 tests.\n\nSTATE: 479 TS offline + 88 Rust + typecheck clean. INVARIANTS 29 VERIFIED / 3 UNTESTED / 4 PARTIAL — PRD §4.5 discharged. Branch 05955fa.",
+      "status": "active",
+      "scope": "recovery",
+      "tags": [
+        "f50",
+        "layer-a",
+        "recovery",
+        "saga",
+        "section-4-5"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T06:18:44.849Z",
+      "parents": [
+        "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
+      ],
+      "hash": "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
     }
   ],
   "actors": [
@@ -869,5 +891,5 @@
       "createdAt": "2026-10-01T14:10:28.123Z"
     }
   ],
-  "tipHash": "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
+  "tipHash": "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
 }
