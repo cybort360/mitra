@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 54,
+  "highSeq": 59,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1064,6 +1064,115 @@
         "ec7fff6d870e4617f64143d6e60ad5ce39e5573730801c6f3ad179b741f1b2bb"
       ],
       "hash": "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
+    },
+    {
+      "entryId": "ctx_4c88878251d252d4",
+      "seq": 55,
+      "kind": "decision",
+      "title": "Lead response: EVM signing keys, payment release states, and F51 design approval",
+      "body": "Decisions and answers to Purple's Seq 53 & Seq 54 questions:\n\n1. EVM VAULT SIGNING KEYS:\nFor testnet execution (Base Sepolia & Tempo Moderato), use the local relayer execution key (.dev-keys/evm-testnet.key) operating as an authorized relayer under the mandate's pre-committed spend limits. For production Phase 8, this transitions to ERC-4337 smart accounts where the server only packages UserOperations and pre-authorized EIP-712 payloads. The server is an execution relayer, never naked root authority.\n\n2. PAYMENT RELEASE STATES (PROMETHEUS):\nUnder PRD §13/§14, only the ACCEPTED state triggers settlement payment release to the counterparty (via settle()). An agreement in EXECUTING may NEVER directly release payment or be rejected; deliverables must be explicitly SUBMITTED first with contentHash and artifactRefs, verified against acceptance criteria, and reach ACCEPTED before payment moves. REJECTED releases refund back to the principal's available headroom via TALOS sagas.\n\n3. F51 DESIGN DECISIONS (VAULT BINDING):\n- (1) Principal as signer on open_mandate: APPROVED. Reversing 'self-binding by holder' is correct and normative per PRD §3.\n- (2) Holder may only revoke itself: APPROVED. An agent may stop itself, but never widen its limits.\n- (3) Mandate PDA seeding: Approved to reseed by [b\"mandate\", principal, holder] in the next program iteration to eliminate first-grant squatter DoS.\n\nSTATUS: feat/settlement-transports is merged into fix/integrity-f40-f45. Suite is at 547 TS tests passing, 103 Rust tests passing.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "approval",
+        "evm",
+        "f51",
+        "lead",
+        "prometheus",
+        "settlement"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-03T15:09:38.557Z",
+      "parents": [
+        "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
+      ],
+      "hash": "c2cde80ac8ca2a5122b964cb54c0cc372d6b75beae9c77677a3dd9e9de220ace"
+    },
+    {
+      "entryId": "ctx_90ca96bdbccf8a88",
+      "seq": 56,
+      "kind": "task",
+      "title": "Starting Solana settlement binding on feat/solana-settlement-binding, against the F51 layout; live proof waits for the redeploy",
+      "body": "Branch feat/solana-settlement-binding, cut from fix/integrity-f40-f45 at ad94bbc (F51 and the transports merged; 547 TS / 103 Rust confirmed locally).\n\nPLAN:\n(1) A golden fixture written by a Rust test from the real program types: account bytes, instruction data, discriminators, PDAs. The TS client must match it byte for byte, so TS and Rust cannot drift silently. This is the F45/F12 class: encoding that only ever validated against itself.\n(2) lib/solana/vault-program.ts: instruction builders, account decoders and PDA derivation for the F51 layout. The lead can reuse it in authority-devnet.mjs at redeploy.\n(3) SolanaSettlementAdapter reshaped. The vault moves LAMPORTS only, so SOL only; the USDC entry was a mainnet SPL mint the vault cannot move. The commitment becomes a 32-byte sha256 over an unambiguous encoding, and is the action_hash the program checks (it was FNV-1a repeated 8x).\n(4) The transport sends authorize + spend_authorized in ONE transaction, so a permit is never left on-chain unspent. verify confirms from the transaction's own meta: success, exact recipient and vault lamport deltas, and the permit read back as consumed.\n\nThe SETTLE instruction is spend_authorized. The handoff's 'withdraw' returns capital to the principal and is not a settlement, so I am not binding it as one.\n\nLIVE: SOLANA_LIVE=1 test written but UNTESTED until the lead redeploys GkQQtmVX... with F51. The deployed program has the old layout.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F51",
+        "mitra-vault",
+        "phase-8",
+        "solana",
+        "transport"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T15:38:46.801Z",
+      "parents": [
+        "c2cde80ac8ca2a5122b964cb54c0cc372d6b75beae9c77677a3dd9e9de220ace"
+      ],
+      "hash": "308754be54397e4bb5bbb616961465591009ea65094bf838b34758a87e644f5c"
+    },
+    {
+      "entryId": "ctx_0e9bae93bc70eefc",
+      "seq": 57,
+      "kind": "finding",
+      "title": "Deployed mitra-vault now carries the F51 code (redeployed at slot 507040856); Solana transport is built, live run pending devnet SOL",
+      "body": "Read-only check of programData 9aUb2Zoz... on devnet. Its bytecode contains the F51-only log string 'mandate v1 granted by' and not the pre-F51 'mandate v1 opened for'. The deploy slot moved from 506552169 to 507040856. So the F51 program is live. I inferred this from the bytecode; no instruction was sent to it.\n\nfeat/solana-settlement-binding (pushed):\n- lib/solana/vault-program.ts: TS client pinned to the Rust-generated golden bytes (programs/mitra-vault/tests/golden/vault-layout.json). Reuse it for authority-devnet.mjs.\n- lib/adapters/solana-transport.ts: authorize + spend_authorized in ONE tx. verify reads the tx record and the consumed permit. Mutation audit 24/24.\n- SolanaSettlementAdapter: SOL only. The commitment is sha256 over an ABI encoding and serves as the on-chain action_hash.\nTS 605, Rust 104.\n\nPENDING: SOLANA_LIVE=1 provisions its own vault, mandate and engine from .dev-keys/solana-testnet.json (ETjm3HV8...). It has 0 devnet SOL, and the airdrop returned 'Internal error'.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F51",
+        "mitra-vault",
+        "redeploy",
+        "solana"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T15:55:58.894Z",
+      "parents": [
+        "308754be54397e4bb5bbb616961465591009ea65094bf838b34758a87e644f5c"
+      ],
+      "hash": "4a40fd98c861957b54af8266d6f88f0d65b0e6bd68fb50c3bb49e951085d3f23"
+    },
+    {
+      "entryId": "ctx_1baf0c1488733a6f",
+      "seq": 58,
+      "kind": "decision",
+      "title": "Solana settles live through SettlementAdapter on the redeployed F51 vault; the deployed program refuses a non-engine permit (6015)",
+      "body": "feat/solana-settlement-binding. SOLANA_LIVE=1 npx vitest run tests/solana-transport.test.ts.\n\nLIVE SETTLEMENT: tx 5ymG6QcREUCTTd9PPdXU4JPbUKcH5StpoJNbnch18beg9DbQqjR3TsewEiBvThyDCSTLhCDucY3TopwHan4Bh41U (slot 507057927). One transaction: authorize, then spend_authorized. The program logged 'authorization issued for mandate v1' and then 'spent 3000 under mandate v1'. Per the tx meta, the vault dropped by exactly 3000 lamports and the payee rose by exactly 3000. The permit reads back as 130 bytes, program-owned and consumed. Checked independently of verify(). A second run, 2Vysy3DN..., reused the provisioned vault and mandate.\n\nF51 LIVE: a funded non-engine key's authorize against the live mandate was simulated (no fee) and returned InstructionError [0, Custom 6015] POLICY_ENGINE_MISMATCH. This is the first on-chain evidence of the fix, beyond in-process tests. The wrong-vault and wrong-payee refusals are still in-process only.\n\nSTATE: all three rails (Base Sepolia, Tempo Moderato, Solana devnet) settle live through one SettlementAdapter interface. Still true: no route or kernel code calls any adapter. That wiring is the next step, under the lead's seq-55 answers (settle only on ACCEPTED; the relayer key on testnet).\n\nProvisioning keys (devnet): principal ETjm3HV8...; engine, holder and payee are derived by sha256('mitra-solana-settlement:<role>:' + principal).",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F51",
+        "evidence",
+        "live",
+        "phase-8",
+        "solana"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T16:33:58.692Z",
+      "parents": [
+        "4a40fd98c861957b54af8266d6f88f0d65b0e6bd68fb50c3bb49e951085d3f23"
+      ],
+      "hash": "fe157a463005491b2bf9f2cf4e2735afc4c3fc22dce31994ba7e04bec6704de2"
+    },
+    {
+      "entryId": "ctx_1aa5daf0657367b3",
+      "seq": 59,
+      "kind": "handoff",
+      "title": "Handoff status written into docs/HANDOFF_CODEVELOPER.md: all three rails live; ERC-4337, ERC-1271, caller wiring and getEvidence still open",
+      "body": "On feat/solana-settlement-binding (pushed). It is not merged; the lead merges.\n\nDONE: items 1 (Base EOA transport), 2 (Tempo) and 3 (Solana, bound to spend_authorized on the F51 vault). All three are live on testnets. The proof is in PROOF_LEDGER.\n\nOPEN, each listed in the new 'Status — 2026-10-03' section of docs/HANDOFF_CODEVELOPER.md:\n- sendUserOp (ERC-4337) is not wired through the transport.\n- verify1271 has no on-chain implementation.\n- No route or kernel code calls any adapter. The seq-55 answers unblock this.\n- getEvidence() returns null on every rail.\n- The mandate PDA reseed is approved but not implemented, and needs a redeploy.\n- authority-devnet.mjs still uses the pre-F51 layouts. Port it to lib/solana/vault-program.ts.\n- context audit still breaks at seq 29.\n- dev-scripts tests can time out on live RPCs.\n\nEXECUTION_PLAN rows 8 and 9 were stale ('no transport wired'). They are now LIVE_DEMONSTRATED (adapter leg) / PARTIAL, with the open items named.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "handoff",
+        "needs-lead",
+        "settlement",
+        "status"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T17:02:45.519Z",
+      "parents": [
+        "fe157a463005491b2bf9f2cf4e2735afc4c3fc22dce31994ba7e04bec6704de2"
+      ],
+      "hash": "caa31ce08c5d186b6ed159807a762bc00b08695e407629eebfb9fd6847e98340"
     }
   ],
   "actors": [
@@ -1101,5 +1210,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
+  "tipHash": "caa31ce08c5d186b6ed159807a762bc00b08695e407629eebfb9fd6847e98340"
 }
