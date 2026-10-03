@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 65,
+  "highSeq": 67,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1302,6 +1302,51 @@
       ],
       "hash": "9b8229c359ec5a2c4242497dc4e9792199859786049818193c3ef6a61fb18122",
       "supersedesId": "ctx_2257268c1b4c4bd5"
+    },
+    {
+      "entryId": "ctx_0dbe56a01ea65284",
+      "seq": 66,
+      "kind": "task",
+      "title": "Starting sprint item 2: getEvidence() on Base, Tempo and Solana, built from the live settlement record",
+      "body": "Branch feat/settlement-caller, which is pushed and contains item 1 (4659a70). Today getEvidence returns null on every rail. lib/evm/evidence.ts already defines EvidenceBundle and verifyEvidenceBundle. Plan: build bundles only from a settlement that was observed on chain, and keep returning null otherwise. A bundle must re-derive its commitment; that is what makes it evidence rather than a claim.",
+      "status": "superseded",
+      "scope": "settlement",
+      "tags": [
+        "evidence",
+        "item-2",
+        "settlement",
+        "sprint"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T21:49:46.337Z",
+      "parents": [
+        "9b8229c359ec5a2c4242497dc4e9792199859786049818193c3ef6a61fb18122"
+      ],
+      "hash": "d2c62c2b1a55fc6a7020aa7e1f12c3bba1d8c872e2f1ac8c000d7bef5325a005"
+    },
+    {
+      "entryId": "ctx_2b6c908e2f78a4b2",
+      "seq": 67,
+      "kind": "decision",
+      "title": "getEvidence() now builds bundles from the chain on Base, Tempo and Solana; live-verified on all three; settlement receipts are hash-chained but unsigned",
+      "body": "Sprint item 2, on feat/settlement-caller (uncommitted at time of writing).\n\nHOW IT WORKS\n- Each transport's verify(txHash) is now observe(txHash) !== null. observe returns what the node reported: block or slot, carried commitment (Base calldata suffix / Tempo memo / Solana permit action_hash), payer, payee, atomic amount, token. Existing verify tests pass unchanged.\n- getEvidence({settlement, observedAt}) re-derives the commitment from the record's terms and observes the tx. It builds a bundle only if every field matches. It returns null if nothing was observed, and throws EVIDENCE_CONTRADICTED:<field> or EVIDENCE_RECORD_INCONSISTENT otherwise, because a contradiction is not an absence.\n- Bundles carry a scheme: EIP-712 (Base, Tempo) or solana-abi-sha256/v1. verifyEvidenceBundle handles both. bundleToJson/bundleFromJson round-trip the bigint amounts.\n- GET /api/v1/settlements/evidence?settlementId= returns the bundle, verifyEvidenceBundle's verdict, the receipt, and the run's receipt chain with its own verdict.\n- Receipts: settlement confirmation appends a SettlementReceipt (lib/kernel/receipts.ts; mitra.receipts, per-run advisory lock). Receipts are hash-chained per run, signer \"unsigned:mitra-settlement-service\". Signing is open (F53).\n\nTRAP AVOIDED (F53): observedLevel(\"base\") = LIVE_PUBLIC_PASS, because there \"base\" names the network, Base mainnet. Settlement.chain is also \"base\" for Sepolia settlements, so passing it straight in would grade testnet evidence as public. Bundles now use networkName(chain, chainId), e.g. \"base-sepolia\". A mutation reverting this is killed.\n\nLIVE 2026-10-03, all TESTNET_PASS, with block/slot equal to the node's:\n- Base: tx 0x83a19fdb…, block 47648508, full Mitra route plus receipt chain.\n- Tempo: tx 0x7c835aef…, block 38048386, adapter.\n- Solana: tx Ctik7kab…, slot 507144309, adapter.\n\nTESTS: 41 offline evidence tests plus 3 route tests, mutation 17/17. Postgres: 724 pass twice; the receipt lock and idempotency mutations are killed.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F53",
+        "evidence",
+        "item-2",
+        "live",
+        "receipts",
+        "sprint"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T22:11:05.167Z",
+      "parents": [
+        "d2c62c2b1a55fc6a7020aa7e1f12c3bba1d8c872e2f1ac8c000d7bef5325a005"
+      ],
+      "hash": "649e5f55b61ab2516b63f495c7aa602143084a3f2d42d1cf244b4a35c21f0994",
+      "supersedesId": "ctx_0dbe56a01ea65284"
     }
   ],
   "actors": [
@@ -1339,5 +1384,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "9b8229c359ec5a2c4242497dc4e9792199859786049818193c3ef6a61fb18122"
+  "tipHash": "649e5f55b61ab2516b63f495c7aa602143084a3f2d42d1cf244b4a35c21f0994"
 }
