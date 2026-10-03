@@ -1,6 +1,6 @@
 {
   "fromNodeId": "agent:cline",
-  "highSeq": 41,
+  "highSeq": 42,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -780,6 +780,28 @@
         "831832c5d2eac5753a741d6ea2c626c00d57d4296cfcffd768e689591f8d7168"
       ],
       "hash": "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
+    },
+    {
+      "entryId": "ctx_0bd3ecd66034b592",
+      "seq": 42,
+      "kind": "decision",
+      "title": "F47 — four SECURITY.md invariants had no enforcement",
+      "body": "Closing the last four docs/SECURITY.md rows. Three had no guard at all; the fourth had a guard that counted nothing.\n\nCOMPENSATION DOUBLE-EXECUTION — the limit was advisory. CompensationRoute.maxAttempts existed and compensate() checked it, but the route came from input.availableRoutes, an array the CALLER constructs on every call, and the kernel decremented nothing. Unlimited compensation. Saga.routeAttempts now records each execution. Two of my tests were wrong first: the \"replay\" test passed a FRESHLY declared saga (no spent attempt, so it asserted nothing about replay) and declareSaga takes four positional args.\n\nSINGLE-EPOCH ENTRY — no guard. finalizeEpoch sealed whatever it was handed, so an obligation could be netted in two epochs, each with a valid resultHash. assertSingleEpochEntry refuses against FINALIZED epochs only — an OPEN/CHALLENGE epoch holds an obligation provisionally and refusing it would make two concurrent epochs impossible to prepare. The state is CHALLENGE not CHALLENGED.\n\nRECEIPT BINDING — chainHash and resultHash each existed but nothing bound a receipt to a particular result; a receipt for epoch A could carry epoch B numbers. settlementReceiptHash binds settlementId + epochId + resultHash + the transfers THEMSELVES, so citing one epoch and enumerating anothers transfers would require recomputing the netting.\n\nIDENTITY REMAP — marketplaceRefs was a plain array, so [...refs, otherAgentsRef] type-checked. assertNoIdentityRemap / mergeRefs refuse a (system,id) bound elsewhere. Exact match, no case folding.\n\nNOT TRUE, worth repeating: the plan said 4 of 9 API routes serve seed fixtures. They do not — all four call getStore()/repo.listX(), PostgresRepository issues real SQL, no route imports seed.ts (commit d81b482). THIRD stale blocker in that plan after Phase 0 Space and Phase 9 Tempo mints.\n\nMutation: removing all four guards fails 5 tests.\nSTATE: 506 TS / 88 Rust / typecheck clean. Invariants 28 VERIFIED / 4 UNTESTED / 4 PARTIAL. Branch at a0a39e9.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "clearing",
+        "f47",
+        "identity",
+        "recovery",
+        "security"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:38:06.433Z",
+      "parents": [
+        "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
+      ],
+      "hash": "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
     }
   ],
   "actors": [
@@ -805,5 +827,5 @@
       "createdAt": "2026-10-01T14:10:28.123Z"
     }
   ],
-  "tipHash": "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
+  "tipHash": "01f2b72f90a97e30bb36a72b263b5f1f2335fc17a38cb6868dfadae4ff8a594f"
 }
