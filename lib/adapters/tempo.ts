@@ -26,6 +26,7 @@ import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "./types";
 import { UnconfiguredAdapterError } from "./types";
 import type { EvidenceBundle } from "@/lib/evm/evidence";
+import { settlementDigest, settlingDomain, toAtomic } from "@/lib/evm/eip712";
 
 /** TIP-20 mints on Tempo. TIP-20 is the settlement asset; native balance is not usable (F12). */
 /**
@@ -88,6 +89,30 @@ export const TEMPO_TOKENS: Record<string, { symbol: string; mint: `0x${string}`;
 
 export type TempoNetwork = "moderato" | "mainnet";
 
+/** Chain ids read from the nodes themselves (PROOF_LEDGER: Moderato `0xa5bf`, mainnet 4217). */
+export const TEMPO_CHAIN_IDS: Record<TempoNetwork, number> = { moderato: 42431, mainnet: 4217 };
+
+/**
+ * The production commitment for a Tempo settlement: the same EIP-712 typed-data
+ * digest Base uses, under Tempo's chain id. It is 32 bytes, which is exactly the
+ * `transferWithMemo` memo slot, so the commitment rides on-chain with the payment
+ * rather than being padded or truncated to fit.
+ *
+ * The network is bound through the domain's chain id, so a commitment made for
+ * Moderato does not verify on mainnet.
+ */
+export function tempoCommitment(i: { settlementId: string; from: string; to: string; amount: Money; network: TempoNetwork }): `0x${string}` {
+  const token = TEMPO_TOKENS[i.amount.asset];
+  if (!token) throw new Error("TEMPO_SETTLES_IN_TIP20_ONLY");
+  return settlementDigest(settlingDomain(TEMPO_CHAIN_IDS[i.network], "0x0000000000000000000000000000000000000000"), {
+    settlementId: i.settlementId,
+    from: i.from as `0x${string}`,
+    to: i.to as `0x${string}`,
+    amountAtomic: toAtomic(i.amount.amount, token.decimals),
+    asset: token.mint,
+  });
+}
+
 export interface TempoBalanceSource {
   /** Returns TIP-20 balances. An empty array does NOT mean unfunded — see F15. */
   balances(network: TempoNetwork, address: string): Promise<{ data: Array<{ mint: string; amount: string }> }>;
@@ -134,7 +159,7 @@ export class TempoSettlementAdapter implements SettlementAdapter {
 
   constructor(
     private readonly opts: { network: TempoNetwork; transport?: TempoTransport },
-    private readonly commit: (i: { settlementId: string; from: string; to: string; amount: Money; network: string }) => string,
+    private readonly commit: (i: { settlementId: string; from: string; to: string; amount: Money; network: TempoNetwork }) => string,
   ) {}
 
   async validateTarget(input: { asset: string; recipient: string; amount: number }): Promise<void> {
