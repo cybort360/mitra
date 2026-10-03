@@ -10,18 +10,24 @@
 //! `spend_integration.rs` does for `spend_authorized`.
 
 use mitra_vault::anchor_parity::{err, ix};
-use mitra_vault::state::{Authorization, Mandate};
+use mitra_vault::state::{Authorization, Mandate, MandateBinding};
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
 const NOW: u64 = 1_000_000;
 
+/// The principal that granted `base()`, and the engine it named. Fixed keys so a
+/// failure names the role that caused it.
+const PRINCIPAL: Pubkey = Pubkey::new_from_array([4u8; 32]);
+const ENGINE: Pubkey = Pubkey::new_from_array([5u8; 32]);
+const PAYEE: Pubkey = Pubkey::new_from_array([9u8; 32]);
+
 struct Fx {
     program_id: Pubkey,
     holder_key: Pubkey,
     mandate_key: Pubkey,
-    holder_lamports: u64,
+    signer_lamports: u64,
     data: Vec<u8>,
 }
 
@@ -45,7 +51,7 @@ impl Fx {
             program_id,
             holder_key,
             mandate_key,
-            holder_lamports: 5_000_000,
+            signer_lamports: 5_000_000,
             data: m.to_bytes().to_vec(),
         }
     }
@@ -59,15 +65,19 @@ impl Fx {
         d
     }
 
+    /// Amend as the principal — the party that may change a mandate (F51).
     fn amend(&mut self, limit: u64, ceiling: u64, expires_at: u64, revoke: bool, now: u64) -> Result<(), ProgramError> {
+        self.amend_as(PRINCIPAL, limit, ceiling, expires_at, revoke, now)
+    }
+
+    fn amend_as(&mut self, signer: Pubkey, limit: u64, ceiling: u64, expires_at: u64, revoke: bool, now: u64) -> Result<(), ProgramError> {
         let mut data = ix::AMEND_MANDATE.to_vec();
         data.extend(Self::ix_args(limit, ceiling, expires_at, revoke));
 
         let owner = self.program_id;
-        let holder = self.holder_key;
         let mandate_key = self.mandate_key;
         let program_id = self.program_id;
-        let mut holder_lamports = self.holder_lamports;
+        let mut signer_lamports = self.signer_lamports;
         let mut acct = std::mem::take(&mut self.data);
         // The mandate's own lamports are never touched, but AccountInfo requires a
         // `&mut u64`, so a store has to outlive the account array. A `&mut f()`
@@ -76,12 +86,12 @@ impl Fx {
         let mut mandate_lamports: u64 = 1_137_920;
         let result = {
             let accounts = [
-                AccountInfo::new(&holder, true, true, &mut holder_lamports, &mut [], &owner, false, 0),
+                AccountInfo::new(&signer, true, true, &mut signer_lamports, &mut [], &owner, false, 0),
                 AccountInfo::new(&mandate_key, false, true, &mut mandate_lamports, &mut acct, &owner, false, 0),
             ];
             mitra_vault::dispatch(&program_id, &accounts, &data, now)
         };
-        self.holder_lamports = holder_lamports;
+        self.signer_lamports = signer_lamports;
         self.data = acct;
         result
     }
@@ -99,6 +109,7 @@ fn base() -> Mandate {
         expires_at: NOW + 1_000_000,
         ceiling: 1_000_000,
         revoked: false,
+        binding: Some(MandateBinding { principal: PRINCIPAL, policy_engine: ENGINE }),
     }
 }
 
@@ -299,9 +310,12 @@ impl SpendFx {
             &[b"authorization", holder.as_ref(), hash.as_ref()], &program_id,
         );
         let (mandate_key, _) = Pubkey::find_program_address(&[b"mandate", holder.as_ref()], &program_id);
-        let (vault_key, _) = Pubkey::find_program_address(&[b"vault", holder.as_ref()], &program_id);
+        // The PRINCIPAL's vault. This fixture used the holder's, which only
+        // worked because spend never asked whose vault it was debiting (F51).
+        let principal = m.binding.expect("fixture mandates are bound").principal;
+        let (vault_key, vault_bump) = Pubkey::find_program_address(&[b"vault", principal.as_ref()], &program_id);
 
-        let mut v = Vault::new(holder, 254);
+        let mut v = Vault::new(principal, vault_bump);
         v.deposit(1_000_000).expect("fund the vault");
         Self {
             holder,
@@ -317,6 +331,7 @@ impl SpendFx {
                 expires_at: NOW + 1_000_000,
                 consumed: false,
                 bump: 254,
+                recipient: PAYEE,
             }.to_bytes().to_vec(),
             mandate_data: m.to_bytes().to_vec(),
             vault_data: v.to_bytes().to_vec(),
@@ -345,10 +360,9 @@ impl SpendFx {
         data.extend(u64le(expires_at)); data.push(u8::from(revoke));
 
         let owner = self.program_id;
-        // The signing key MUST be the mandate's own holder: `amend_mandate`
-        // re-derives the PDA from `[b"mandate", holder]` and refuses a mismatch.
-        // A hardcoded key here failed with `InvalidSeeds` for a reason that had
-        // nothing to do with the revocation being tested.
+        // Signed by the HOLDER, which may revoke but not amend (F51). The only
+        // caller passes revoke=true, so this also covers an agent stopping its
+        // own outstanding permits end to end.
         let holder = self.holder;
         let mandate_key = self.mandate_key;
         let program_id = self.program_id;
@@ -371,7 +385,7 @@ impl SpendFx {
         let mut data = ix::SPEND_AUTHORIZED.to_vec();
         data.extend(self.hash);
         let owner = self.program_id;
-        let recipient = Pubkey::new_from_array([9u8; 32]);
+        let recipient = PAYEE;
         let authz_key = self.authz_key;
         let vault_key = self.vault_key;
         let mandate_key = self.mandate_key;

@@ -2288,6 +2288,89 @@ never stepping it, the vacuous-pass trap — fails **6** of the 12 new tests.
     machines driven independently will disagree, and the recovery one will record
     activity that the commercial one refused.
 
+## F51 — a stranger could move a principal's capital through `spend_authorized`
+
+**Status:** `FAILED` on the deployed program (`GkQQtmVX…`, devnet). Fixed in code on
+`fix/vault-permit-binding` and `VERIFIED` in-process only — **not deployed**; the
+upgrade authority is `C4ZoTdNS…pSefD`.
+**Found:** 2026-10-03, while preparing to bind `SolanaSettlementAdapter` to the vault.
+
+Three gaps, each reproduced against the real `mitra_vault::dispatch` before any
+change, and each sufficient on its own to move someone else's capital:
+
+1. **`spend_authorized` debited whatever vault the caller named.** It checked that
+   vault, permit and mandate were program-owned and that permit and mandate named
+   the same holder — never that the vault had anything to do with that mandate.
+   Repro: an attacker's own mandate and permit, the VICTIM's vault PDA → `Ok(())`,
+   5_000 lamports to the attacker, victim `available` 10_000 → 5_000.
+2. **`authorize` accepted any signer as the policy engine.** Repro: a stranger key
+   issues a 5_000-unit permit against the victim's mandate → `Ok(())`. ADR-0009
+   decision 2 says *"only the program may author an Authorization"*; the
+   `open_mandate` doc comment said the engine *"cannot mint a permit"*. Neither was
+   true.
+3. **`spend_authorized` takes no signature and the payee was the caller's choice.**
+   Anyone who saw an unspent permit on chain could redeem it to themselves.
+
+And underneath all three: **the agent granted its own mandate.** `open_mandate` was
+signed by the holder ("a self-binding limit on its own holder"), and `amend_mandate`
+let the holder widen it. A limit chosen by the party it limits binds nothing, and no
+mandate named a vault, so there was no principal anywhere in the authority chain —
+the opposite of PRD §3's *"the principal's mandate"*.
+
+### Why nothing caught it
+
+`tests/spend_integration.rs` built its vault as `Vault::new(Pubkey::new_unique(), 254)`
+— an authority unrelated to the mandate — at an arbitrary address. Every spend test
+**modelled the attack and asserted that it succeeded**. `amend_integration.rs`'s
+`SpendFx` derived the vault from the *holder's* seeds, encoding the self-granted
+model as the fixture. The F48 shape again: the fixture held the defect, so the suite
+called it correct. The suite asked "does a valid permit spend once?" and never "whose
+money is this?".
+
+### The fix
+
+- `Mandate` gains a `MandateBinding { principal, policy_engine }` (138 bytes, was 97).
+  `open_mandate` is signed by the **principal**, who must be the authority of the vault
+  being bound (`check_vault_account`), and names the one engine it will honour.
+- `authorize` requires the signer to be `binding.policy_engine` (6015
+  `POLICY_ENGINE_MISMATCH`), refuses a revoked mandate (the docs always said so; the
+  handler never checked), and records the **recipient** in the permit (130 bytes, was 98).
+- `spend_authorized` requires the vault to be the principal's PDA **and** to record
+  the principal as authority (6017 `VAULT_MISMATCH`), and the payee to equal the
+  permit's recipient (6016 `RECIPIENT_MISMATCH`). A refused spend consumes nothing.
+- `amend_mandate`: the principal may amend or revoke; the holder may **only revoke**.
+- Legacy 96/97-byte mandates still load (the Phase 3 evidence stays readable) but are
+  **unbound** and inert: authorize, spend and amend all refuse them (6018
+  `MANDATE_UNBOUND`). Legacy 98-byte permits do not load.
+
+### Evidence
+
+`cargo +1.98.1 test` in `programs/mitra-vault`: **103 pass, 0 fail** (88 before; 90
+after the fixture and layout corrections, plus 13 in `tests/permit_binding.rs`; the
+legacy-permit refusal is an added assertion in `authorization.rs`). Each refusal is paired with the legitimate path in the same world, so a
+program that refuses everything fails too. **Mutation audit 14/14** — the first pass
+was 13/14: the vault-address check survived because the authority check always
+refused first, so a test now presents an account that claims the right authority at
+the wrong address.
+
+**Not verified:** an SBF build (`cargo-build-sbf` is not installed on the machine that
+made this fix) and anything on devnet. `scripts/authority-devnet.mjs` encodes the OLD
+instruction layouts and must change with the redeploy: `open_mandate` accounts become
+`[principal (signer), holder, mandate, vault, system, program]` with a 32-byte engine
+after `expires_at`; `authorize` takes a 32-byte recipient after `amount` (bump moves
+to byte 72); `spend_authorized`'s recipient must be the one the permit names.
+
+### Known limitation, not fixed here
+
+The mandate PDA is still seeded by `[b"mandate", holder]` alone, so one agent can hold
+one mandate across all principals, and a principal who grants first occupies that
+agent's address. That is a denial of service, not a theft — the squatter binds the
+mandate to *their own* vault — but seeding by `[principal, holder]` would remove it.
+
+**RULES ADDED:** (12) a fixture that builds an account no honest flow could produce is
+testing the attack, not the feature; (13) for every handler that moves value, ask
+whose money it is and who chose the payee — and find the line that answers each.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

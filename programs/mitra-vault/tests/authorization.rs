@@ -29,6 +29,7 @@ fn permit(action_hash: [u8; 32], amount: u64, expires_at: u64) -> Authorization 
         mandate_version: 1,
         expires_at,
         consumed: false,
+        recipient: Pubkey::new_from_array([9u8; 32]),
         bump: 254,
     }
 }
@@ -126,8 +127,11 @@ fn every_field_survives_a_round_trip() {
 fn a_truncated_or_foreign_permit_is_refused() {
     let p = permit(action(1), 100, NOW + 100);
     let full = p.to_bytes();
-    assert_eq!(full.len(), 98);
-    assert!(Authorization::try_from_bytes(&full[..97]).is_err());
+    assert_eq!(full.len(), 130);
+    assert!(Authorization::try_from_bytes(&full[..129]).is_err());
+    // A 98-byte permit is the layout from before `recipient` (F51). It names no
+    // payee, so it must not load as one that does.
+    assert!(Authorization::try_from_bytes(&full[..98]).is_err());
     let mut bad = full;
     bad[0] ^= 0xff;
     assert!(Authorization::try_from_bytes(&bad).is_err());

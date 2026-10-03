@@ -10,7 +10,7 @@
 //!     test failure rather than as a comment that has gone stale.
 
 use mitra_vault::anchor_parity::{err, mandate_discriminator, mandate_seeds, MANDATE_SEED};
-use mitra_vault::state::{Mandate, MANDATE_LEN, MANDATE_LEN_PRE_REVOCATION};
+use mitra_vault::state::{Mandate, MandateBinding, MANDATE_LEN, MANDATE_LEN_PRE_BINDING, MANDATE_LEN_PRE_REVOCATION};
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
@@ -28,20 +28,44 @@ fn sample() -> Mandate {
         expires_at: 1_700_000_000,
         revoked: false,
         ceiling: 50_000,
+        binding: Some(MandateBinding {
+            principal: Pubkey::new_from_array([4u8; 32]),
+            policy_engine: Pubkey::new_from_array([5u8; 32]),
+        }),
     }
 }
 
 #[test]
-fn mandate_serializes_to_exactly_97_bytes() {
-    // 8 discriminator + 32 holder + 4 * 8 fields + 1 revoked.
+fn mandate_serializes_to_exactly_138_bytes() {
+    // 8 discriminator + 32 holder + 4 * 8 fields + 1 revoked + 1 bound flag
+    // + 32 principal + 32 policy_engine.
     //
-    // This was 96 until revocation was added, and the assertion was updated
-    // rather than the field dropped, because the 96-byte account deployed during
-    // Phase 3 is the subject of a PROOF_LEDGER claim: changing the length without
-    // the compatibility path in `try_from_bytes` would have made that evidence
-    // unreadable.
+    // 96 before revocation, 97 before binding (F51). Each time the assertion was
+    // updated rather than the field dropped, and each older length still loads
+    // through `try_from_bytes`, because the deployed Phase 3 accounts are the
+    // subject of PROOF_LEDGER claims.
     assert_eq!(sample().to_bytes().len(), MANDATE_LEN);
-    assert_eq!(MANDATE_LEN, 97);
+    assert_eq!(MANDATE_LEN, 138);
+}
+
+/// A 97-byte mandate — the layout deployed before binding — loads, keeps every
+/// field, and is UNBOUND. Unbound is what makes it inert: authorize, spend and
+/// amend all refuse it with MANDATE_UNBOUND.
+#[test]
+fn a_pre_binding_mandate_loads_as_unbound() {
+    let mut legacy = Mandate { revoked: true, ..sample() }.to_bytes().to_vec();
+    legacy.truncate(MANDATE_LEN_PRE_BINDING);
+    let loaded = Mandate::try_from_bytes(&legacy).expect("a 97-byte mandate must still load");
+    assert_eq!(loaded, Mandate { revoked: true, binding: None, ..sample() });
+}
+
+/// The bound flag is required, not inferred. A full-length buffer whose flag is
+/// zero must not read as bound to the all-zero key — which is the system program.
+#[test]
+fn a_full_length_mandate_with_the_flag_clear_is_unbound() {
+    let mut b = sample().to_bytes();
+    b[73] = 0;
+    assert_eq!(Mandate::try_from_bytes(&b).unwrap().binding, None);
 }
 
 /// The 96-byte account deployed before `revoked` existed must still load, and
@@ -58,7 +82,7 @@ fn a_pre_revocation_mandate_still_loads_as_not_revoked() {
     assert_eq!(legacy.len(), 96);
 
     let loaded = Mandate::try_from_bytes(&legacy).expect("a 96-byte mandate must still load");
-    assert_eq!(loaded, sample(), "every other field must round-trip unchanged");
+    assert_eq!(loaded, Mandate { binding: None, ..sample() }, "every other field must round-trip unchanged");
     assert_eq!(loaded.revoked, false, "absent flag must mean not revoked");
 }
 
@@ -98,9 +122,11 @@ fn layout_matches_the_documented_offsets() {
     assert_eq!(u64::from_le_bytes(b[48..56].try_into().unwrap()), m.version, "version at [48..56]");
     assert_eq!(u64::from_le_bytes(b[56..64].try_into().unwrap()), m.expires_at, "expires_at at [56..64]");
     assert_eq!(u64::from_le_bytes(b[64..72].try_into().unwrap()), m.ceiling, "ceiling at [64..72]");
-    // Bytes past the last field must be zero, not stale. A struct that grew a
-    // field and shrank nothing would leave the tail undefined.
-    assert!(b[72..].iter().all(|&x| x == 0), "no uninitialized tail bytes");
+    assert_eq!(b[72], 0, "revoked at [72]");
+    let binding = m.binding.unwrap();
+    assert_eq!(b[73], 1, "bound flag at [73]");
+    assert_eq!(&b[74..106], binding.principal.as_ref(), "principal at [74..106]");
+    assert_eq!(&b[106..138], binding.policy_engine.as_ref(), "policy_engine at [106..138]");
 }
 
 #[test]
@@ -176,6 +202,11 @@ fn error_codes_do_not_collide() {
         err::MANDATE_EXPIRED,
         err::AUTHORIZATION_CONSUMED,
         err::ACTION_HASH_MISMATCH,
+        err::MANDATE_REVOKED,
+        err::POLICY_ENGINE_MISMATCH,
+        err::RECIPIENT_MISMATCH,
+        err::VAULT_MISMATCH,
+        err::MANDATE_UNBOUND,
     ];
     let mut sorted = codes.to_vec();
     sorted.sort_unstable();

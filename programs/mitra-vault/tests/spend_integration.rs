@@ -19,7 +19,8 @@
 //! audit found the hole.
 
 use mitra_vault::anchor_parity::{err, ix};
-use mitra_vault::state::{Authorization, Mandate, Vault, AUTHORIZATION_LEN, MANDATE_LEN, VAULT_LEN};
+use mitra_vault::anchor_parity::{find_vault_pda, vault_seeds};
+use mitra_vault::state::{Authorization, Mandate, MandateBinding, Vault, AUTHORIZATION_LEN, MANDATE_LEN, VAULT_LEN};
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
@@ -46,12 +47,17 @@ const PERMIT: u64 = 2_500;
 
 fn fixture() -> Fixture {
     let program_id = Pubkey::new_unique();
-    let vault = Pubkey::new_unique();
     let mandate = Pubkey::new_unique();
     let auth = Pubkey::new_unique();
     let recipient = Pubkey::new_unique();
 
-    let mut v = Vault::new(Pubkey::new_unique(), 254);
+    // The vault is the PRINCIPAL's PDA, and the principal is the one recorded on
+    // the mandate. This fixture used an arbitrary key for the vault and a random
+    // authority for its state — a vault unrelated to the mandate it was spent
+    // under — and every test passed, because the handler never asked (F51).
+    let principal = Pubkey::new_unique();
+    let (vault, vault_bump) = find_vault_pda(&vault_seeds(&principal), &program_id).unwrap();
+    let mut v = Vault::new(principal, vault_bump);
     v.deposit(FUNDED).unwrap();
 
     // The holder is SHARED between the mandate and the permit, and that is the
@@ -69,6 +75,7 @@ fn fixture() -> Fixture {
         expires_at: NOW + 10_000,
         revoked: false,
         ceiling: 50_000,
+        binding: Some(MandateBinding { principal, policy_engine: Pubkey::new_unique() }),
     };
     let a = Authorization {
         holder,
@@ -78,6 +85,7 @@ fn fixture() -> Fixture {
         expires_at: NOW + 10_000,
         consumed: false,
         bump: 254,
+        recipient,
     };
     let _ = (MANDATE_LEN, AUTHORIZATION_LEN, VAULT_LEN);
 

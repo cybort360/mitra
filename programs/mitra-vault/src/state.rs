@@ -238,11 +238,37 @@ impl Vault {
 /// Fixed and asserted by the layout tests. A mandate's size changing silently
 /// would invalidate every stored policy, and unlike the vault there is no
 /// reconciliation invariant to catch it at load.
-pub const MANDATE_LEN: usize = 97;
+pub const MANDATE_LEN: usize = 138;
 
 /// The length a Mandate had before `revoked` existed. Still loadable — see
 /// [`Mandate::try_from_bytes`].
 pub const MANDATE_LEN_PRE_REVOCATION: usize = 96;
+
+/// The length a Mandate had before it carried a [`MandateBinding`]. Still
+/// loadable, as an UNBOUND mandate that can neither authorize nor spend.
+pub const MANDATE_LEN_PRE_BINDING: usize = 97;
+
+/// Who granted a mandate, and who may issue permits under it.
+///
+/// **Before this existed, neither question had an answer on chain.** The agent
+/// opened its own mandate with any limit it liked, `authorize` accepted any
+/// signer as the policy engine, and `spend_authorized` debited whatever vault the
+/// caller named. Each gap alone let a stranger move a principal's capital. See
+/// FAILURES.md F51.
+///
+/// The PRD's mandate is *"the principal's mandate"* (§3): the principal grants it
+/// to an agent over a vault the principal controls, and names the engine whose
+/// decisions it will honour. ADR-0009 decision 2 — *"only the program may author
+/// an Authorization"* — is only true if the program knows which engine's request
+/// to act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MandateBinding {
+    /// The vault authority who granted this mandate. The only vault it can spend
+    /// from is this key's vault PDA, and only this key may amend it.
+    pub principal: Pubkey,
+    /// The only signer `authorize` accepts for this mandate.
+    pub policy_engine: Pubkey,
+}
 
 /// A mandate is live until this timestamp. The *only* lifecycle field that is
 /// not a version or a limit.
@@ -286,6 +312,10 @@ pub struct Mandate {
     /// an emergency kill switch, and the caller would be unable to tell from the
     /// version number which had happened.
     pub revoked: bool,
+    /// `None` only for a mandate written under a layout that predates binding.
+    /// Such a mandate is inert: it cannot authorize, spend, or be amended. Fail
+    /// closed — there is no safe principal or engine to assume for it.
+    pub binding: Option<MandateBinding>,
 }
 
 impl Mandate {
@@ -299,6 +329,11 @@ impl Mandate {
         out[56..64].copy_from_slice(&self.expires_at.to_le_bytes());
         out[64..72].copy_from_slice(&self.ceiling.to_le_bytes());
         out[72] = u8::from(self.revoked);
+        if let Some(b) = self.binding {
+            out[73] = 1;
+            out[74..106].copy_from_slice(b.principal.as_ref());
+            out[106..138].copy_from_slice(b.policy_engine.as_ref());
+        }
         out
     }
 
@@ -315,7 +350,10 @@ impl Mandate {
         // alternative — refusing 96 — would leave the deployed Phase 3 evidence
         // unreadable, which is a worse failure than a permissive default on a
         // layout version that provably predates the field.
-        if data.len() != MANDATE_LEN && data.len() != MANDATE_LEN_PRE_REVOCATION {
+        if data.len() != MANDATE_LEN
+            && data.len() != MANDATE_LEN_PRE_BINDING
+            && data.len() != MANDATE_LEN_PRE_REVOCATION
+        {
             return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
         }
         if data[0..8] != mandate_discriminator() {
@@ -336,6 +374,9 @@ impl Mandate {
         const OFF_EXPIRES: usize = 56;
         const OFF_CEILING: usize = 64;
         const OFF_REVOKED: usize = 72;
+        const OFF_BOUND: usize = 73;
+        const OFF_PRINCIPAL: usize = 74;
+        const OFF_ENGINE: usize = 106;
         let version = read_u64(OFF_VERSION);
         if version == 0 {
             return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
@@ -349,6 +390,18 @@ impl Mandate {
             ceiling: read_u64(OFF_CEILING),
             // A 96-byte account has no flag byte; absent means not revoked.
             revoked: data.get(OFF_REVOKED).is_some_and(|&b| b != 0),
+            // The flag byte is required, not inferred from the length: a zeroed
+            // principal would otherwise read as the system program's key.
+            binding: if data.len() == MANDATE_LEN && data[OFF_BOUND] == 1 {
+                Some(MandateBinding {
+                    principal: Pubkey::try_from(&data[OFF_PRINCIPAL..OFF_ENGINE])
+                        .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
+                    policy_engine: Pubkey::try_from(&data[OFF_ENGINE..MANDATE_LEN])
+                        .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
+                })
+            } else {
+                None
+            },
         })
     }
 
@@ -391,8 +444,11 @@ impl Mandate {
 // could observe an unused authorization.
 
 /// Byte length: 8 discriminator + 32 holder + 32 action_hash + 8 amount + 8
-/// mandate_version + 8 expires_at + 1 consumed + 1 bump = 98.
-pub const AUTHORIZATION_LEN: usize = 98;
+/// mandate_version + 8 expires_at + 1 consumed + 1 bump + 32 recipient = 130.
+///
+/// Was 98, without `recipient`. A 98-byte permit does not load: it names no
+/// payee, and `spend_authorized` must refuse to choose one for it.
+pub const AUTHORIZATION_LEN: usize = 130;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Authorization {
@@ -419,6 +475,13 @@ pub struct Authorization {
     /// that moves value.
     pub consumed: bool,
     pub bump: u8,
+    /// The only account this permit can pay.
+    ///
+    /// `spend_authorized` needs no signature, so before this field the payee was
+    /// whatever account the caller placed first — anyone who saw an unspent permit
+    /// on chain could redeem it to themselves (F51). The engine names the payee
+    /// when it issues the permit, because who gets paid is part of the decision.
+    pub recipient: Pubkey,
 }
 
 impl Authorization {
@@ -432,6 +495,7 @@ impl Authorization {
         out[88..96].copy_from_slice(&self.expires_at.to_le_bytes());
         out[96] = u8::from(self.consumed);
         out[97] = self.bump;
+        out[98..130].copy_from_slice(self.recipient.as_ref());
         out
     }
 
@@ -462,6 +526,8 @@ impl Authorization {
             // would turn corruption into spendable value.
             consumed: data[96] != 0,
             bump: data[97],
+            recipient: Pubkey::try_from(&data[98..130])
+                .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
         })
     }
 

@@ -6,7 +6,7 @@
 //! strand in-flight permits on a routine limit reduction, or leave a compromised
 //! agent able to spend.
 
-use mitra_vault::state::{Mandate, MANDATE_LEN, MANDATE_LEN_PRE_REVOCATION};
+use mitra_vault::state::{Mandate, MandateBinding, MANDATE_LEN, MANDATE_LEN_PRE_REVOCATION};
 use solana_program::pubkey::Pubkey;
 
 /// A fixed instant, so boundary behaviour is testable rather than clock-dependent.
@@ -20,6 +20,10 @@ fn base() -> Mandate {
         expires_at: 2_000_000,
         ceiling: 1_000_000,
         revoked: false,
+        binding: Some(MandateBinding {
+            principal: Pubkey::new_from_array([4u8; 32]),
+            policy_engine: Pubkey::new_from_array([5u8; 32]),
+        }),
     }
 }
 
@@ -105,7 +109,9 @@ fn the_version_saturates_and_never_wraps() {
     data.push(0u8);
 
     let owner = program_id;
-    let holder = m.holder;
+    // Signed by the principal: an amendment is the principal's to make (F51).
+    // This test is about saturation, not about who may sign.
+    let holder = m.binding.unwrap().principal;
     let mut holder_lamports: u64 = 5_000_000;
     let mut mandate_lamports: u64 = 1_137_920;
     let mut acct = m.to_bytes().to_vec();
@@ -134,18 +140,19 @@ fn a_revoked_mandate_still_reports_its_version() {
 }
 
 #[test]
-fn growth_from_96_to_97_preserves_every_field() {
-    // The live devnet mandate is 96 bytes. The first amend reallocs it to 97, and
-    // that realloc must not disturb a single field — it is the same account, the
-    // same policy history, just with a flag byte added.
+fn a_96_byte_mandate_reloads_every_field_and_reserializes_unbound() {
+    // The live devnet mandate is 96 bytes. It must still load with every field
+    // intact — the Phase 3 evidence depends on reading it. It loads UNBOUND
+    // (F51): no principal or engine was ever recorded for it, so none is invented.
     let mut legacy = base().to_bytes().to_vec();
     legacy.truncate(MANDATE_LEN_PRE_REVOCATION);
     let loaded = Mandate::try_from_bytes(&legacy).expect("legacy loads");
     assert_eq!(loaded.revoked, false);
     assert_eq!(loaded.version, base().version);
     assert_eq!(loaded.limit, base().limit);
+    assert_eq!(loaded.binding, None, "a legacy mandate is unbound, never assumed bound");
 
-    // After amend, the account is 97 and the flag round-trips.
+    // Re-serialized at the current length, it round-trips — still unbound.
     let grown = loaded.to_bytes();
     assert_eq!(grown.len(), MANDATE_LEN);
     assert_eq!(Mandate::try_from_bytes(&grown).unwrap(), loaded);

@@ -121,6 +121,15 @@ pub mod err {
     /// attempted. The most important guard in the program: it is what makes "an
     /// ALLOW is not permission to move value" structural rather than advisory.
     pub const ACTION_HASH_MISMATCH: u32 = 6013;
+    /// `authorize` was signed by a key other than the mandate's policy engine (F51).
+    pub const POLICY_ENGINE_MISMATCH: u32 = 6015;
+    /// `spend_authorized` named a payee other than the permit's recipient (F51).
+    pub const RECIPIENT_MISMATCH: u32 = 6016;
+    /// `spend_authorized` named a vault other than the mandate principal's (F51).
+    pub const VAULT_MISMATCH: u32 = 6017;
+    /// The mandate predates binding: no principal or engine is recorded, so it
+    /// can neither authorize, spend, nor be amended (F51).
+    pub const MANDATE_UNBOUND: u32 = 6018;
 
     pub fn custom(code: u32) -> ProgramError {
         ProgramError::Custom(code)

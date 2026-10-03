@@ -506,32 +506,45 @@ mod devnet_regressions {
 // Phase 3 — Authority: mandate, authorization, consume-on-spend (ADR-0009).
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// `open_mandate(limit, ceiling, expires_at)` — creates the holder's mandate.
+/// `open_mandate(limit, ceiling, expires_at, policy_engine)` — a principal grants
+/// an agent a mandate over the principal's vault.
 ///
-/// Signature `[u64 limit][u64 ceiling][u64 expires_at][u8 bump?]`, matching the
-/// field order in `Mandate` so the arg order and the account layout stay
-/// auditable side by side.
+/// Signature `[u64 limit][u64 ceiling][u64 expires_at][32 policy_engine][u8 bump?]`.
+/// Accounts `[principal (signer), holder, mandate, vault, system_program, program]`.
 ///
-/// **The authority that opens a mandate is the holder's keypair, not a separate
-/// "policy engine" signer.** There is deliberately no privileged creator: a
-/// mandate is a self-binding limit on its own holder. An external policy engine
-/// appears in Phase 3d as a *proposal* producer, and even then it cannot mint a
-/// permit — it can only cause one to be derived. Putting the signer here would
-/// let a compromised policy engine widen anyone's limits, which is the inverse
-/// of the mechanism AGENTS.md requires.
+/// **The PRINCIPAL opens the mandate, not the holder.** This reverses the first
+/// design, which made a mandate "a self-binding limit on its own holder" opened
+/// by the holder's own key. A self-granted limit binds nothing: the agent chose
+/// its own ceiling, and nothing tied the mandate to any vault, so the vault a
+/// spend debited was whichever one the caller named (F51). The PRD's mandate is
+/// "the principal's mandate"; the principal must sign, must be the authority of
+/// the vault being bound, and names the one engine whose permits it will honour.
+///
+/// The holder does not sign. Being granted a bounded mandate imposes nothing on
+/// the agent, and requiring its key here would not narrow anyone's authority.
 fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
+    if args.len() < 56 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
     let limit = read_amount(&args[0..8])?;
     let ceiling = read_amount(&args[8..16])?;
     let expires_at = read_amount(&args[16..24])?;
-    let bump_arg = args.get(24).copied();
+    let policy_engine = Pubkey::try_from(&args[24..56]).map_err(|_| ProgramError::InvalidInstructionData)?;
+    let bump_arg = args.get(56).copied();
 
     let mut it = accounts.iter();
+    let principal = next_account_info(&mut it)?;
     let holder = next_account_info(&mut it)?;
     let mandate_account = next_account_info(&mut it)?;
+    let vault_account = next_account_info(&mut it)?;
     let system_program = next_account_info(&mut it)?;
 
-    if !holder.is_signer {
-        return Err(err::custom(err::NOT_SIGNER));
+    // Signer, program ownership, PDA derivation from the principal, and the
+    // recorded authority — the same four checks every vault-directing handler
+    // makes. A principal can only bind a mandate to its own vault.
+    check_vault_account(vault_account, principal, program_id)?;
+    if policy_engine == Pubkey::default() {
+        return Err(ProgramError::InvalidArgument);
     }
     // Every other handler that takes a system program validates it. This one
     // read the account and then ignored it, which the compiler flagged as an
@@ -582,8 +595,9 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
 
     if mandate_account.lamports() == 0 {
         let lamports = rent_for_bytes(state::MANDATE_LEN)?;
+        // The principal pays rent: the mandate is its grant.
         let cpi = system_instruction::create_account(
-            holder.key, mandate_account.key, lamports,
+            principal.key, mandate_account.key, lamports,
             state::MANDATE_LEN as u64, &program_id,
         );
         let program_account = next_account_info(&mut it)?;
@@ -595,7 +609,7 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
         ]];
         invoke_signed(
             &cpi,
-            &[holder.clone(), mandate_account.clone(), program_account.clone()],
+            &[principal.clone(), mandate_account.clone(), program_account.clone()],
             seed_sets,
         )?;
     }
@@ -613,9 +627,10 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
         expires_at,
         ceiling,
         revoked: false,
+        binding: Some(state::MandateBinding { principal: *principal.key, policy_engine }),
     };
     mandate_account.try_borrow_mut_data()?.copy_from_slice(&mandate.to_bytes());
-    msg!("mandate v1 opened for {}", holder.key);
+    msg!("mandate v1 granted by {} to {}", principal.key, holder.key);
     Ok(())
 }
 
@@ -628,10 +643,22 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
 /// load-bearing boundary from AGENTS.md rendered as a function signature — the
 /// reason an "ALLOW" is not permission is that no path exists by which a caller
 /// can hand the program its own permission.
+///
+/// Signature `[32 action_hash][u64 amount][32 recipient][u8 bump?]`.
+///
+/// **The signer must be the mandate's own policy engine.** It used to be any
+/// signer at all, so a stranger could issue a permit against anyone's mandate
+/// (F51) — the opposite of ADR-0009 decision 2. The engine also names the
+/// recipient here, and the permit carries it, because `spend_authorized` takes no
+/// signature and must not let its caller pick the payee.
 fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u64) -> ProgramResult {
+    if args.len() < 72 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
     let amount = read_amount(&args[32..40])?;
     let mut action_hash = [0u8; 32];
     action_hash.copy_from_slice(&args[0..32]);
+    let recipient = Pubkey::try_from(&args[40..72]).map_err(|_| ProgramError::InvalidInstructionData)?;
 
     let mut it = accounts.iter();
     let policy_engine = next_account_info(&mut it)?;
@@ -653,6 +680,17 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
     if mandate.holder != *holder.key {
         return Err(err::custom(err::UNAUTHORIZED));
     }
+    let binding = mandate.binding.ok_or(err::custom(err::MANDATE_UNBOUND))?;
+    if binding.policy_engine != *policy_engine.key {
+        return Err(err::custom(err::POLICY_ENGINE_MISMATCH));
+    }
+    // The `Mandate` docs always said a revoked mandate cannot issue new permits;
+    // this handler never checked. A permit issued after revocation could not be
+    // spent (spend re-checks), but it would still be minted, paid for, and
+    // recorded as an authorization the principal had already withdrawn.
+    if mandate.revoked {
+        return Err(err::custom(err::MANDATE_REVOKED));
+    }
 
     // Refuse to issue against a dead mandate *before* checking the amount, so an
     // expired policy reports expiry rather than a ceiling complaint.
@@ -671,7 +709,7 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
     if expected != *authorization_account.key {
         return Err(ProgramError::InvalidSeeds);
     }
-    let bump = args.get(40).copied().unwrap_or(derived_bump);
+    let bump = args.get(72).copied().unwrap_or(derived_bump);
     if bump != derived_bump {
         return Err(ProgramError::InvalidSeeds);
     }
@@ -720,6 +758,7 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
         expires_at: mandate.expires_at,
         consumed: false,
         bump,
+        recipient,
     };
     authorization_account
         .try_borrow_mut_data()?
@@ -813,6 +852,21 @@ fn spend_authorized(
         return Err(err::custom(err::UNAUTHORIZED));
     }
 
+    // Which vault, and who gets paid — the two questions this handler used to
+    // leave to its caller (F51). Neither is a signer here, so both must be
+    // re-derived from what the principal and the engine recorded.
+    let binding = mandate.binding.ok_or(err::custom(err::MANDATE_UNBOUND))?;
+    let (principal_vault, _) = find_vault_pda(&vault_seeds(&binding.principal), program_id)?;
+    if *vault_account.key != principal_vault {
+        return Err(err::custom(err::VAULT_MISMATCH));
+    }
+    if Vault::from_bytes(&vault_account.try_borrow_data()?)?.authority != binding.principal {
+        return Err(err::custom(err::VAULT_MISMATCH));
+    }
+    if *recipient.key != authorization.recipient {
+        return Err(err::custom(err::RECIPIENT_MISMATCH));
+    }
+
     // Three refusals, in this order, from `spendable_at`. Consumed is checked
     // first so a replay is reported as a replay rather than as a hash mismatch.
     authorization.spendable_at(&action_hash, now)?;
@@ -897,11 +951,14 @@ fn spend_authorized(
 
 /// `amend_mandate(limit, ceiling, expires_at, revoke)` — Phase 3b.
 ///
-/// Only the **holder** may amend, and only by signing. There is no admin path and
-/// no governance call: a mandate is a self-binding limit, so the party it binds
-/// is the only party that may move it. Adding an administrative override would
-/// reintroduce exactly the "an external party can widen my authority" hole that
-/// `open_mandate` refuses.
+/// Only the **principal** that granted the mandate may amend it; the **holder** may
+/// only revoke it. Accounts `[signer, mandate]`.
+///
+/// This used to read "only the holder may amend… a mandate is a self-binding
+/// limit". That made the agent the one party able to widen its own authority —
+/// the hole the wording claimed to prevent (F51). The authority being bounded
+/// belongs to the principal, so the principal moves the bound; the agent keeps
+/// the one change that can only ever narrow it.
 ///
 /// `revoke` is a flag rather than a separate instruction so that revoking and
 /// amending are the same audited code path. A distinct `revoke_mandate` would be
@@ -926,19 +983,23 @@ fn amend_mandate(
     let revoke = args.get(24).is_some_and(|&b| b != 0);
 
     let mut it = accounts.iter();
-    let holder = next_account_info(&mut it)?;
+    let signer = next_account_info(&mut it)?;
     let mandate_account = next_account_info(&mut it)?;
 
-    if !holder.is_signer {
+    if !signer.is_signer {
         return Err(err::custom(err::NOT_SIGNER));
     }
     if mandate_account.owner != program_id {
         return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
     }
+
+    let mut mandate = state::Mandate::try_from_bytes(&mandate_account.try_borrow_data()?)?;
+
     // Re-derive rather than trusting the stored bump: the amendment is written to
-    // a policy object, and writing to the wrong account is unrecoverable.
+    // a policy object, and writing to the wrong account is unrecoverable. Derived
+    // from the holder the mandate RECORDS, since the signer may be the principal.
     let (expected, _) = Pubkey::try_find_program_address(
-        &anchor_parity::mandate_seeds(holder.key),
+        &anchor_parity::mandate_seeds(&mandate.holder),
         program_id,
     )
     .ok_or(ProgramError::InvalidSeeds)?;
@@ -946,7 +1007,16 @@ fn amend_mandate(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    let mut mandate = state::Mandate::try_from_bytes(&mandate_account.try_borrow_data()?)?;
+    // Who may change a mandate. The principal may amend or revoke. The holder may
+    // ONLY revoke: an agent that can stop itself is a safety valve, an agent that
+    // can raise its own limit is the self-granted mandate F51 removed. Under the
+    // first design the holder could do both, because it had opened the mandate.
+    let binding = mandate.binding.ok_or(err::custom(err::MANDATE_UNBOUND))?;
+    let is_principal = *signer.key == binding.principal;
+    let is_holder_revoking = *signer.key == mandate.holder && revoke;
+    if !is_principal && !is_holder_revoking {
+        return Err(err::custom(err::UNAUTHORIZED));
+    }
 
     // A revoked mandate is terminal. It cannot be un-revoked, and it cannot be
     // amended into a different policy — otherwise "revoked" would be a pause
