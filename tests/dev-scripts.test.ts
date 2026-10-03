@@ -96,15 +96,22 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     //
     // Measured, not asserted from literals: compare each API block height
     // against both nodes and record which chain it actually tracks.
-    const height = async (url: string) => {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
-        signal: AbortSignal.timeout(12_000),
-      });
-      const j = await r.json() as { result?: string };
-      return j.result ? parseInt(j.result, 16) : 0;
+    const height = async (url: string, retries = 3) => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+          signal: AbortSignal.timeout(12_000),
+        });
+        const j = await r.json().catch(() => ({})) as { result?: string; error?: { code?: number; message?: string } };
+        if (j.error?.code === -32002 && attempt < retries) {
+          await new Promise((res) => setTimeout(res, 500 * Math.pow(2, attempt)));
+          continue;
+        }
+        return j.result ? parseInt(j.result, 16) : 0;
+      }
+      return 0;
     };
     type Blocks = { data?: { number?: number }[] };
     const api: Blocks = await fetch("https://api.tempo.xyz/v1/blocks?limit=5", {
@@ -280,16 +287,25 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
 
 describe("Tempo balance semantics (F12)", () => {
   const RPC = process.env.TEMPO_RPC_URL ?? "https://rpc.moderato.tempo.xyz";
-  const balance = async (address: string) => {
-    const r = await fetch(RPC, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [address, "latest"],
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return BigInt((await r.json() as { result: string }).result);
+  const balance = async (address: string, retries = 3): Promise<bigint> => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const r = await fetch(RPC, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [address, "latest"],
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const j = await r.json().catch(() => ({})) as { result?: string; error?: { code?: number; message?: string } };
+      if ((j.error?.code === -32002 || r.status === 429) && attempt < retries) {
+        await new Promise((res) => setTimeout(res, 500 * Math.pow(2, attempt)));
+        continue;
+      }
+      if (!j.result) throw new Error(`eth_getBalance failed: ${JSON.stringify(j)}`);
+      return BigInt(j.result);
+    }
+    throw new Error(`eth_getBalance rate-limited after ${retries} retries`);
   };
 
   it("returns the SAME non-zero value for unrelated addresses", async () => {
@@ -299,11 +315,10 @@ describe("Tempo balance semantics (F12)", () => {
     //
     // The failure this guards is a vault controller reading a balance,
     // concluding it is unimaginably funded, and moving capital on that basis.
-    const [dev, dead, ones] = await Promise.all([
-      balance("0x5a335c1fdbfd660c54e83e2b77dcf31f6dc2fb29"),
-      balance("0x000000000000000000000000000000000000dead"),
-      balance("0x1111111111111111111111111111111111111111"),
-    ]);
+    // Staggered rather than Promise.all to avoid burst rate-limiting from Moderato.
+    const dev = await balance("0x5a335c1fdbfd660c54e83e2b77dcf31f6dc2fb29");
+    const dead = await balance("0x000000000000000000000000000000000000dead");
+    const ones = await balance("0x1111111111111111111111111111111111111111");
 
     // Address-independence is the whole point: a value that is identical for
     // every address carries no information about any of them.

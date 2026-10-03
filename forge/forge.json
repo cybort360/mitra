@@ -43,7 +43,7 @@
     "3_authority_and_confidential_policy": "live_demonstrated_spend_leg__arcium_circuit_compiles_unexecuted",
     "4_commerce": "tested__erc8183_projection_space_partial_10_contents",
     "5_agent_ecosystem": "tested__erc8004_projection_x402_mpp_no_transport_no_virtuals",
-    "6_recovery": "tested__saga_kernel_built_from_prd15_talos_absent",
+    "6_recovery": "integrated__saga_persistence_layer_a_b_prd15_talos_absent",
     "7_clearing": "tested__epoch_write_path_and_adversarial_suites_no_live_epoch",
     "8_base": "tested__eip712_erc1271_erc4337_envelope_no_transport_no_bundler",
     "9_tempo": "tested__mpp_payment_metadata_receipt_mapping_no_transport",

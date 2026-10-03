@@ -153,6 +153,8 @@ npx vitest run tests/kernel.test.ts
 | Disputed obligations are excluded, not silently netted | `VERIFIED` | Reported in `excluded` |
 | Reservation state machine blocks illegal transitions | `VERIFIED` | Mutation: bypassing the guard fails 3 tests |
 | Saga outcomes are mutually unreachable | `VERIFIED` | `tests/machines.test.ts` |
+| Failure is a state transition, not an exception (§4.5) | `VERIFIED` | `tests/commerce-saga.test.ts` (12 tests) → deliverable rejection drives saga through `EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED`, releases `space.committed`, unhandled exceptions = 0 |
+| Recovery sagas are queryable via HTTP route | `VERIFIED` | `tests/sagas-api.test.ts` (4 tests) → `GET /api/v1/sagas` returns armed and recovered sagas with route attempts and run filters |
 
 ## T7 — Testnet credentials and network reachability
 
@@ -305,7 +307,7 @@ The two refusals that matter were each confirmed by a **decoded custom error
 code**, not by the mere presence of a failure.
 | 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation in Mitra. **Substrate located**: Microcosm at `/opt/microcosm-x` (§50 reuse list audited, F24) |
 | 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — interfaces plus one `local` stub; no A2A, MCP server, ERC-8004, marketplace, x402 |
-| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `PROPOSED` | `BLOCKED_INTERNAL` **and** `BLOCKED_EXTERNAL` — no implementation, and PRD §50's named source (TALOS) is not present anywhere on disk (F24). Buildable; any claim of TALOS reuse would be unsupported |
+| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `INTEGRATED` | `PARTIAL` — Full local lifecycle verified (F49/F50): agreement rejection drives `applyAgreementOpWithSaga` through `EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED`, releases `space.committed`, persists to repository (`mitra.sagas`), and serves via `GET /api/v1/sagas`. `tests/commerce-saga.test.ts` (12 tests) and `tests/sagas-api.test.ts` (4 tests). On-chain TALOS contract recovery remains for future phase |
 | 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
 | 8 Base | "Same economic intent executes on Base through the common API." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation: no ERC-8004/8183/4337/1271, no EIP-712 |
 | 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `PROPOSED` | `BLOCKED_INTERNAL` — adapter absent; the *environment* is ready and verified (Moderato funded) |

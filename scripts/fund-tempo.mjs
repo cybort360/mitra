@@ -27,16 +27,22 @@ const ADDR_FILE = ".dev-keys/evm-testnet.address";
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const LOG_WINDOW = 99_000; // node rejects ranges wider than 100k blocks
 
-const rpc = async (method, params = []) => {
-  const r = await fetch(RPC, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (j.error) throw new Error(`${method}: ${j.error.message ?? JSON.stringify(j.error)}`);
-  return j.result;
+const rpc = async (method, params = [], retries = 3) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const r = await fetch(RPC, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if ((j.error?.code === -32002 || r.status === 429) && attempt < retries) {
+      await new Promise((res) => setTimeout(res, 500 * Math.pow(2, attempt)));
+      continue;
+    }
+    if (j.error) throw new Error(`${method}: ${j.error.message ?? JSON.stringify(j.error)}`);
+    return j.result;
+  }
 };
 
 if (!existsSync(ADDR_FILE)) {
