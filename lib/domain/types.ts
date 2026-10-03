@@ -379,6 +379,15 @@ export interface Agreement {
    * it rather than the reasoning.
    */
   settledRef?: string;
+  /**
+   * The saga that governs this agreement's failure path (F49 Step 2).
+   *
+   * Optional because not every agreement needs recovery machinery, and because an
+   * multi-step engagement may have several. When present it is the ONLY thing that
+   * may advance the agreement's recovery — the agreement state and the saga state are
+   * kept in step by `applyAgreementOpWithSaga`, never by two independent callers.
+   */
+  sagaIds?: string[];
   version: number;
 }
 

@@ -2201,6 +2201,93 @@ fail-closed test.
 22. **A shared fixture can encode a defect.** `goodProposal` asserted public evaluation
     of a confidential mandate, and every test built on it inherited that.
 
+## F50 — the recovery API promised Result and threw; and Layer A coupling (F49 step 2)
+
+**Status:** `FAILED` — four exported functions violated PRD §4.5 by throwing; and the recovery kernel had no caller.
+**Found:** 2026-10-03, building Layer A coupling.
+
+### F50a — four functions typed `Result<Saga>` could throw
+
+`armSaga`, `startSaga`, `recordStep` and `beginCompensation` are all declared
+`Result<Saga>`. None is wrapped in a `try`. They call `transition`, which **throws**
+on an illegal edge:
+
+    beginCompensation(recoveredSaga)   // typed Result<Saga>
+    // ...throws TERMINAL_STATE: RECOVERED is terminal for saga
+
+PRD §4.5 is "failure is a state transition, not an exception", and these four ARE
+the recovery path. A caller trusting the signature and chaining them would get an
+unhandled throw precisely when a saga was already in trouble — the worst moment for
+an exception.
+
+They were also inconsistent: `startSaga` and `recordStep` returned `fail(...)` for
+their own checks but still let `transition` throw, so only *some* illegal calls
+produced a `Result`. A caller could not tell which.
+
+Fixed by making all four throwing primitives (`*Throwing`) and exporting `asResult`
+wrappers under the real names, so the promise is kept in exactly one place.
+`transition` still throws deliberately — it is the primitive.
+
+Found by a test asserting that re-entering compensation is refused: the refusal was
+*thrown*, so the test errored instead of observing a `Result`. The F44/F48 shape once
+more — a correct guarantee whose type over-promised and that nothing exercised.
+
+### F50b — Layer A coupling: commerce now drives recovery
+
+`lib/kernel/commerce-recovery.ts`. The commercial transition runs FIRST; the saga
+follows only if it succeeded. That order matters: a refused `startExecution` must not
+leave a saga in `EXECUTING`.
+
+- **fund** declares and **arms** a saga with a pre-committed `REFUND` route (§15.5:
+  committed before execution, never synthesised at failure time).
+- **startExecution** advances `ARMED -> EXECUTING`.
+- **rejectDeliverable** walks `EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED`
+  and releases `space.committed`.
+
+**Capital ordering.** The refund releases committed capital BEFORE the saga reaches
+terminal. If the saga transition failed first, capital would move with no recorded
+reason; if the release failed first, the saga would claim a recovery that never
+happened. Releasing first means the worst case is a saga that *under-reports*
+recovery — visible — rather than capital that moved with no record — not.
+
+**Deliberate disagreement with the handoff.** It said "if `failurePolicy` is present,
+declare a saga". We arm one either way, defaulting an empty policy to
+`"refund on expiry"`. §15.5 requires a saga with more than one step to declare a
+compensation route, and funding a two-step agreement is exactly that — so making the
+recovery path depend on an optional prose field would let a blank field leave escrow
+with no unwind. An empty policy becomes a default, not an absent saga.
+
+### Correction to my own claim
+
+I told the handoff `beginCompensation` did not exist. **It does**, at
+`recovery.ts:242`, and the handoff was right. I asserted a negative from an
+incomplete export listing — the same failure as the earlier "`transition()` has no
+callers" claim. **A negative claim must come from a search that could have found its
+opposite.**
+
+### Also found by these tests
+
+- The agreement cannot be rejected from `EXECUTING`; it must be `SUBMITTED` first.
+  The machine is right and my first test was wrong.
+- `compensate` flips a `FAILED` step to `COMPENSATED`, so asserting `FAILED` as the
+  terminal state asserts a mid-flight state.
+- Three live-Moderato test files flake on `-32002` rate limits. **The suite's
+  green/red state partly depends on a third party's rate limiter.** Not yet gated or
+  retried; recorded rather than tolerated silently.
+
+### Mutation check
+
+Making the rejection path a plain commercial transition — i.e. arming a saga and
+never stepping it, the vacuous-pass trap — fails **6** of the 12 new tests.
+
+### Rules added
+
+23. **A `Result` return type is a promise, not a hint.** Four functions declared
+    `Result<Saga>` and threw. If the signature says no exception escapes, nothing may.
+24. **Run the commercial transition before the recovery transition.** Two state
+    machines driven independently will disagree, and the recovery one will record
+    activity that the commercial one refused.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

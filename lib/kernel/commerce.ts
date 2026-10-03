@@ -28,8 +28,8 @@ import { transition, nextStates, isTerminal } from "@/lib/kernel/machines";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; reason: string };
 
-const fail = <T>(reason: string): Result<T> => ({ ok: false, reason });
-const pass = <T>(value: T): Result<T> => ({ ok: true, value });
+export const fail = <T>(reason: string): Result<T> => ({ ok: false, reason });
+export const pass = <T>(value: T): Result<T> => ({ ok: true, value });
 
 /**
  * Containment check (PRD §13.1).

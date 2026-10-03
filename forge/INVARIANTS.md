@@ -115,7 +115,7 @@ in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpar
 |---|---|---|---|
 | — | A non-idempotent compensation route cannot execute twice | SECURITY.md | `VERIFIED` — guard added | `maxAttempts` was checked against a CALLER-supplied array the kernel never decremented, so the limit was advisory. `Saga.routeAttempts` now tracks it. `tests/security-invariants-2.test.ts`; mutation removes 2 |
 | — | `RECOVERED`, `CONTAINED`, `ABORTED` remain semantically distinct | §14 | `VERIFIED` — `tests/machines.test.ts` proves none is reachable from another |
-| — | Failure is a state transition, not an exception | §4.5 | `UNTESTED` — the saga machine is defined but no saga runs |
+| — | Failure is a state transition, not an exception | §4.5 | `VERIFIED` | `tests/commerce-saga.test.ts` → a rejected deliverable drives the saga `EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED` with zero unhandled exceptions. **F50a:** four recovery functions typed `Result` but threw. Mutation: arming without stepping fails 6 tests |
 
 ## V. Netting and clearing
 

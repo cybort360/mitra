@@ -118,33 +118,30 @@ export function declareSaga(
  * accepting one would put us back on the path §15.5 forbids while *looking*
  * compliant.
  */
-export function armSaga(
-  saga: Saga,
-  declaration: SagaDeclaration,
-): Result<Saga> {
+function armSagaThrowing(saga: Saga, declaration: SagaDeclaration): Saga {
   const usable = declaration.compensationRoutes.filter((r) => r.maxAttempts > 0 && r.route.length > 0);
-  if (!usable.length) return fail("NO_USABLE_COMPENSATION_ROUTE");
-  return pass(transition("saga", saga, "ARMED"));
+  if (!usable.length) throw new Error("NO_USABLE_COMPENSATION_ROUTE");
+  return transition("saga", saga, "ARMED");
 }
 
 /** Begins execution. Refused unless ARMED — this is the §15.5 gate. */
-export function startSaga(saga: Saga): Result<Saga> {
-  if (saga.status !== "ARMED") return fail("SAGA_NOT_ARMED");
-  return pass(transition("saga", saga, "EXECUTING"));
+function startSagaThrowing(saga: Saga): Saga {
+  if (saga.status !== "ARMED") throw new Error("SAGA_NOT_ARMED");
+  return transition("saga", saga, "EXECUTING");
 }
 
 /** Records a step's outcome, advancing or failing the saga accordingly. */
-export function recordStep(
+function recordStepThrowing(
   saga: Saga,
   stepId: string,
   outcome: "SUCCEEDED" | "FAILED",
   failureReason?: string,
-): Result<Saga> {
+): Saga {
   const step = saga.steps.find((s) => s.stepId === stepId);
-  if (!step) return fail("UNKNOWN_SAGA_STEP");
-  if (step.state === "SUCCEEDED") return fail("STEP_ALREADY_SUCCEEDED");
+  if (!step) throw new Error("UNKNOWN_SAGA_STEP");
+  if (step.state === "SUCCEEDED") throw new Error("STEP_ALREADY_SUCCEEDED");
 
-  const steps = saga.steps.map((s) =>
+  const steps = saga.steps.map((s: SagaStep) =>
     s.stepId === stepId
       ? {
           ...s,
@@ -159,9 +156,9 @@ export function recordStep(
     const next = { ...saga, steps, version: saga.version + 1 };
     // Only the last step completing ends the saga successfully.
     const allDone = steps.every((s) => s.state === "SUCCEEDED" || s.state === "SKIPPED");
-    return pass(allDone ? transition("saga", next, "RECOVERED") : next);
+    return allDone ? transition("saga", next, "RECOVERED") : next;
   }
-  return pass({ ...transition("saga", saga, "STEP_FAILURE"), steps, version: saga.version + 1 });
+  return { ...transition("saga", saga, "STEP_FAILURE"), steps, version: saga.version + 1 };
 }
 
 // ── compensation ────────────────────────────────────────────────────────────
@@ -239,8 +236,8 @@ export function compensate(
 }
 
 /** Re-enters recovery from STEP_FAILURE. */
-export function beginCompensation(saga: Saga): Result<Saga> {
-  return pass(transition("saga", saga, "COMPENSATING"));
+function beginCompensationThrowing(saga: Saga): Saga {
+  return transition("saga", saga, "COMPENSATING");
 }
 
 /** True when a saga has reached an outcome and can take no further action. */
@@ -249,3 +246,61 @@ export function isRecovered(saga: Saga): boolean {
 }
 
 export { isTerminal };
+
+/**
+ * Convert a throwing transition into a `Result` (F50).
+ *
+ * ## The defect
+ *
+ * `armSaga`, `startSaga`, `recordStep` and `beginCompensation` are all typed
+ * `Result<Saga>`, and none of them is wrapped in a `try`. Each calls `transition`,
+ * which **throws** on an illegal edge. So every one of them could throw while its
+ * type promised a value:
+ *
+ *     beginCompensation(recoveredSaga)   // typed Result<Saga>
+ *     // ...throws TERMINAL_STATE: RECOVERED is terminal for saga
+ *
+ * That is not a typing nicety. PRD §4.5 says failure is a state transition, not an
+ * exception, and these four functions are the recovery path itself: a caller that
+ * trusted the signature and called them in sequence would get an unhandled throw
+ * precisely when a saga was already in trouble — which is when an exception is
+ * least useful.
+ *
+ * It was found by a test asserting that re-entering compensation is refused: the
+ * refusal was thrown rather than returned, so the test errored instead of
+ * observing a `Result`. The F44/F48 shape once more — a correct guarantee that the
+ * type over-promised and nothing exercised.
+ *
+ * ## Why wrap the exported functions rather than `transition`
+ *
+ * `transition` throws deliberately: it is the primitive, used where a caller wants
+ * the throw. Wrapping it there would change that contract for every existing caller.
+ * The exported recovery API is the surface that promises `Result`, so that is the
+ * surface that must keep the promise.
+ */
+function asResult(fn: () => Saga): Result<Saga> {
+  try {
+    return pass(fn());
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
+// The four throwing implementations above are kept as `*Throwing` and the exported
+// names below are the guarded ones. `transition` deliberately throws — it is the
+// primitive — but the exported recovery API promises `Result`, so that is the surface
+// that must keep the promise.
+export function armSaga(saga: Saga, declaration: SagaDeclaration): Result<Saga> {
+  return asResult(() => armSagaThrowing(saga, declaration));
+}
+export function startSaga(saga: Saga): Result<Saga> {
+  return asResult(() => startSagaThrowing(saga));
+}
+export function recordStep(
+  saga: Saga, stepId: string, outcome: "SUCCEEDED" | "FAILED", failureReason?: string,
+): Result<Saga> {
+  return asResult(() => recordStepThrowing(saga, stepId, outcome, failureReason));
+}
+export function beginCompensation(saga: Saga): Result<Saga> {
+  return asResult(() => beginCompensationThrowing(saga));
+}
