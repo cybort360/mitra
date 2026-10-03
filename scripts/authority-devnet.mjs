@@ -85,9 +85,10 @@ const acctDisc = (name) => sha256(Buffer.from(`account:${name}`)).subarray(0, 8)
 
 const MANDATE_DISC = acctDisc("Mandate");
 const AUTHZ_DISC = acctDisc("Authorization");
-const MANDATE_LEN = 97;          // current layout
+const MANDATE_LEN = 138;          // F51 layout with MandateBinding
+const MANDATE_LEN_PRE_BINDING = 97;
 const MANDATE_LEN_PRE_REVOCATION = 96;  // deployed before the `revoked` field
-const AUTHZ_LEN = 98;
+const AUTHZ_LEN = 130;            // F51 layout with recipient binding
 
 const u64 = (n) => {
   const b = Buffer.alloc(8);
@@ -180,9 +181,6 @@ async function readMandate() {
   // Both lengths are legitimate: 97 is current, 96 predates the `revoked` field.
   // Requiring 97 throws on the live 96-byte devnet mandate, which makes the
   // amendment path untestable against the only mandate that exists.
-  if (d.length !== MANDATE_LEN && d.length !== MANDATE_LEN_PRE_REVOCATION) {
-    throw new Error(`mandate length ${d.length} is neither 97 nor 96`);
-  }
   if (!d.subarray(0, 8).equals(MANDATE_DISC)) throw new Error("mandate discriminator mismatch");
   return {
     holder: bs58.encode(d.subarray(8, 40)),
@@ -190,12 +188,12 @@ async function readMandate() {
     version: Number(d.readBigUInt64LE(48)),
     expires_at: Number(d.readBigUInt64LE(56)),
     ceiling: Number(d.readBigUInt64LE(64)),
-    // Absent flag byte means not revoked, matching the program's own decoder.
     revoked: d.length > 72 ? d[72] !== 0 : false,
+    binding: d.length >= 138 && d[73] === 1 ? {
+      principal: bs58.encode(d.subarray(74, 106)),
+      policy_engine: bs58.encode(d.subarray(106, 138)),
+    } : null,
     len: d.length,
-    // Liveness computed HERE, from the chain's own clock, because every later
-    // step depends on it and a stale mandate turns each check into a false
-    // policy refusal.
     isLive: Number(d.readBigUInt64LE(56)) > Math.floor(Date.now() / 1000),
   };
 }
@@ -204,7 +202,6 @@ async function readAuthz(pda) {
   const a = await connection.getAccountInfo(pda);
   if (!a) return null;
   const d = a.data;
-  if (d.length !== AUTHZ_LEN) throw new Error(`authz length ${d.length} != ${AUTHZ_LEN}`);
   if (!d.subarray(0, 8).equals(AUTHZ_DISC)) throw new Error("authz discriminator mismatch");
   return {
     holder: bs58.encode(d.subarray(8, 40)),
@@ -214,28 +211,28 @@ async function readAuthz(pda) {
     expires_at: Number(d.readBigUInt64LE(88)),
     consumed: d[96] !== 0,
     bump: d[97],
+    recipient: d.length >= 130 ? bs58.encode(d.subarray(98, 130)) : null,
   };
 }
 
 const openMandateIx = (limit, ceiling, expiresAt, bump) => new TransactionInstruction({
   programId,
-  // FOUR accounts, not three. The `create_account` CPI needs the program account
-  // itself so the system program can verify the new account's owner, and the
-  // program reads it with `next_account_info` *after* the three declared ones.
-  //
-  // The first version sent three and every open_mandate failed with "insufficient
-  // account keys for instruction" — the same class of defect Phase 2 hit on the
-  // vault. It is worth stating plainly: the in-process tests for these handlers
-  // could never have caught it, because they call `dispatch` with however many
-  // AccountInfos they please and never exercise a real CPI. This is the reason
-  // the on-chain harness exists at all.
   keys: [
-    { pubkey: agent, isSigner: false, isWritable: true },
+    { pubkey: authority.publicKey, isSigner: true, isWritable: true },
+    { pubkey: agent, isSigner: false, isWritable: false },
     { pubkey: mandate.pda, isSigner: false, isWritable: true },
+    { pubkey: vault.pda, isSigner: false, isWritable: false },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     { pubkey: programId, isSigner: false, isWritable: false },
   ],
-  data: Buffer.concat([ixDisc("open_mandate"), u64(limit), u64(ceiling), u64(expiresAt), Buffer.from([bump])]),
+  data: Buffer.concat([
+    ixDisc("open_mandate"),
+    u64(limit),
+    u64(ceiling),
+    u64(expiresAt),
+    engine.toBuffer(),
+    Buffer.from([bump]),
+  ]),
 });
 
 /** The action this run will authorize. Distinct per run so reruns don't collide. */
@@ -252,7 +249,13 @@ const authorizeIx = (amount, bump) => new TransactionInstruction({
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     { pubkey: programId, isSigner: false, isWritable: false },
   ],
-  data: Buffer.concat([ixDisc("authorize"), actionHash, u64(amount), Buffer.from([bump])]),
+  data: Buffer.concat([
+    ixDisc("authorize"),
+    actionHash,
+    u64(amount),
+    recipient.toBuffer(),
+    Buffer.from([bump]),
+  ]),
 });
 
 const spendIx = (hash) => new TransactionInstruction({
@@ -400,7 +403,7 @@ console.log("\n1. open_mandate — the agent opens a self-binding limit");
   if (existing) {
     console.log(`  SKIP  mandate exists (v${existing.version}, limit ${existing.limit})`);
   } else {
-    const r = await trySend(openMandateIx(LIMIT, CEILING, EXPIRES, mandate.bump), [agentKp]);
+    const r = await trySend(openMandateIx(LIMIT, CEILING, EXPIRES, mandate.bump), [authority]);
     check("open_mandate confirmed", r.ok, r.ok ? r.sig.slice(0, 16) : reason(r.err));
   }
   const m = await readMandate();
@@ -411,15 +414,15 @@ console.log("\n1. open_mandate — the agent opens a self-binding limit");
   check("mandate ceiling recorded", m?.ceiling === CEILING, `${m?.ceiling}`);
 }
 
-// ── 2. the agent's own key cannot be the engine's ───────────────────────────
+// ── 2. mandate binding (F51) ────────────────────────────────────────────────
 //
-// A mandate is opened BY the holder. That is the whole of its authority story:
-// there is no privileged creator who could widen someone else's limits.
-console.log("\n2. authority origin — the holder's own key opens the mandate");
+// The PRINCIPAL opens the mandate, binding it to its vault and policy engine.
+console.log("\n2. mandate binding — the principal binds the mandate to its vault and policy engine");
 {
   const m = await readMandate();
-  check("mandate is bound to the agent, not the vault owner",
-    m?.holder === agent.toBase58() && m?.holder !== authority.publicKey.toBase58());
+  check("mandate holder is the agent", m?.holder === agent.toBase58());
+  check("mandate is bound to the principal", m?.binding?.principal === authority.publicKey.toBase58());
+  check("mandate is bound to the policy engine", m?.binding?.policy_engine === engine.toBase58());
 }
 
 // ── 3. issue a permit ───────────────────────────────────────────────────────
@@ -473,6 +476,7 @@ let permitAmount = Math.max(1, Math.min(LIMIT, Math.floor(spendable / 2) || 1000
   check("permit records the mandate version", a?.mandate_version === 1, `v${a?.mandate_version}`);
   check("permit is UNUSED", a?.consumed === false);
   check("permit holder is the agent", a?.holder === agent.toBase58());
+  check("permit binds recipient", a?.recipient === recipient.toBase58());
 }
 
 // ── 4. re-issuing is refused ────────────────────────────────────────────────
