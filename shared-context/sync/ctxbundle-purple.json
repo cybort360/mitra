@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 67,
+  "highSeq": 68,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1347,6 +1347,31 @@
       ],
       "hash": "649e5f55b61ab2516b63f495c7aa602143084a3f2d42d1cf244b4a35c21f0994",
       "supersedesId": "ctx_0dbe56a01ea65284"
+    },
+    {
+      "entryId": "ctx_51103b758638fa8c",
+      "seq": 68,
+      "kind": "decision",
+      "title": "ERC-4337 settlement from a smart account and on-chain ERC-1271/6492 verification are live on Base Sepolia (sprint item 3)",
+      "body": "On feat/settlement-caller (pushed).\n\nERC-4337: lib/adapters/base-4337-transport.ts, enabled with MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337.\n- The payer is a Coinbase Smart Wallet v1, built with viem's toCoinbaseSmartAccount and owned by the relayer key. On testnet the relayer submits handleOps to EntryPoint v0.6 and is reimbursed from the account's own balance.\n- The transfer plus commitment is the same as the EOA path, wrapped in execute(token, 0, data).\n- Confirmation requires a UserOperationEvent for this account with success=true AND a Transfer FROM the account. handleOps succeeds even when the inner operation reverts; this is tested, and the mutation is killed.\n- Live: handleOps tx 0xd3c1145323fef446bd1c9c1a83fe0df0385018d962db2ea89a79fc59c1f17844, block 47649638. The first UserOperation deployed the account 0x00aD7C71680A5b1a9B86d41440022857fC17E7CA. 0.01 USDC moved from the smart account; evidence TESTNET_PASS.\n\nERC-1271/6492: lib/evm/erc1271.ts RpcSignatureVerifier, behind verifyAuthorisation.\n- A plain signature calls isValidSignature, and the result is passed through unchanged.\n- A 6492-wrapped signature goes through viem verifyHash (the universal validator, eth_call only).\n- Live: the deployed account's signature is valid as a contract signature; a fresh undeployed account validates via 6492; a stranger is refused.\n- No production route asks for a counterparty signature yet, so the verifier has no caller outside tests.\n\nF54: lib/evm/erc4337.ts userOperationHash binds neither EntryPoint nor chain id and includes the signature, so it is not any EntryPoint's hash. scripts/base-4337.mjs calls EntryPoint v0.7 with the v0.6 11-field tuple and uses raw creation code as initCode. Neither is used now. Both are documented, not fixed.\n\nNot claimed: a paymaster, an external bundler, or EntryPoint v0.7.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F54",
+        "base",
+        "erc1271",
+        "erc4337",
+        "erc6492",
+        "item-3",
+        "live",
+        "sprint"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T22:50:42.683Z",
+      "parents": [
+        "649e5f55b61ab2516b63f495c7aa602143084a3f2d42d1cf244b4a35c21f0994"
+      ],
+      "hash": "7fdd724153855a36803b80b9b139f8ae7ff142bc0dad098e9e2e2bb2b0676b5c"
     }
   ],
   "actors": [
@@ -1384,5 +1409,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "649e5f55b61ab2516b63f495c7aa602143084a3f2d42d1cf244b4a35c21f0994"
+  "tipHash": "7fdd724153855a36803b80b9b139f8ae7ff142bc0dad098e9e2e2bb2b0676b5c"
 }
