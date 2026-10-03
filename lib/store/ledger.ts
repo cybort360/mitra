@@ -1,7 +1,7 @@
 import type {
   Authorization, AuthorizationDecision, Reservation, ReservationStatus, Vault,
 } from "@/lib/domain/types";
-import { reservations, vaults } from "@/lib/store/seed";
+import { mandates, reservations, vaults } from "@/lib/store/seed";
 import { transition } from "@/lib/kernel/machines";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -54,11 +54,22 @@ export class CapitalLedger {
       .filter((r) => r.vaultId === vaultId && (r.status === "RESERVED" || r.status === "COMMITTED"))
       .map((r) => r.reservationId)
       .sort();
-    // Mandates are not ledger-owned, so their activeness cannot be derived here.
-    // The seed's list is the only available source and is left as declared; the
-    // Postgres backend filters mandates by status, which is a genuine difference
-    // in what the two backends can know. Recorded rather than papered over.
-    return { ...v, activeReservations };
+    // F48: `activeMandates` is now DERIVED from the seed's mandate array by
+    // (vaultId, status), exactly as Postgres derives it. It used to be left as the
+    // seed's DECLARED list, with a comment recording the divergence as "a genuine
+    // difference in what the two backends can know".
+    //
+    // That was not a difference in knowledge — both have the same mandate array. It
+    // was a declared list that nobody recomputed, and it drifted the moment a mandate
+    // was added: Postgres saw three ACTIVE mandates for this vault, the ledger saw
+    // the two the seed had named. The backend-parity test caught it immediately.
+    //
+    // Same defect as `Space.agreementIds` (F33) and the same fix: derive, don't declare.
+    const activeMandates = mandates
+      .filter((m) => m.vaultId === vaultId && m.status === "ACTIVE")
+      .map((m) => m.mandateId)
+      .sort();
+    return { ...v, activeMandates, activeReservations };
   }
 
   getVault(vaultId: string): Vault | undefined {

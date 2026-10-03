@@ -23,7 +23,7 @@
  */
 
 import type { AuthorizationDecision, Mandate, Vault } from "@/lib/domain/types";
-import type { ActionProposal, PolicyContext, PolicyResult } from "@/lib/kernel/authorization";
+import { evaluateProposal, type ActionProposal, type PolicyContext, type PolicyResult } from "@/lib/kernel/authorization";
 
 /**
  * PRD §11.10's binding list, as a type. An enclave output MUST carry all six.
@@ -168,4 +168,99 @@ export function bind(result: PolicyResult, source: Omit<DecisionBinding, "policy
     reasonCodes: result.reasonCodes,
     evaluator: "public",
   };
+}
+
+/**
+ * The public evaluator, as a `PolicyEvaluator`.
+ *
+ * ## Why this exists (F48)
+ *
+ * `PolicyEvaluator`, `evaluateWithFallback`, `bind` and `EnclaveUnavailableError` all
+ * existed and were covered by tests, and **nothing in production ever used them**:
+ * `app/api/v1/authorizations/route.ts` called `evaluateProposal` directly. The seam
+ * was correct and bypassed, which is the same shape as F44's compiled-but-unwired
+ * circuit — and it left PRD §11.11 unenforced on the only route that issues
+ * authorizations.
+ *
+ * Specifically: `mandate_research_v7` sets `confidentialPolicy: true`, and nothing in
+ * the request path consulted that flag. A confidential mandate would have been
+ * evaluated by the public evaluator and issued a normal `Authorization`, stamped
+ * `policy-engine:local`. §11.11 requires such a request to **fail closed**.
+ */
+export class PublicPolicyEvaluator implements PolicyEvaluator {
+  readonly kind = "public" as const;
+  readonly confidential = false;
+
+  async evaluate(
+    mandate: Mandate,
+    vault: Vault,
+    proposal: ActionProposal,
+    context: PolicyContext,
+  ): Promise<EnclaveOutput> {
+    const result = evaluateProposal(mandate, vault, proposal, context);
+    return bind(
+      result,
+      {
+        actionDigest: proposal.actionDigest,
+        vaultId: vault.vaultId,
+        mandateId: mandate.mandateId,
+        executionGuardToken: executionGuardToken(proposal),
+      },
+      {
+        policyVersion: mandate.version,
+        // §11: a decision is dead after this instant regardless of reuse. Derived
+        // from the proposal's own clock so a caller cannot hand back a decision that
+        // outlives the evaluation that produced it.
+        decisionExpiresAt: new Date(proposal.now.getTime() + 5 * 60_000).toISOString(),
+      },
+    );
+  }
+}
+
+/**
+ * The evaluator a mandate requires, per its own `confidentialPolicy` flag.
+ *
+ * This is the function the route should have been calling. It exists so that "is this
+ * confidential?" is decided in exactly one place from the mandate itself, rather than
+ * at each call site — §11.11's whole requirement is that no component can *choose* to
+ * downgrade a confidential policy, which is only enforceable if the choice is not
+ * available at the call site.
+ *
+ * With no Arcium evaluator registered, a confidential mandate resolves to a
+ * confidential evaluator that cannot evaluate — and therefore fails closed through
+ * `evaluateWithFallback`, naming `ENCLAVE_UNAVAILABLE`, rather than quietly falling
+ * back to public evaluation.
+ */
+export function createPolicyEvaluator(
+  mandate: Mandate,
+  enclave?: PolicyEvaluator,
+): PolicyEvaluator {
+  if (!mandate.confidentialPolicy) return new PublicPolicyEvaluator();
+  return enclave ?? new UnavailableEnclaveEvaluator(mandate.mandateId);
+}
+
+/**
+ * Stands in for a confidential evaluator until an MXE is reachable.
+ *
+ * It is `confidential: true` on purpose: that flag is what makes `evaluateWithFallback`
+ * treat a throw as an *outage* (→ `EnclaveUnavailableError`) rather than a local
+ * defect. Marking it public would invert the fail-closed rule.
+ */
+export class UnavailableEnclaveEvaluator implements PolicyEvaluator {
+  readonly kind = "arcium" as const;
+  readonly confidential = true;
+  constructor(private readonly mandateId: string) {}
+  async evaluate(): Promise<EnclaveOutput> {
+    throw new Error(`no MPC enclave is registered for mandate ${this.mandateId}`);
+  }
+}
+
+/**
+ * The token the execution guard re-derives against (§11.10).
+ *
+ * Derived from the action digest rather than random, so the guard recomputes the same
+ * value from stored state instead of trusting a field that arrived on the request.
+ */
+function executionGuardToken(proposal: ActionProposal): string {
+  return `guard:${proposal.actionDigest}`;
 }

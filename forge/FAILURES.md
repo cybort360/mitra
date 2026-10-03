@@ -2132,6 +2132,75 @@ Removing all four guards fails **5** of the new tests.
 20. **Two separate commitments are not one binding.** A receipt and a result each being
     individually verifiable says nothing about whether they belong together.
 
+## F48 — the policy seam existed, was tested, and no production code called it
+
+**Status:** `FAILED` — PRD §11.11 was unenforced on the only route that issues authorizations.
+**Found:** 2026-10-03, wiring the seam named in the session handoff.
+
+### The seam was real and bypassed
+
+`PolicyEvaluator`, `evaluateWithFallback`, `bind` and `EnclaveUnavailableError` were all
+written, exported, documented against §11.11, and covered by tests. `app/api/v1/authorizations/route.ts`
+imported `evaluateProposal` **directly**:
+
+```ts
+import { evaluateProposal, type ActionProposal } from "@/lib/kernel/authorization";
+const result = evaluateProposal(mandate, vault, proposal, { recentSpend });
+```
+
+Nothing on that path consulted `mandate.confidentialPolicy`. `mandate_research_v7` sets
+it `true`, and would have been evaluated publicly and issued a normal `Authorization`
+stamped `policy-engine:local`. PRD §11.11 requires such a request to **fail closed** and
+forbids any component silently downgrading confidentiality.
+
+This is F44's shape exactly: a correct, tested component that nothing calls. `createPolicyEvaluator`
+did not even exist — the handoff assumed it did.
+
+### What was built
+
+- `PublicPolicyEvaluator` — today's `evaluateProposal` behind the interface, emitting a
+  full six-field `EnclaveOutput`.
+- `UnavailableEnclaveEvaluator` — stands in for a missing MXE. Marked `confidential: true`
+  **on purpose**: that flag is what makes `evaluateWithFallback` treat a throw as an
+  outage rather than a local defect. Marking it public would invert the fail-closed rule.
+- `createPolicyEvaluator(mandate, enclave?)` — chooses from the **mandate**, never from
+  the request, so no caller can opt out of confidentiality by asking.
+- The route now returns `503 CONFIDENTIAL_ENCLAVE_UNAVAILABLE` (a deliberate refusal, not
+  a 500), and public decisions carry the §11 binding block and name their substrate:
+  `policy-engine:public`.
+
+### The shared fixture had encoded the defect
+
+`tests/fixtures.ts`'s `goodProposal` named `mandate_research_v7` — the **confidential**
+mandate — and every authorization test asserted a *public* decision against it. "A
+confidential mandate is evaluated publicly" was what the suite called correct.
+
+Fixed by adding `mandate_research_public_v7`: the same terms, `confidentialPolicy: false`.
+The terms are duplicated deliberately — pointing `goodProposal` at a differently-terms
+mandate would have changed what those tests actually cover.
+
+### A second drift, caught by the parity test
+
+Adding a mandate broke `backend parity`: `activeMandates` on `vault_sol_primary` was 3 on
+Postgres and 2 in the ledger. The ledger **declared** the list from the seed while Postgres
+**derived** it from `(vaultId, status)`. A comment recorded the divergence as "a genuine
+difference in what the two backends can know" — but both have the same mandate array, so
+it was not a difference in knowledge. It was a declared list nobody recomputed: the same
+defect as `Space.agreementIds` (F33). Now derived on both sides.
+
+### Mutation check
+
+Reverting the route to evaluate directly — ignoring `confidentialPolicy` — fails the
+fail-closed test.
+
+### Rules added
+
+21. **A seam with no production caller is not a seam.** A tested, documented component
+    that nothing calls is the same as an absent one, and it is harder to notice because
+    the code exists.
+22. **A shared fixture can encode a defect.** `goodProposal` asserted public evaluation
+    of a confidential mandate, and every test built on it inherited that.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

@@ -194,6 +194,39 @@ export const mandates: Mandate[] = [
     confidentialPolicy: true,
   },
   {
+    // F48: the PUBLIC twin of `mandate_research_v7`, term for term.
+    //
+    // Before this, `tests/fixtures.ts`'s `goodProposal` pointed at
+    // `mandate_research_v7` — the confidential mandate — and every authorization test
+    // asserted a *public* decision against it. The shared fixture had quietly encoded
+    // the F48 defect: "a confidential mandate is evaluated publicly" was the thing the
+    // suite called correct.
+    //
+    // Duplicating the terms is deliberate. Pointing `goodProposal` at a different,
+    // differently-terms mandate would have changed what those tests actually cover;
+    // this keeps them covering exactly what they covered, on a mandate that is
+    // permitted to be evaluated publicly at all.
+    mandateId: "mandate_research_public_v7",
+    name: "Research purchasing (public policy)",
+    version: 7,
+    principal: "Mitra Labs",
+    agentId: "agent_buyer_07",
+    vaultId: "vault_sol_primary",
+    asset: "USDC",
+    budget: 50,
+    maxTransaction: 15,
+    velocityLimit: { amount: 50, windowMinutes: 60 },
+    allowedCounterparties: ["virtuals:*", "olas:*", "x402:approved:*"],
+    allowedCapabilities: ["market_research", "structured_data", "api_access"],
+    prohibitedCapabilities: ["unsecured_credit", "arbitrary_transfer"],
+    approvedChains: ["solana"],
+    policyVersion: "policy-v3.4",
+    expiresAt: inDays(30),
+    nonce: 19,
+    status: "ACTIVE",
+    confidentialPolicy: false,
+  },
+  {
     mandateId: "mandate_data_v4",
     name: "Market data access",
     version: 4,

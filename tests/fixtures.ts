@@ -6,7 +6,10 @@ import { __resetStoreForTests } from "@/lib/store/provider";
 export const NOW = "2026-10-01T12:00:00.000Z";
 
 export const goodProposal = {
-  mandateId: "mandate_research_v7",
+  // F48: the PUBLIC twin. This fixture previously named the confidential
+  // `mandate_research_v7`, so every authorization test asserted a public decision
+  // against a confidential mandate — the suite encoded the defect it should have caught.
+  mandateId: "mandate_research_public_v7",
   vaultId: "vault_sol_primary",
   amount: 5, asset: "USDC", chain: "solana",
   counterparty: "virtuals:research-agent-18",
