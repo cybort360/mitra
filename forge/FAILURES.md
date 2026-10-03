@@ -2070,6 +2070,68 @@ Mutation check: removing the three guards fails 5 of the new tests.
     relative to now, and `head`/`tail` truncation must never be the basis of a claim
     about what exists.
 
+## F47 — four SECURITY.md invariants had no enforcement; one had enforcement that was advisory
+
+**Status:** `FAILED` — three had no guard at all; the fourth had a guard that counted nothing.
+**Found:** 2026-10-03, closing the last four `docs/SECURITY.md` rows.
+
+### The stale item in the request that triggered this
+
+The plan said 4 of 9 API routes serve seed fixtures instead of the repository. **That is
+false.** `/api/v1/vaults`, `/runs`, `/clearing` and `/obligations` all call `getStore()`
+and `repo.listX()`, and `PostgresRepository.listVaults` issues real SQL
+(`SELECT * FROM mitra.vaults`). No route imports `seed.ts`. Commit `d81b482` did this.
+Third stale blocker in this plan, after Phase 0 Space and Phase 9 Tempo mints.
+
+### Compensation double-execution — the limit counted nothing
+
+`CompensationRoute.maxAttempts` existed and `compensate()` checked
+`route.maxAttempts <= 0`. But `route` came from `input.availableRoutes` — an array the
+**caller constructs on every call** — and the kernel decremented nothing. A caller
+passing the original routes got unlimited compensation. The check was real and the
+guarantee was not.
+
+`Saga.routeAttempts` now records each execution. Two tests were wrong in ways worth
+recording: the first "replay" test passed a *freshly declared* saga, which has no spent
+attempt, so it was asserting "a fresh saga can compensate" and calling it a replay;
+and `declareSaga` takes four positional arguments, not an object.
+
+### Single-epoch entry — no guard
+
+`finalizeEpoch` sealed whatever it was handed, so an obligation could be netted in two
+epochs, each producing a valid `resultHash`. `assertSingleEpochEntry` refuses against a
+supplied ledger of **finalized** epochs only: an OPEN or CHALLENGE epoch holds an
+obligation provisionally, and refusing it would make two concurrent epochs impossible
+to prepare. (`CHALLENGE`, not `CHALLENGED` — the state is named differently than every
+other machine in the repo, which is itself a trap.)
+
+### Receipt binding — two commitments that were never combined
+
+`chainHash` commits a receipt to its object and `resultHash` commits an epoch to its
+netting, but nothing bound a receipt to a *particular* result: a receipt for epoch A
+could be presented with epoch B's numbers. `settlementReceiptHash` binds
+settlementId + epochId + resultHash + **the transfers themselves** — including the list
+rather than referencing it, so a receipt citing one epoch and enumerating another's
+transfers would have to recompute the whole netting to pass.
+
+### Identity remap — a plain array
+
+`marketplaceRefs` accepted any ref, so `[...refs, otherAgentsRef]` type-checked and the
+record then read as though both belonged to this agent. `assertNoIdentityRemap` and
+`mergeRefs` refuse a `(system, id)` already bound elsewhere. Exact string match, no
+case folding — `ERC8004:base` and `erc8004:base` being one identity is itself a remap.
+
+### Mutation check
+
+Removing all four guards fails **5** of the new tests.
+
+### Rules added
+
+19. **A limit read from caller-supplied state is not a limit.** Enforce it where it can
+    be relied upon: on the object that persists, not on a structure the caller rebuilds.
+20. **Two separate commitments are not one binding.** A receipt and a result each being
+    individually verifiable says nothing about whether they belong together.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

@@ -239,3 +239,59 @@ export function finalizeEpoch(epoch: ClearingEpoch, result: NettingResult): Clea
     resultHash: resultHash(result, epoch.epochId),
   }, "FINALIZED"));
 }
+
+/**
+ * F47 — the single-epoch guarantee.
+ *
+ * > An obligation may enter at most one finalized clearing epoch unless explicit
+ * > roll-forward rules apply. (`docs/SECURITY.md`)
+ *
+ * Nothing enforced this. `finalizeEpoch` seals whatever it is handed, and `openEpoch`
+ * accepts any obligation set — so the same obligation could be netted in epoch 1 and
+ * again in epoch 2, and each epoch would produce a valid `resultHash` over it. A
+ * participant reading the second epoch would see an obligation that has already been
+ * settled, netted against a second time.
+ *
+ * The check is against a supplied ledger of **finalized** epochs rather than against
+ * the whole world, for two reasons:
+ *
+ * 1. The kernel is pure and has no store. Passing the finalized set keeps the rule
+ *    testable and keeps a hidden dependency on global state out of a function that
+ *    returns a `ClearingResult`.
+ * 2. Only FINALIZED matters. An OPEN or CHALLENGED epoch holds an obligation
+ *    provisionally, and refusing it because another open epoch mentions it would make
+ *    two concurrent epochs impossible to prepare at all.
+ *
+ * A non-finalized epoch that already contains the obligation is **not** a conflict:
+ * that is the ordinary case of one epoch being prepared while another is live.
+ */
+export function assertSingleEpochEntry(
+  obligationIds: readonly string[],
+  finalizedEpochs: readonly ClearingEpoch[],
+): ClearingResult<true> {
+  const settled = new Set<string>();
+  for (const e of finalizedEpochs) {
+    if (e.status !== "FINALIZED") continue;
+    for (const id of e.obligationIds) settled.add(id);
+  }
+  const clashes = obligationIds.filter((id) => settled.has(id)).sort();
+  if (clashes.length) return cfail(`OBLIGATION_ALREADY_FINALIZED:${clashes.join(",")}`);
+  return cpass(true);
+}
+
+/**
+ * `finalizeEpoch` with the single-epoch rule applied.
+ *
+ * Preferred over the bare `finalizeEpoch` because the bare form has no way to know
+ * about other epochs, and a caller that forgets the extra check gets a double-netted
+ * obligation with a valid-looking commitment — the exact failure the invariant names.
+ */
+export function finalizeEpochOnce(
+  epoch: ClearingEpoch,
+  result: NettingResult,
+  finalizedEpochs: readonly ClearingEpoch[],
+): ClearingResult<ClearingEpoch> {
+  const guard = assertSingleEpochEntry(epoch.obligationIds, finalizedEpochs);
+  if (!guard.ok) return cfail(guard.reason);
+  return finalizeEpoch(epoch, result);
+}

@@ -123,3 +123,75 @@ export function rankForDiscovery(
     .sort((a, b) => (b.c.claimedReputation ?? 0) - (a.c.claimedReputation ?? 0) || a.i - b.i)
     .map((x) => x.c.registration);
 }
+
+/**
+ * Resolves an external reference to an internal agent, or refuses.
+ *
+ * ## F47 — `docs/SECURITY.md`
+ *
+ * > External identities cannot be silently remapped to another wallet/agent record.
+ *
+ * `recordExternalRef` records a `{system, id}` pointer and nothing more, which is
+ * correct as far as it goes. But nothing stopped an agent from *carrying* a different
+ * agent's reference: `marketplaceRefs` is a plain array, so `[...refs, otherAgentsRef]`
+ * type-checks and the record then reads as though both references were this agent's.
+ * A silent remap looks exactly like a legitimate second identity until something
+ * checks.
+ *
+ * Two guards, because they catch different mistakes:
+ *
+ * 1. **One owner per (system, id).** Two agents claiming the same external identity
+ *    is the remap in its most damaging form — an agent inherits another agent's
+ *    reputation, mandates or obligations.
+ * 2. **An agent cannot silently gain a ref it did not declare.** `mergeRefs` takes the
+ *    set a caller is entitled to add and rejects anything already bound elsewhere.
+ *
+ * `system` is compared case-sensitively and exactly: normalising would let
+ * `ERC8004:base` and `erc8004:base` be treated as one identity, which is a remap by
+ * another name.
+ */
+type Result<T> = { ok: true; value: T } | { ok: false; reason: string };
+
+export interface IdentityBinding {
+  agentId: string;
+  refs: ExternalIdentityRef[];
+}
+
+/** Fails with the specific collision, naming both agents so the fix is obvious. */
+export function assertNoIdentityRemap(
+  bindings: readonly IdentityBinding[],
+  candidateAgentId: string,
+  candidateRefs: readonly ExternalIdentityRef[],
+): Result<true> {
+  for (const ref of candidateRefs) {
+    for (const b of bindings) {
+      if (b.agentId === candidateAgentId) continue;
+      const clash = b.refs.some((r) => r.system === ref.system && r.id === ref.id);
+      if (clash) {
+        return {
+          ok: false,
+          reason: `IDENTITY_REMAPPED:${ref.system}/${ref.id} is bound to ${b.agentId}`,
+        };
+      }
+    }
+  }
+  return { ok: true, value: true };
+}
+
+/** Adds refs to an agent's set, refusing any that belong to another agent. */
+export function mergeRefs(
+  bindings: readonly IdentityBinding[],
+  agentId: string,
+  incoming: readonly ExternalIdentityRef[],
+): Result<ExternalIdentityRef[]> {
+  const guard = assertNoIdentityRemap(bindings, agentId, incoming);
+  if (!guard.ok) return guard;
+  const existing = bindings.find((b) => b.agentId === agentId)?.refs ?? [];
+  // De-duplicated within the agent too: the same ref twice is not two identities,
+  // and carrying it twice would make a set-equality check meaningless.
+  const merged: ExternalIdentityRef[] = [];
+  for (const r of [...existing, ...incoming]) {
+    if (!merged.some((m) => m.system === r.system && m.id === r.id)) merged.push(r);
+  }
+  return { ok: true, value: merged };
+}

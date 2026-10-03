@@ -424,6 +424,19 @@ export interface Saga {
   intentId: string;
   steps: SagaStep[];
   compensationRoutes: string[];
+  /**
+   * How many times each compensation route has actually been executed.
+   *
+   * **F47.** `CompensationRoute.maxAttempts` existed and `compensate()` checked it,
+   * but the count came from `input.availableRoutes` — an array the CALLER supplies on
+   * every invocation. The kernel never decremented anything, so the limit was enforced
+   * only as far as the caller chose to enforce it. Passing the original routes again
+   * gave unlimited compensation.
+   *
+   * Tracking it here makes the limit a property of the saga rather than of the
+   * caller's diligence, which is the only place it can actually be relied upon.
+   */
+  routeAttempts?: Record<string, number>;
   timeoutPolicy: string;
   status: SagaStatus;
   recoveredValue: number;

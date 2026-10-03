@@ -113,3 +113,43 @@ export function typedHash(domain: string, value: unknown): string {
 export function chainHash(previousHash: string | null, value: unknown): string {
   return typedHash("mitra.receipt.v1", { previousHash: previousHash ?? null, value });
 }
+
+/**
+ * Binds a settlement receipt to the exact set it settles.
+ *
+ * ## F47 — `docs/SECURITY.md`
+ *
+ * > A settlement receipt binds to the exact cleared obligation or transfer set.
+ *
+ * `chainHash` commits a receipt to the object it carries, and `resultHash` commits an
+ * epoch to its netting result — but nothing bound a receipt to a *particular* clearing
+ * result. A receipt for epoch A could be presented alongside epoch B's numbers and
+ * nothing would object, because the two commitments were never combined.
+ *
+ * `settlementReceiptHash` binds all four things that must agree:
+ *
+ *   settlementId · epochId · resultHash · the residual transfers themselves
+ *
+ * The transfer list is included rather than referenced, deliberately. Including the
+ * epoch's `resultHash` proves which computation was performed; including the actual
+ * transfers proves the receipt describes the money that moved. A receipt that cites
+ * an epoch but enumerates different transfers would have to change `resultHash` to
+ * pass, which it cannot do without recomputing the whole netting.
+ */
+export function settlementReceiptHash(receipt: {
+  settlementId: string;
+  epochId: string;
+  resultHash: string;
+  residualTransfers: ReadonlyArray<{ from: string; to: string; amount: number }>;
+}): string {
+  return typedHash("mitra.settlement-receipt.v1", {
+    settlementId: receipt.settlementId,
+    epochId: receipt.epochId,
+    resultHash: receipt.resultHash,
+    // Sorted, because the order of a transfer list is not economically meaningful
+    // and an unsorted list would let two identical settlements hash differently.
+    residualTransfers: [...receipt.residualTransfers]
+      .map((t) => ({ from: t.from, to: t.to, amount: t.amount }))
+      .sort((a, b) => `${a.from}${a.to}${a.amount}`.localeCompare(`${b.from}${b.to}${b.amount}`)),
+  });
+}

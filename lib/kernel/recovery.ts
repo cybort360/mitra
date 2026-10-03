@@ -202,12 +202,24 @@ export function compensate(
     // to construct one.
     return fail("COMPENSATION_ROUTE_NOT_COMMITTED");
   }
-  if (route.maxAttempts <= 0) return fail("COMPENSATION_ROUTE_EXHAUSTED");
+  // F47: count against the SAGA, not against the caller's array. The previous check
+  // read `route.maxAttempts` from `input.availableRoutes`, which the caller rebuilds
+  // on every call, so a caller that passed the original routes could compensate
+  // indefinitely and the limit meant nothing.
+  const attemptsSoFar = saga.routeAttempts?.[input.routeId] ?? 0;
+  if (attemptsSoFar >= route.maxAttempts) return fail("COMPENSATION_ROUTE_EXHAUSTED");
 
   const compensatedSteps = saga.steps.map((s) =>
     s.state === "FAILED" ? { ...s, state: "COMPENSATED" as const } : s,
   );
-  const base = { ...saga, steps: compensatedSteps, version: saga.version + 1 };
+  // The attempt is recorded on the saga as it is spent, so a caller that retries a
+  // route cannot get a fresh budget by re-reading its own route list.
+  const base = {
+    ...saga,
+    steps: compensatedSteps,
+    routeAttempts: { ...(saga.routeAttempts ?? {}), [input.routeId]: attemptsSoFar + 1 },
+    version: saga.version + 1,
+  };
 
   switch (input.outcome) {
     case "RECOVERED":

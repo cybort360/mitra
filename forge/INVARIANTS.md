@@ -113,7 +113,7 @@ in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpar
 
 | ID | Invariant | PRD | Status |
 |---|---|---|---|
-| — | A non-idempotent compensation route cannot execute twice | SECURITY.md | `UNTESTED` |
+| — | A non-idempotent compensation route cannot execute twice | SECURITY.md | `VERIFIED` — guard added | `maxAttempts` was checked against a CALLER-supplied array the kernel never decremented, so the limit was advisory. `Saga.routeAttempts` now tracks it. `tests/security-invariants-2.test.ts`; mutation removes 2 |
 | — | `RECOVERED`, `CONTAINED`, `ABORTED` remain semantically distinct | §14 | `VERIFIED` — `tests/machines.test.ts` proves none is reachable from another |
 | — | Failure is a state transition, not an exception | §4.5 | `UNTESTED` — the saga machine is defined but no saga runs |
 
@@ -124,8 +124,8 @@ in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpar
 | FR-CLEAR-003 | Disputed obligations are never silently included in the net result | §19 | `VERIFIED` | `netObligations` excludes `DISPUTED`/`DEFAULTED` and reports them in `excluded` |
 | — | Net positions sum to zero | — | `VERIFIED` | `*conserves value*` |
 | — | Netting is deterministic and order-independent | — | `VERIFIED` | `*is deterministic*` — reversed input, identical output |
-| — | An obligation enters at most one finalized clearing epoch | SECURITY.md | `UNTESTED` |
-| — | A settlement receipt binds to the exact cleared obligation set | SECURITY.md | `UNTESTED` |
+| — | An obligation enters at most one finalized clearing epoch | SECURITY.md | `VERIFIED` — guard added | `finalizeEpochOnce` refuses an obligation already in a FINALIZED epoch. Only finalized counts: an OPEN/CHALLENGE epoch holds it provisionally, so two may be prepared at once |
+| — | A settlement receipt binds to the exact cleared obligation set | SECURITY.md | `VERIFIED` — guard added | `settlementReceiptHash` binds settlementId + epochId + resultHash + the transfers themselves. Order-insensitive; amount/epoch/result changes all change it |
 
 ## VI. Settlement and integration
 
@@ -134,7 +134,7 @@ in-process; those need a chain, and `scripts/vault-devnet.mjs` is the counterpar
 | FR-SETTLE-004 | No claim of atomic cross-chain settlement unless implemented and verified | §21 | `VERIFIED` — settlement adapter throws `UnconfiguredAdapterError`; no such claim is made |
 | FR-INT-002 | MCP remains the control surface and cannot bypass authority | §24 | `PARTIAL` — the shared-context server holds notes, not authority; it cannot move capital |
 | — | Settlement chain and asset match authorized terms | SECURITY.md | `VERIFIED` — `CHAIN_MISMATCH` / `ASSET_MISMATCH` |
-| — | External identities cannot be silently remapped | SECURITY.md | `UNTESTED` |
+| — | External identities cannot be silently remapped | SECURITY.md | `VERIFIED` — guard added | `marketplaceRefs` was a plain array. `assertNoIdentityRemap` / `mergeRefs` refuse a `(system,id)` already bound to another agent |
 
 ## VII. Evidence honesty
 
