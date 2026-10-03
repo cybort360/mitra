@@ -311,7 +311,21 @@ The two refusals that matter were each confirmed by a **decoded custom error
 code**, not by the mere presence of a failure.
 | 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation in Mitra. **Substrate located**: Microcosm at `/opt/microcosm-x` (§50 reuse list audited, F24) |
 | 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — interfaces plus one `local` stub; no A2A, MCP server, ERC-8004, marketplace, x402 |
-| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `INTEGRATED` | `PARTIAL` — Full local lifecycle verified (F49/F50): agreement rejection drives `applyAgreementOpWithSaga` through `EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED`, releases `space.committed`, persists to repository (`mitra.sagas`), and serves via `GET /api/v1/sagas`. `tests/commerce-saga.test.ts` (12 tests) and `tests/sagas-api.test.ts` (4 tests). On-chain TALOS contract recovery remains for future phase |
+| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `LIVE_DEMONSTRATED` | — |
+
+**Phase 6 evidence — 2026-10-03, Base Sepolia (84532) & Tempo Moderato (42431).**
+Automated distributed saga recovery executed against live `MitraVault.sol` deployments.
+A deliberately rejected agreement triggers automated compensation: pre-committed `refundEscrow(jobId)` is executed on-chain after timeout, restoring vault available balance with zero lost capital, advancing the saga to `RECOVERED` without unhandled exceptions (PRD §4.5, §15.5, ADR-0012). Replay is refused on-chain.
+
+- Commands:
+  ```bash
+  node scripts/showcase-live-saga.mjs baseSepolia   # 100% PASS
+  node scripts/showcase-live-saga.mjs moderato      # 100% PASS (verified PathUSD 0x20c0...0000)
+  ```
+- Executed Tx Hashes:
+  - Base Sepolia: `lockEscrow` `0x5983f82b203b6852…` (block 47647239), `refundEscrow` `0xc05bd25c5a108391…` (block 47647243).
+  - Tempo Moderato: `lockEscrow` `0x300a9b685218f9b0…` (block 38044216), `refundEscrow` `0x5881a9ea0823588a…` (block 38044252).
+  - Both chains: Replay `refundEscrow` rejected on-chain (`JOB_ALREADY_SETTLED`). Attempt count recorded on saga (`F47`).
 | 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
 | 8 Base | "Same economic intent executes on Base through the common API." | `TESTED` | `PARTIAL` — `BaseSettlementAdapter` + `BaseRpcTransport` settle live on Base Sepolia through `SettlementAdapter` with the EIP-712 commitment on-chain as a calldata suffix (see the live row above). EOA path only: the ERC-4337 path (`scripts/base-4337.mjs`) is not wired through the transport. **Not yet an obligation path:** no route or kernel code constructs the adapter |
 | 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `TESTED` | `PARTIAL` — `TempoSettlementAdapter` + `ModeratoTransport` settle live on Moderato through `SettlementAdapter` with the commitment on-chain as the memo (see the live row above). **Not yet an obligation path:** no route or kernel code constructs the adapter, so no Mitra obligation reaches it |

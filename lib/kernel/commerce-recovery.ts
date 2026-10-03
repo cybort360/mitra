@@ -71,6 +71,24 @@ export interface CoupledResult {
   saga?: Saga;
 }
 
+export interface OnChainEscrowRef {
+  chain: string;
+  contractAddress: string;
+  jobId: string;
+  timeout?: number;
+}
+
+export interface CommercialSagaOptions {
+  capability?: string;
+  amount?: { asset: Agreement["price"]["asset"]; amount: number };
+  artifactRefs?: string[];
+  contentHash?: string;
+  failureReason?: string;
+  compensationRoutes?: CompensationRoute[];
+  compensationRouteId?: string;
+  onChainEscrow?: OnChainEscrowRef;
+}
+
 /**
  * Applies a commercial operation AND advances the attached saga.
  *
@@ -82,7 +100,7 @@ export async function applyAgreementOpWithSaga(
   space: Space,
   agreement: Agreement,
   op: AgreementOp,
-  opts: { capability?: string; amount?: { asset: Agreement["price"]["asset"]; amount: number }; artifactRefs?: string[]; contentHash?: string; failureReason?: string } = {},
+  opts: CommercialSagaOptions = {},
 ): Promise<Result<CoupledResult>> {
   // The commercial transition first: if the agreement cannot legally make this move,
   // the saga must not move either. Doing it the other way round would let a rejected
@@ -94,6 +112,17 @@ export async function applyAgreementOpWithSaga(
 
   // ── fund: declare and ARM the saga ────────────────────────────────────────
   if (op === "fund") {
+    const compensationRoutes = opts.compensationRoutes ?? (
+      opts.onChainEscrow
+        ? [{
+            routeId: `route_refund_${opts.onChainEscrow.jobId.slice(0, 10)}`,
+            action: "REFUND" as const,
+            route: `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`,
+            maxAttempts: 1,
+          }]
+        : [REFUND_ROUTE]
+    );
+
     const declaration: SagaDeclaration = {
       // Two steps, so §15.5's "a saga with >1 step MUST declare a compensation route"
       // is satisfied by construction rather than by luck.
@@ -101,7 +130,7 @@ export async function applyAgreementOpWithSaga(
         { stepId: "execute", name: "perform the agreed work", state: "PENDING", attempts: 0 },
         { stepId: "deliver", name: "submit the deliverable", state: "PENDING", attempts: 0 },
       ],
-      compensationRoutes: [REFUND_ROUTE],
+      compensationRoutes,
       timeoutPolicy: nextAgreement.failurePolicy || "refund on expiry",
     };
     const declared = unwrap(declareSaga(`saga_${nextAgreement.agreementId}`, nextAgreement.runId, nextAgreement.intentId, declaration), "declareSaga");
@@ -109,7 +138,11 @@ export async function applyAgreementOpWithSaga(
     await repo.saveSaga(armed);
     return pass({
       space: nextSpace,
-      agreement: { ...nextAgreement, sagaIds: [armed.sagaId] },
+      agreement: {
+        ...nextAgreement,
+        sagaIds: [armed.sagaId],
+        ...(opts.onChainEscrow ? { escrowRef: opts.onChainEscrow.jobId } : {}),
+      },
       saga: armed,
     });
   }
@@ -152,11 +185,26 @@ export async function applyAgreementOpWithSaga(
     // Then the saga, through every state, with no exception escaping.
     const stepped = unwrap(recordStep(loaded, "deliver", "FAILED", reason), "recordStep");
     const compensating = unwrap(beginCompensation(stepped), "beginCompensation");
+
+    const targetRouteId = opts.compensationRouteId
+      ?? (loaded.compensationRoutes.length > 0 ? loaded.compensationRoutes[0] : REFUND_ROUTE.routeId);
+
+    const availableRoutes = opts.compensationRoutes ?? [
+      {
+        routeId: targetRouteId,
+        action: "REFUND" as const,
+        route: opts.onChainEscrow
+          ? `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`
+          : (nextAgreement.escrowRef ? `evm:refundEscrow:${nextAgreement.escrowRef}` : REFUND_ROUTE.route),
+        maxAttempts: 1,
+      },
+    ];
+
     const terminal = compensate(compensating, {
-      routeId: REFUND_ROUTE.routeId,
+      routeId: targetRouteId,
       outcome: "RECOVERED",
       recoveredValue: nextAgreement.price.amount,
-      availableRoutes: [REFUND_ROUTE],
+      availableRoutes,
     });
     if (!terminal.ok) {
       // The saga refused — most plausibly because the route was already spent
