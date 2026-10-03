@@ -99,8 +99,23 @@ console.log(`tempo_fundAddress returned ${hashes.length} transaction(s); verifyi
 
 // A successful receipt proves the transaction landed, not that we were paid.
 const credited = new Set();
+// The faucet returns hashes before they are mined, so a receipt read straight
+// away is null. Poll instead of reading once; a missing receipt is "not yet",
+// and only a timeout is a failure.
+const receiptOf = async (h) => {
+  for (let i = 0; i < 30; i++) {
+    const r = await rpc("eth_getTransactionReceipt", [h]);
+    if (r) return r;
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  return null;
+};
 for (const h of hashes) {
-  const receipt = await rpc("eth_getTransactionReceipt", [h]);
+  const receipt = await receiptOf(h);
+  if (!receipt) {
+    console.error(`  ${h.slice(0, 14)}… no receipt after 30s — NOT MINED`);
+    continue;
+  }
   if (receipt.status !== "0x1") {
     console.error(`  ${h.slice(0, 14)}… status=${receipt.status} — FAILED`);
     continue;
