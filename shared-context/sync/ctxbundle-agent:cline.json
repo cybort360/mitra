@@ -1,6 +1,6 @@
 {
   "fromNodeId": "agent:cline",
-  "highSeq": 40,
+  "highSeq": 41,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -759,6 +759,27 @@
         "829f804c9e1af51b63b9953152aa47ff5c1cfb8bed546dd3251ea07bc5381dc3"
       ],
       "hash": "831832c5d2eac5753a741d6ea2c626c00d57d4296cfcffd768e689591f8d7168"
+    },
+    {
+      "entryId": "ctx_1ddf0a2e3c4ee1d8",
+      "seq": 41,
+      "kind": "decision",
+      "title": "F46 — the suite was a clock bomb; provider substitution had NO guard",
+      "body": "Closing the docs/SECURITY.md rows. Three of seven were structurally guaranteed and cost a test each. One had no implementation at all.\n\nPROVIDER SUBSTITUTION HAD NO GUARD. SettlementAdapter.settle() takes from/to/amount/commitmentHash — the provider is NOT part of the settlement input, so a settlement could be attributed to an agreement whose provider it had nothing to do with. assertSettlementBinding now matches provider, asset and amount exactly. No allowReassignment flag on purpose: PRD §11 makes reassignment an amendment, so a flag would be a second silent path to the same change.\n\nMy first version gated settlement on escrowReleased and refused EVERY legitimate settlement — escrow is released at ACCEPTANCE while settlement happens after it. The tests caught it. settledRef is now separate from escrowReleased because they are different moments. Mutation: removing the three guards fails 5 tests.\n\nTHE CLOCK BOMB. Three tests/persistence.test.ts cases began failing \"expected 403 to be 201\". Not policy: mandate_research_v7 expired 2026-10-02T23:59:59Z and the clock crossed it during this session. evaluateProposal correctly denied the expired mandate; the route correctly returned 403. A fixture with a hardcoded expiry is green until a date and then permanently broken, for a cause that reads like a regression in the system under test. The suite greenness was a statement about the CALENDAR, not the code. Fixed to inDays(30|60|90). Historical reservations keep literal dates — a SETTLED reservation with a past expiry is correct history — and the regression test is bounded to mandates so it does not \"fix\" that.\n\nTWO ERRORS OF MY OWN, recorded. I claimed transition() had no callers outside tests (grep for agent(/mandate( — a search that could not find its own answer) and then claimed docs/SECURITY.md did not exist (find | head -3 truncated before reaching it). I was one edit from \"correcting\" seven good citations.\n\nSTATE: 485 TS / 88 Rust / typecheck clean. Invariants 24 VERIFIED / 8 UNTESTED. Branch fix/integrity-f40-f45 at f84b7ab.",
+      "status": "active",
+      "scope": "failure",
+      "tags": [
+        "clock",
+        "f46",
+        "postgres",
+        "security"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T04:17:14.167Z",
+      "parents": [
+        "831832c5d2eac5753a741d6ea2c626c00d57d4296cfcffd768e689591f8d7168"
+      ],
+      "hash": "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
     }
   ],
   "actors": [
@@ -784,5 +805,5 @@
       "createdAt": "2026-10-01T14:10:28.123Z"
     }
   ],
-  "tipHash": "831832c5d2eac5753a741d6ea2c626c00d57d4296cfcffd768e689591f8d7168"
+  "tipHash": "26be3fd8f0822bdade8a801c8c1cc499746e85574ff3a3a43e5042a61dafd4d7"
 }
