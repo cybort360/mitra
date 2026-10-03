@@ -21,8 +21,7 @@ const CFG = {
   },
   moderato: {
     chainId: 42431, name: "moderato", rpc: "https://rpc.moderato.tempo.xyz",
-    // PathUSD, verified by name() on Moderato — see forge/FAILURES.md F40.
-    token: "0x20c00000000000000000000000000000000000000",
+    token: "0x20c0000000000000000000000000000000000001",
   },
 };
 
@@ -83,14 +82,17 @@ async function main() {
   const approveHash = await w.writeContract({ address: cfg.token, abi: erc20, functionName: "approve", args: [V, balBefore], chain });
   const approveRc = await pub.waitForTransactionReceipt({ hash: approveHash });
   check("approve confirmed", approveRc.status === "success");
+  await new Promise((r) => setTimeout(r, 2000));
   const depHash = await run("deposit", [cfg.token, AMOUNT]);
   const depRc = await pub.waitForTransactionReceipt({ hash: depHash });
   check("deposit confirmed", depRc.status === "success", `tx ${depHash.slice(0, 18)}… block ${depRc.blockNumber}`);
+  await new Promise((r) => setTimeout(r, 2000));
 
   // 2. open a mandate for the holder
   const mh = await run("openMandate", [HOLDER, AMOUNT, AMOUNT * 10n, DEADLINE, ENGINE]);
   const mrc = await pub.waitForTransactionReceipt({ hash: mh });
   check("openMandate confirmed", mrc.status === "success", `tx ${mh.slice(0, 18)}…`);
+  await new Promise((r) => setTimeout(r, 3000));
 
   const mand = await pub.readContract({ address: V, abi: artifact.abi, functionName: "mandates", args: [HOLDER] });
   check("mandate is bound to this principal", String(mand[0]).toLowerCase() === acct.address.toLowerCase());
@@ -115,10 +117,17 @@ async function main() {
   const sh = await run("spendAuthorized", [acct.address, HOLDER, cfg.token, AMOUNT, RECIPIENT, "settle-1", 1, DEADLINE, sig]);
   const src = await pub.waitForTransactionReceipt({ hash: sh });
   check("spendAuthorized confirmed", src.status === "success", `tx ${sh.slice(0, 18)}… block ${src.blockNumber}`);
-  const recAfter = await pub.readContract({ address: cfg.token, abi: erc20, functionName: "balanceOf", args: [RECIPIENT] });
+  let recAfter = recBefore;
+  let spentAmt = 0n;
+  for (let i = 0; i < 5; i++) {
+    recAfter = await pub.readContract({ address: cfg.token, abi: erc20, functionName: "balanceOf", args: [RECIPIENT] });
+    const m = await pub.readContract({ address: V, abi: artifact.abi, functionName: "mandates", args: [HOLDER] });
+    spentAmt = m[4];
+    if (recAfter - recBefore === AMOUNT && spentAmt === AMOUNT) break;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
   check("recipient received EXACTLY the amount", recAfter - recBefore === AMOUNT, `${recAfter - recBefore} atomic`);
-  const spent = await pub.readContract({ address: V, abi: artifact.abi, functionName: "mandates", args: [HOLDER] });
-  check("cumulative spend recorded", spent[4] === AMOUNT, `spent=${spent[4]}`);
+  check("cumulative spend recorded", spentAmt === AMOUNT, `spent=${spentAmt}`);
 
   // 5. replay must be refused ON-CHAIN
   let replayRefused = false;
