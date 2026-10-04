@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 78,
+  "highSeq": 80,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1592,6 +1592,50 @@
         "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
       ],
       "hash": "d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af"
+    },
+    {
+      "entryId": "ctx_cff395ebe61ad34e",
+      "seq": 79,
+      "kind": "handoff",
+      "title": "Purple backlog is rebased onto feat/mitra-vault-v2-reseed as feat/backlog-on-v2; EVM vault rails now settle through canonical v2",
+      "body": "DONE: feat/backlog-on-v2 = origin/feat/mitra-vault-v2-reseed (af90542) + backlog #1-#6, gitguardian.yaml, and 3 new commits. The MitraVaultTransport (B.4) is ported to contracts/MitraVault.sol v2. v2's SpendExecuted.actionHash is the permit's EIP-712 digest, not the commitment, so observe() decodes spendAuthorized calldata and binds the event by recomputing the digest. Limit is checked only pre-sign, which is now load-bearing. rails.ts picks the chain's non-__ deployments.json entry. Live, via /api/v1/settlements, TESTNET_PASS: Base 0xa607a6f9…2d71, Tempo 0x08160f4f…cf85. Suites: tsc clean; vitest 789; Postgres --no-file-parallelism 838 x2; forge 31/31; mutation 16/16. Our clearing finding renumbered F58->F60 (you use F58/F59). NEW F61 (open, for the lead): a v2 Mandate has no token, so limit/ceiling are raw units in whatever token the permit names. A leaked engine key with a USD-sized ceiling takes 5 BTC (contracts/test/MitraVaultTokenScope.t.sol reproduces it). Fix: add token to Mandate, or key [principal][holder][token], then invert that test. NEXT (pending decisions): MCP SSE transport; F55 caller identity auth model; MitraClearing.sol permissions; integration target branch; #29 Solana redeploy.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "B.4",
+        "F60",
+        "F61",
+        "handoff",
+        "v2",
+        "vault"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T17:55:35.511Z",
+      "parents": [
+        "d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af"
+      ],
+      "hash": "13b75a9945ff06a208cbd6f3c3b58b826e1ac5e39b6f8f2a4598a155655c292d"
+    },
+    {
+      "entryId": "ctx_2251f80eaa0cb751",
+      "seq": 80,
+      "kind": "decision",
+      "title": "MCP network transport serves legacy SSE and Streamable HTTP on one port, loopback by default, bearer token required off-loopback",
+      "body": "Starting Phase 5 transport on feat/backlog-on-v2 (integration target: feat/mitra-vault-v2-reseed, decided by human:purple 2026-10-04). Command: `npm run mcp -- --transport sse --port 3001`. Endpoints: GET /sse + POST /messages (the handoff's SSE; the SDK marks it deprecated) and /mcp (Streamable HTTP, what current clients speak). The server stays a thin HTTP client of the Mitra API, NOT the handoff's direct getStore()/kernel dispatch: the routes stay the only gate (FR-INT-002), and we rejected direct dispatch for that reason. Network exposure widens F55, so: bind 127.0.0.1 by default; refuse to bind a non-loopback host without MITRA_MCP_TOKEN (bearer token, compared in constant time); Host/Origin checks against DNS rebinding; one McpServer per session; a session cap. A token gates who can connect but is NOT caller identity: withheld tools stay withheld until F55 is resolved.",
+      "status": "active",
+      "scope": "mcp",
+      "tags": [
+        "F55",
+        "mcp",
+        "phase5",
+        "sse"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T18:01:13.816Z",
+      "parents": [
+        "13b75a9945ff06a208cbd6f3c3b58b826e1ac5e39b6f8f2a4598a155655c292d"
+      ],
+      "hash": "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
     }
   ],
   "actors": [
@@ -1629,5 +1673,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af"
+  "tipHash": "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
 }
