@@ -334,7 +334,23 @@ A deliberately rejected agreement triggers automated compensation: pre-committed
   node scripts/showcase-live-saga.mjs baseSepolia   # 100% PASS
   node scripts/showcase-live-saga.mjs moderato      # 100% PASS (verified PathUSD 0x20c0...0000)
   ```
-- Executed Tx Hashes (Run 2, full un-truncated logging):
+- **v2 CONTRACT — these are the CURRENT figures** (promoted `[principal][holder]`
+  + `actionHash` permit, deployed fresh on both chains; see the superseded v1 run
+  below for provenance).
+  - Base Sepolia, vault `0x9c2c2d42a1a282b665bc67f407017b7605e51e8f`
+    (deploy tx `0x39953adf7f0d19f60add1784d6b335c05c325fcf2f9b46fe0df572203e17ed8e`, block 47669876):
+    - `lockEscrow`: `0xd585765c9735ac9dc40ba636fa1fea3af2413dadac1171f2767cc0ba5e915163` (block 47669948)
+    - `refundEscrow`: `0x22096706ac5670ba580b9ccc4c7698e1e6c1df59947ecaa9375d779513eb21a3` (block 47669959)
+  - Tempo Moderato, vault `0xaa46c23adefed6687cb2180d8a14cf88c6688ee6`
+    (deploy tx `0xc13aadac5052e9bb3046bc2c3c76afdfe527d2ff732acf9af92afdbd09b77679`, block 38119669):
+    - `lockEscrow`: `0x32eddfd5fa7c4d1ef58a40e8b58ac78ab6e621608ab0e1db98f663ee032313ec` (block 38120016)
+    - `refundEscrow`: `0x22f3d9cdb35ec0b7829ae0e643111f9ff0cbddfd08b03b190a4549348908fd34` (block 38120052)
+  - Deployed bytecode is 8701 bytes on BOTH chains and both return
+    `PERMIT_TYPEHASH() == 0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`,
+    read by `eth_call` selector `0x30adf81f`. That value is the keccak of the
+    v2 8-field struct and does NOT match the v1 deployed constant
+    `0xec3317dd…`, so the ledger can be checked against the chain.
+- Superseded — v1 contract addresses/hashes retained for provenance only:
   - Base Sepolia (84532):
     - `lockEscrow`: `0x61fcfb6dba13b7751c65b0d07c943c51d6d22d69923e1fe4f010f72b49d46d0a` (block 47648097)
     - `refundEscrow`: `0x767b4e30f12e97868c4120ad65878b588e673c8c43e04dce71cc71c15351800b` (block 47648107)

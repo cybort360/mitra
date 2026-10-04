@@ -12,3 +12,4 @@ remappings = [
   "@openzeppelin/contracts/=../node_modules/@openzeppelin/contracts/",
   "forge-std/=lib/forge-std/src/",
 ]
+via_ir = true

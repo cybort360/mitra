@@ -82,11 +82,28 @@ contract MitraVault is EIP712, ReentrancyGuard {
     // EIP-712 domain separator, so a permit cannot be replayed on another chain
     // or against a re-deployed contract at the same address.
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
-        "SpendPermit(address vault,address holder,address token,uint256 amount,address recipient,string settlementId,uint32 mandateVersion,uint64 deadline)"
+        "SpendPermit(address principal,address holder,address token,bytes32 actionHash,uint256 amount,address recipient,uint32 mandateVersion,uint64 deadline)"
     );
 
+    /// The signed terms. Ported from the v2 variant: `actionHash` replaces the
+    /// free-form `settlementId` string, so the binding is a fixed-width digest
+    /// rather than caller-chosen text that two callers could spell differently.
+    struct SpendPermit {
+        address principal;
+        address holder;
+        address token;
+        bytes32 actionHash;
+        uint256 amount;
+        address recipient;
+        uint32 mandateVersion;
+        uint64 deadline;
+    }
+
     mapping(address => mapping(address => Positions)) public vaults;
-    mapping(address => Mandate) public mandates;
+    // Keyed by [principal][holder], ported from the v2 variant. Keyed by holder
+    // alone, Principal A could open a mandate on an agent address Principal B
+    // wants, squatting it so B's own openMandate reverts MANDATE_ALREADY_EXISTS.
+    mapping(address => mapping(address => Mandate)) public mandates;
     mapping(bytes32 => bool) public consumedPermits;
     mapping(bytes32 => EscrowJob) public escrows;
 
@@ -167,11 +184,11 @@ contract MitraVault is EIP712, ReentrancyGuard {
     // ── 2. mandate lifecycle (ADR-0009) ───────────────────────────────────────
 
     function openMandate(address holder, uint64 limit, uint64 ceiling, uint64 expiresAt, address policyEngine) external {
-        require(mandates[holder].holder == address(0), "MANDATE_ALREADY_EXISTS");
+        require(mandates[msg.sender][holder].holder == address(0), "MANDATE_ALREADY_EXISTS");
         require(limit > 0 && ceiling >= limit, "EXCEEDS_MANDATE_CEILING");
         require(expiresAt > block.timestamp, "INVALID_EXPIRY");
         require(policyEngine != address(0), "INVALID_POLICY_ENGINE");
-        mandates[holder] = Mandate({
+        mandates[msg.sender][holder] = Mandate({
             principal: msg.sender, holder: holder, limit: limit, ceiling: ceiling,
             spent: 0, expiresAt: expiresAt, version: 1, policyEngine: policyEngine, revoked: false
         });
@@ -180,8 +197,8 @@ contract MitraVault is EIP712, ReentrancyGuard {
 
     /// Amending governs FUTURE permits. A permit already issued stands.
     function amendMandate(address holder, uint64 newLimit, uint64 newCeiling, uint64 newExpiresAt) external {
-        Mandate storage m = mandates[holder];
-        require(msg.sender == m.principal, "UNAUTHORIZED_PRINCIPAL");
+        Mandate storage m = mandates[msg.sender][holder];
+        require(m.principal == msg.sender, "UNAUTHORIZED_PRINCIPAL");
         require(!m.revoked, "MANDATE_REVOKED");
         require(m.expiresAt > block.timestamp, "MANDATE_EXPIRED");
         require(newLimit > 0 && newCeiling >= newLimit, "EXCEEDS_MANDATE_CEILING");
@@ -196,7 +213,7 @@ contract MitraVault is EIP712, ReentrancyGuard {
     /// compromised" and must stop value NOW, so it reaches back and kills outstanding
     /// permits. The holder may also revoke itself, which cannot move value.
     function revokeMandate(address holder) external {
-        Mandate storage m = mandates[holder];
+        Mandate storage m = mandates[msg.sender][holder];
         require(msg.sender == m.principal || msg.sender == m.holder, "UNAUTHORIZED");
         require(!m.revoked, "ALREADY_REVOKED");
         m.revoked = true;
@@ -206,23 +223,21 @@ contract MitraVault is EIP712, ReentrancyGuard {
     // ── 3. guarded spend — the load-bearing invariant ─────────────────────────
 
     function spendAuthorized(
-        address principal,
-        address holder,
-        address token,
-        uint256 amount,
-        address recipient,
-        string calldata settlementId,
-        uint32 mandateVersion,
-        uint64 deadline,
+        SpendPermit calldata permit,
         bytes calldata signature
     ) external nonReentrant {
-        Mandate storage m = mandates[holder];
+        address principal = permit.principal;
+        address holder     = permit.holder;
+        address token      = permit.token;
+        uint256 amount     = permit.amount;
+
+        Mandate storage m = mandates[principal][holder];
         Positions storage p = vaults[principal][token];
 
         require(m.principal == principal, "PRINCIPAL_MISMATCH");
         require(!m.revoked, "MANDATE_REVOKED");
         require(block.timestamp < m.expiresAt, "MANDATE_EXPIRED");
-        require(block.timestamp <= deadline, "PERMIT_EXPIRED");
+        require(block.timestamp <= permit.deadline, "PERMIT_EXPIRED");
         // DO NOT RE-ADD equality here. A mutation test kills the one test that covers
         // this when `==` is restored. `== m.version` also rejects permits issued
         // under an OLDER version, so every amendment instantly strands every
@@ -231,7 +246,7 @@ contract MitraVault is EIP712, ReentrancyGuard {
         // (lib.rs:880): only a version FROM THE FUTURE is not something this
         // mandate issued. A permit issued under v1 was authorised under v1's limit,
         // which is exactly the promise ADR-0009 says must stand.
-        require(mandateVersion <= m.version, "MANDATE_VERSION_FROM_FUTURE");
+        require(permit.mandateVersion <= m.version, "MANDATE_VERSION_FROM_FUTURE");
         require(!p.emergencyFreeze, "VAULT_FROZEN");
         require(amount <= p.available, "INSUFFICIENT_AVAILABLE");
         require(m.spent + amount <= m.ceiling, "EXCEEDS_MANDATE_CEILING");
@@ -246,8 +261,8 @@ contract MitraVault is EIP712, ReentrancyGuard {
         // The limit is enforced at ISSUANCE, against the version the permit cites.
 
         bytes32 structHash = keccak256(abi.encode(
-            PERMIT_TYPEHASH, principal, holder, token, amount, recipient,
-            keccak256(bytes(settlementId)), mandateVersion, deadline
+            PERMIT_TYPEHASH, principal, holder, token, permit.actionHash,
+            amount, permit.recipient, permit.mandateVersion, permit.deadline
         ));
         bytes32 actionHash = _hashTypedDataV4(structHash);
 
@@ -277,8 +292,8 @@ contract MitraVault is EIP712, ReentrancyGuard {
         p.total -= amount;
         _assertReconciled(p);
 
-        IERC20(token).safeTransfer(recipient, amount);
-        emit SpendExecuted(principal, recipient, token, amount, actionHash);
+        IERC20(token).safeTransfer(permit.recipient, amount);
+        emit SpendExecuted(principal, permit.recipient, token, amount, actionHash);
     }
 
     // ── 4. commercial escrow (PRD §15) ────────────────────────────────────────

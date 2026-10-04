@@ -1,21 +1,17 @@
 {
   "baseSepolia": {
     "chainId": 84532,
-    "address": "0x6a731a654423d64afb9839742c3e48c6c54eea9c",
-    "deployTx": "0xf3682dde6c5d3b059e9962dfa99448baa05d8852f5c5c64d51a8c522128ed93a",
-    "deployBlock": 47644607,
-    "deployedAt": "2026-10-03T19:58:20.273Z",
-    "variant": "contracts/MitraVault.sol",
-    "note": "Canonical. Deployed from the lead branch; PERMIT_TYPEHASH 0xec3317dd\u2026 verified on-chain."
+    "address": "0x9c2c2d42a1a282b665bc67f407017b7605e51e8f",
+    "deployTx": "0x39953adf7f0d19f60add1784d6b335c05c325fcf2f9b46fe0df572203e17ed8e",
+    "deployBlock": 47669876,
+    "deployedAt": "2026-10-04T10:00:39.082Z"
   },
   "moderato": {
     "chainId": 42431,
-    "address": "0x19b3c58d85114bcc9451cff83e9c09c10986fcb0",
-    "deployTx": "0x169eb2faa167b7512f0e6f675d5171c7ed63fad56306edd4f58e57e3c829a6ee",
-    "deployBlock": 38035296,
-    "deployedAt": "2026-10-03T19:58:25.584Z",
-    "variant": "contracts/MitraVault.sol",
-    "note": "Canonical. Deployed from the lead branch; PERMIT_TYPEHASH 0xec3317dd\u2026 verified on-chain."
+    "address": "0xaa46c23adefed6687cb2180d8a14cf88c6688ee6",
+    "deployTx": "0xc13aadac5052e9bb3046bc2c3c76afdfe527d2ff732acf9af92afdbd09b77679",
+    "deployBlock": 38119669,
+    "deployedAt": "2026-10-04T10:00:51.156Z"
   },
   "moderato__callerVariant": {
     "network": "tempo-moderato",

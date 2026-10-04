@@ -10,13 +10,13 @@ The contract deployed on two public testnets:
 | Network | Address | Chain ID |
 |---|---|---|
 | Base Sepolia | `0x6a731a654423d64afb9839742c3e48c6c54eea9c` | 84532 |
-| Tempo Moderato | `0x19b3c58d85114bcc9451cff83e9c09c10986fcb0` | 42431 |
+| Tempo Moderato | `0xaa46c23adefed6687cb2180d8a14cf88c6688ee6` | 42431 |
 
 Evidence for that mapping, verified by reading the chain rather than a log:
 
 - both addresses carry 8,593 bytes of code;
 - `PERMIT_TYPEHASH()` on both returns
-  `0xec3317dd5c94a5a003c11d0eaa00f56ddb10aa8b95c0057febc7827a774d249c`, which is
+  `0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`, which is
   the keccak256 of this file's typehash string;
 - the Phase 6 saga showcase (`lockEscrow` → `refundEscrow`) and the settlement
   caller both ran against these addresses.

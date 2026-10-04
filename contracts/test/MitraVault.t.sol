@@ -42,8 +42,8 @@ contract MitraVaultTest is Test {
         string memory settlementId, uint32 version, uint256 deadline, uint256 pk
     ) internal view returns (bytes32) {
         bytes32 structHash = keccak256(abi.encode(
-            keccak256("SpendPermit(address vault,address holder,address token,uint256 amount,address recipient,string settlementId,uint32 mandateVersion,uint64 deadline)"),
-            vaultAddr, hold, tok, amount, to, keccak256(bytes(settlementId)), version, deadline
+            vault.PERMIT_TYPEHASH(),
+            principal, hold, tok, keccak256(bytes(settlementId)), amount, to, version, deadline
         ));
         // READ the domain separator from the contract instead of recomputing it.
         //
@@ -64,9 +64,40 @@ contract MitraVaultTest is Test {
     /// exactly like a contract bug.
     function _spend(bytes32 actionHash, uint256 pk, string memory settlementId) internal {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, actionHash);
+        MitraVault.SpendPermit memory p = MitraVault.SpendPermit({
+            principal: principal,
+            holder: holder,
+            token: address(token),
+            actionHash: keccak256(bytes(settlementId)),
+            amount: 100e6,
+            recipient: recipient,
+            mandateVersion: 1,
+            deadline: uint64(block.timestamp + 1 hours)
+        });
         vm.prank(provider);
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            settlementId, 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r, s, v));
+        vault.spendAuthorized(p, abi.encodePacked(r, s, v));
+    }
+
+    /// The permit struct, for tests that build a variant of it before signing.
+    /// Signs and submits an explicitly-built permit. Used by tests that must vary
+    /// one field away from the happy path (wrong sig, wrong version, replayed id).
+    function _submit(MitraVault.SpendPermit memory p, bytes memory sig) internal {
+        vault.spendAuthorized(p, sig);
+    }
+
+    function _permitOf(
+        bytes32 actionHash, uint256 amount, address to, uint32 version, uint256 deadline
+    ) internal view returns (MitraVault.SpendPermit memory) {
+        return MitraVault.SpendPermit({
+            principal: principal,
+            holder: holder,
+            token: address(token),
+            actionHash: actionHash,
+            amount: amount,
+            recipient: to,
+            mandateVersion: version,
+            deadline: uint64(deadline)
+        });
     }
 
     function _avail() internal view returns (uint256) { (, uint256 a, , , , , , ) = vault.vaults(principal, address(token)); return a; }
@@ -93,8 +124,7 @@ contract MitraVaultTest is Test {
         (uint8 bv, bytes32 br, bytes32 bs) = vm.sign(wrongPk, h);
         vm.prank(attacker);
         vm.expectRevert("POLICY_ENGINE_MISMATCH");
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s1", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(br, bs, bv));
+        _submit(_permitOf(keccak256(bytes("s1")), 100e6, recipient, 1, block.timestamp + 1 hours), abi.encodePacked(br, bs, bv));
         // The legitimate permit still works — it was NOT burned by the attempt.
         _spend(h, enginePk, "s1");
         assertEq(token.balanceOf(recipient), 100e6);
@@ -106,8 +136,7 @@ contract MitraVaultTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(enginePk, h);
         vm.prank(provider);
         vm.expectRevert("AUTHORIZATION_CONSUMED");
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s1", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r, s, v));
+        _submit(_permitOf(keccak256(bytes("s1")), 100e6, recipient, 1, block.timestamp + 1 hours), abi.encodePacked(r, s, v));
     }
 
     function test_cumulative_ceiling_is_enforced() public {
@@ -117,14 +146,13 @@ contract MitraVaultTest is Test {
             bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, sids[i], 1, block.timestamp + 1 hours, enginePk);
             _spend(h, enginePk, sids[i]);
         }
-        (, , , , uint64 spent, , , , ) = vault.mandates(holder);
+        (, , , , uint64 spent, , , , ) = vault.mandates(principal, holder);
         assertEq(spent, 500e6);
         bytes32 h6 = _permit(principal, holder, address(token), 100e6, recipient, "s5", 1, block.timestamp + 1 hours, enginePk);
         (uint8 v6, bytes32 r6, bytes32 s6) = vm.sign(enginePk, h6);
         vm.prank(provider);
         vm.expectRevert("EXCEEDS_MANDATE_CEILING");
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s5", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r6, s6, v6));
+        _submit(_permitOf(keccak256(bytes("s5")), 100e6, recipient, 1, block.timestamp + 1 hours), abi.encodePacked(r6, s6, v6));
     }
 
     function test_frozen_vault_cannot_be_drained() public {
@@ -136,8 +164,7 @@ contract MitraVaultTest is Test {
         vault.withdraw(address(token), 1e6, recipient);
         vm.prank(principal);
         vm.expectRevert("VAULT_FROZEN");
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s", 1, uint64(block.timestamp + 1 hours), "x");
+        _submit(_permitOf(keccak256(bytes("s")), 100e6, recipient, 1, block.timestamp + 1 hours), "x");
     }
 
     function test_positions_reconcile_across_the_whole_lifecycle() public {
@@ -185,8 +212,7 @@ contract MitraVaultTest is Test {
         vm.prank(principal); vault.revokeMandate(holder);
         vm.prank(provider);
         vm.expectRevert("MANDATE_REVOKED");
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s", 1, uint64(block.timestamp + 1 hours), "x");
+        _submit(_permitOf(keccak256(bytes("s")), 100e6, recipient, 1, block.timestamp + 1 hours), "x");
     }
 
     function test_stale_version_permit_is_refused() public {
@@ -197,7 +223,6 @@ contract MitraVaultTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(enginePk, future);
         vm.prank(provider);
         vm.expectRevert("MANDATE_VERSION_FROM_FUTURE");
-        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
-            "s", 3, uint64(block.timestamp + 1 hours), abi.encodePacked(r, s, v));
+        _submit(_permitOf(keccak256(bytes("s")), 100e6, recipient, 3, block.timestamp + 1 hours), abi.encodePacked(r, s, v));
     }
 }
