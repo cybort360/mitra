@@ -134,7 +134,7 @@ fn mandate_pda_seed_is_not_the_vault_seed() {
     // ADR-0002: policy and capital are different objects. A shared seed would
     // let them be derived into the same address space.
     assert_ne!(MANDATE_SEED, b"vault");
-    assert_eq!(mandate_seeds(&Pubkey::new_unique()).len(), 2);
+    assert_eq!(mandate_seeds(&Pubkey::new_unique(), &Pubkey::new_unique()).len(), 3);
 }
 
 // ── negative tests: one per guard ────────────────────────────────────────────

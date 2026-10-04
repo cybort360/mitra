@@ -52,8 +52,8 @@ describe("identifiers match the program", () => {
 
   it("every PDA and bump", () => {
     const [v, vb] = vaultPda(I.principal);
-    const [m, mb] = mandatePda(I.holder);
-    const [a, ab] = authorizationPda(I.holder, I.action);
+    const [m, mb] = mandatePda(I.principal, I.holder);
+    const [a, ab] = authorizationPda(m, I.action);
     expect([v.toBase58(), vb]).toEqual([g.pdas.vault.address, g.pdas.vault.bump]);
     expect([m.toBase58(), mb]).toEqual([g.pdas.mandate.address, g.pdas.mandate.bump]);
     expect([a.toBase58(), ab]).toEqual([g.pdas.authorization.address, g.pdas.authorization.bump]);
@@ -72,7 +72,7 @@ describe("instruction data is byte-identical to what dispatch accepted", () => {
   });
 
   it("authorize", () => {
-    const ix = authorizeIx({ engine: I.engine, holder: I.holder, action: I.action, amount: I.amount, recipient: I.recipient });
+    const ix = authorizeIx({ engine: I.engine, principal: I.principal, holder: I.holder, action: I.action, amount: I.amount, recipient: I.recipient });
     expect(hex(ix.data)).toBe(g.instructions.authorize);
   });
 
@@ -82,7 +82,7 @@ describe("instruction data is byte-identical to what dispatch accepted", () => {
   });
 
   it("amend_mandate (revoke)", () => {
-    const ix = amendMandateIx({ signer: I.holder, holder: I.holder, limit: I.limit, ceiling: I.ceiling, expiresAt: I.expiresAt, revoke: true });
+    const ix = amendMandateIx({ signer: I.holder, principal: I.principal, holder: I.holder, limit: I.limit, ceiling: I.ceiling, expiresAt: I.expiresAt, revoke: true });
     expect(hex(ix.data)).toBe(g.instructions.revoke);
   });
 });
@@ -108,7 +108,7 @@ describe("account order is what dispatch was handed (golden accountMetas)", () =
   });
 
   it("authorize: the engine signs", () => {
-    const ix = authorizeIx({ engine: I.engine, holder: I.holder, action: I.action, amount: 1n, recipient: I.recipient });
+    const ix = authorizeIx({ engine: I.engine, principal: I.principal, holder: I.holder, action: I.action, amount: 1n, recipient: I.recipient });
     expectWithCpiTail(ix, g.accountMetas.authorize);
     expect(ix.keys[0].pubkey.equals(I.engine) && ix.keys[0].isSigner).toBe(true);
   });
