@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getStore } from "@/lib/store/provider";
 import { getRails } from "@/lib/settlement/rails";
 import { confirmSettlement, settleAgreement } from "@/lib/settlement/settle-agreement";
+import { receiptSignerFromEnv } from "@/lib/settlement/receipt-signer";
 
 /**
  * Settlements: the route through which an ACCEPTED agreement is actually paid.
@@ -48,9 +49,10 @@ export async function POST(req: Request) {
   const now = body.now ? new Date(body.now) : new Date();
 
   const rails = await getRails();
+  const receiptSigner = receiptSignerFromEnv();
   const outcome = body.op === "settle"
-    ? await settleAgreement(repo, rails, { agreementId: body.agreementId, reservationId: body.reservationId, now })
-    : await confirmSettlement(repo, rails, { settlementId: body.settlementId, now });
+    ? await settleAgreement(repo, rails, { agreementId: body.agreementId, reservationId: body.reservationId, now, receiptSigner })
+    : await confirmSettlement(repo, rails, { settlementId: body.settlementId, now, receiptSigner });
 
   if (!outcome.ok) {
     return NextResponse.json(

@@ -527,6 +527,12 @@ export interface Receipt {
   payloadHash: string;
   previousReceiptHash?: string;
   signer: string;
+  /**
+   * EIP-191 signature over `receiptHash(receipt)` by the address in `signer`
+   * (`"eip191:<address>"`), when the receipt is signed (backlog #4). Not part of the
+   * hashed body: it attests to the hash, and the chain is the same with or without it.
+   */
+  signature?: string;
   createdAt: string;
   chainEvidence: string[];
   version: number;

@@ -46,7 +46,7 @@ import type {
   Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
-import { linkReceipt, type ReceiptDraft } from "@/lib/kernel/receipts";
+import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type {
   CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts,
 } from "@/lib/store/repository";
@@ -185,12 +185,15 @@ export class InMemoryRepository implements EconomicRepository {
     return true;
   }
 
-  async appendReceipt(draft: ReceiptDraft): Promise<Receipt> {
+  async appendReceipt(draft: ReceiptDraft, signer?: ReceiptSigner): Promise<Receipt> {
     const existing = await this.getReceipt(draft.receiptId);
     if (existing) return existing;
     const run = draft.runId ?? "";
     const chain = this.receiptsByRun.get(run) ?? [];
-    const receipt = linkReceipt(draft, chain.at(-1) ?? null);
+    const receipt = await linkAndSign(draft, chain.at(-1) ?? null, signer);
+    // Signing awaited: re-check nothing was appended for this run or id meanwhile.
+    const now = this.receiptsByRun.get(run) ?? [];
+    if (now.length !== chain.length) return this.appendReceipt(draft, signer);
     this.receiptsByRun.set(run, [...chain, receipt]);
     return { ...receipt };
   }

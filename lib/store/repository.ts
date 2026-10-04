@@ -28,7 +28,7 @@ import type {
   Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
-import type { ReceiptDraft } from "@/lib/kernel/receipts";
+import type { ReceiptDraft, ReceiptSigner } from "@/lib/kernel/receipts";
 
 /** Counts reported by seeding. Widened when spaces and agreements were added. */
 export interface SeedCounts {
@@ -153,7 +153,7 @@ export interface EconomicRepository {
    * A receipt id that already exists is returned unchanged rather than re-linked,
    * so a retried confirmation does not mint a second receipt for one settlement.
    */
-  appendReceipt(draft: ReceiptDraft): Promise<Receipt>;
+  appendReceipt(draft: ReceiptDraft, signer?: ReceiptSigner): Promise<Receipt>;
   getReceipt(receiptId: string): Promise<Receipt | null>;
   /** One run's receipts, oldest first: the order `verifyReceiptChain` walks. */
   listReceipts(runId: string): Promise<Receipt[]>;

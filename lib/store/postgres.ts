@@ -5,7 +5,7 @@ import type {
   Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
-import { linkReceipt, type ReceiptDraft } from "@/lib/kernel/receipts";
+import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
 const num = (v: unknown): number => Number(v);
@@ -137,7 +137,7 @@ export class PostgresRepository implements EconomicRepository {
    * UNIQUE (run_id, seq) constraint would then refuse one, but as an error rather
    * than a queue.
    */
-  async appendReceipt(draft: ReceiptDraft): Promise<Receipt> {
+  async appendReceipt(draft: ReceiptDraft, signer?: ReceiptSigner): Promise<Receipt> {
     const run = draft.runId ?? "";
     const client = await this.pool.connect();
     try {
@@ -149,7 +149,9 @@ export class PostgresRepository implements EconomicRepository {
         "SELECT seq, document FROM mitra.receipts WHERE run_id = $1 ORDER BY seq DESC LIMIT 1", [run],
       );
       const previous = last.rows[0] ? (last.rows[0].document as Receipt) : null;
-      const receipt = linkReceipt(draft, previous);
+      // Signed inside the transaction, under the run's advisory lock, so the signed
+      // hash is the one that is stored and linked.
+      const receipt = await linkAndSign(draft, previous, signer);
       await client.query(
         "INSERT INTO mitra.receipts (receipt_id, run_id, seq, document) VALUES ($1,$2,$3,$4::jsonb)",
         [receipt.receiptId, run, last.rows[0] ? num(last.rows[0].seq) + 1 : 1, JSON.stringify(receipt)],

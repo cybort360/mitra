@@ -5,6 +5,7 @@ import { http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getStore } from "@/lib/store/provider";
 import { baseSepoliaObserver, payX402 } from "@/lib/payments/x402-gateway";
+import { receiptSignerFromEnv } from "@/lib/settlement/receipt-signer";
 import { recordEvent } from "@/lib/store/events";
 
 /**
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
   const result = await payX402({
     repo, reservationId: body.reservationId, url: body.url,
     init: { method: body.method, ...(body.body !== undefined ? { body: body.body } : {}) },
-    signer, now: () => new Date(), observe: baseSepoliaObserver(http(rpc)),
+    signer, now: () => new Date(), observe: baseSepoliaObserver(http(rpc)), receiptSigner: receiptSignerFromEnv(),
   });
 
   const reservation = await repo.getReservation(body.reservationId);

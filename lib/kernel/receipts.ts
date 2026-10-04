@@ -13,11 +13,12 @@
  * altering any earlier receipt changes every later link. `verifyReceiptChain` walks
  * one run's receipts and names the first broken link.
  *
- * ## Not signed — and the field says so
+ * ## Signed when a key is configured (backlog #4)
  *
- * §17.4 lists `signer`. These receipts are hash-chained but carry no signature yet,
- * so `signer` is `"unsigned:<service>"` rather than a name that reads like a key.
- * Signing is open work, recorded in `forge/FAILURES.md` alongside item 2.
+ * §17.4 lists `signer`. With a receipt signer (`MITRA_RECEIPT_SIGNER_KEY_FILE`) each
+ * receipt carries an EIP-191 signature over its `receiptHash` and
+ * `signer: "eip191:<address>"`; `verifyReceipts` recovers it. Without one, `signer` stays
+ * `"unsigned:<service>"` — never a name that reads like a key nobody holds.
  *
  * Pure by kernel convention.
  */
@@ -29,10 +30,28 @@ export type ReceiptDraft = Omit<Receipt, "previousReceiptHash" | "version">;
 
 export const SETTLEMENT_RECEIPT_SIGNER = "unsigned:mitra-settlement-service";
 
-/** The hash the NEXT receipt in the chain must carry as `previousReceiptHash`. */
+/**
+ * The hash the NEXT receipt in the chain must carry as `previousReceiptHash` — and the
+ * value a receipt signature signs. The signature itself is excluded, so signing a
+ * receipt does not change its place in the chain.
+ */
 export function receiptHash(receipt: Receipt): string {
-  const { previousReceiptHash, ...body } = receipt;
+  const { previousReceiptHash, signature: _signature, ...body } = receipt;
   return chainHash(previousReceiptHash ?? null, body);
+}
+
+/** Signs a receipt's hash. The key never reaches the store: the store calls this. */
+export interface ReceiptSigner {
+  /** `"eip191:<address>"`, written into `signer` before the hash is computed. */
+  readonly id: string;
+  /** EIP-191 signature over the receipt hash's 32 bytes (`receiptHashBytes`). */
+  sign(hash: `0x${string}`): Promise<string>;
+}
+
+/** Links, then signs if a signer is given. Used by both stores inside their append. */
+export async function linkAndSign(draft: ReceiptDraft, previous: Receipt | null, signer?: ReceiptSigner): Promise<Receipt> {
+  const linked = linkReceipt(signer ? { ...draft, signer: signer.id } : draft, previous);
+  return signer ? { ...linked, signature: await signer.sign(receiptHashBytes(linked)) } : linked;
 }
 
 /** Links a draft onto the chain whose last receipt is `previous` (null for the first). */
@@ -82,4 +101,39 @@ export function settlementReceipt(settlement: Settlement, network: string, at: D
     createdAt: at.toISOString(),
     chainEvidence: [`${network}:tx:${settlement.txHash}`],
   };
+}
+
+export interface ReceiptCheck {
+  receiptId: string;
+  signed: boolean;
+  /** For a signed receipt: the signature recovers to the address its `signer` names. */
+  valid: boolean;
+  reason?: string;
+}
+
+/**
+ * Checks each receipt's signature (backlog #4). An unsigned receipt is reported as
+ * unsigned — not invalid, not valid. A signed one is valid only if the EIP-191
+ * signature over its `receiptHash` recovers to the address in `signer`; any edit to
+ * the receipt changes the hash and fails it.
+ */
+export async function verifyReceipts(receipts: Receipt[]): Promise<ReceiptCheck[]> {
+  const { recoverMessageAddress } = await import("viem");
+  return Promise.all(receipts.map(async (r) => {
+    if (!r.signer.startsWith("eip191:")) return { receiptId: r.receiptId, signed: false, valid: false, reason: "UNSIGNED" };
+    if (!r.signature) return { receiptId: r.receiptId, signed: true, valid: false, reason: "SIGNATURE_MISSING" };
+    try {
+      const recovered = await recoverMessageAddress({ message: { raw: receiptHashBytes(r) }, signature: r.signature as `0x${string}` });
+      const ok = recovered.toLowerCase() === r.signer.slice("eip191:".length).toLowerCase();
+      return { receiptId: r.receiptId, signed: true, valid: ok, ...(ok ? {} : { reason: "SIGNER_MISMATCH" }) };
+    } catch {
+      return { receiptId: r.receiptId, signed: true, valid: false, reason: "SIGNATURE_MALFORMED" };
+    }
+  }));
+}
+
+/** The 32 bytes a receipt signature signs: the sha256 behind `receiptHash`'s "sha256:<hex>". */
+export function receiptHashBytes(r: Receipt): `0x${string}` {
+  const h = receiptHash(r);
+  return `0x${h.replace(/^sha256:/, "")}`;
 }

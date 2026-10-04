@@ -15,7 +15,9 @@ import { BaseSettlementAdapter, BASE_ASSETS, settlementCommitment, type BaseTran
 import { TempoSettlementAdapter, TEMPO_TOKENS, tempoCommitment, type TempoTransport } from "@/lib/adapters/tempo";
 import { SolanaSettlementAdapter, solanaCommitment, type SolanaTransport } from "@/lib/adapters/solana";
 import { bundleFromJson, bundleToJson, verifyEvidenceBundle, type EvidenceBundle } from "@/lib/evm/evidence";
-import { linkReceipt, receiptHash, settlementReceipt, verifyReceiptChain } from "@/lib/kernel/receipts";
+import { linkAndSign, linkReceipt, receiptHash, settlementReceipt, verifyReceiptChain, verifyReceipts } from "@/lib/kernel/receipts";
+import { evmReceiptSigner } from "@/lib/settlement/receipt-signer";
+import { privateKeyToAccount } from "viem/accounts";
 import { InMemoryRepository } from "@/lib/store/provider";
 import { CapitalLedger } from "@/lib/store/ledger";
 
@@ -175,3 +177,44 @@ describe("receipts (PRD §17.3)", () => {
     expect(linkReceipt(settlementReceipt(confirmed("set_1"), "x", new Date()), null).previousReceiptHash).toBeUndefined();
   });
 });
+
+describe("receipt signatures (backlog #4)", () => {
+  const confirmed = (id: string): Settlement => base({ settlementId: id, receiptId: undefined, txHash: `0x${id.length.toString(16).padStart(64, "0")}` });
+  const key = privateKeyToAccount(`0x${"99".repeat(32)}`);
+  const other = privateKeyToAccount(`0x${"98".repeat(32)}`);
+
+  it("a signed receipt names its key, and its signature recovers to it", async () => {
+    const r = await linkAndSign(settlementReceipt(confirmed("set_s"), "base-sepolia", new Date(OBSERVED_AT)), null, evmReceiptSigner(key));
+    expect(r.signer).toBe(`eip191:${key.address}`);
+    expect(await verifyReceipts([r])).toEqual([{ receiptId: r.receiptId, signed: true, valid: true }]);
+  });
+
+  it("any edit to a signed receipt fails it", async () => {
+    const r = await linkAndSign(settlementReceipt(confirmed("set_s"), "base-sepolia", new Date(OBSERVED_AT)), null, evmReceiptSigner(key));
+    for (const tampered of [{ ...r, payloadHash: "sha256:forged" }, { ...r, result: "FAILURE" as const }, { ...r, chainEvidence: ["base-sepolia:tx:0xother"] }]) {
+      expect((await verifyReceipts([tampered]))[0]).toMatchObject({ signed: true, valid: false, reason: "SIGNER_MISMATCH" });
+    }
+  });
+
+  it("a signature by another key, under this key's name, fails", async () => {
+    const r = await linkAndSign(settlementReceipt(confirmed("set_s"), "base-sepolia", new Date(OBSERVED_AT)), null, evmReceiptSigner(other));
+    const relabelled = { ...r, signer: `eip191:${key.address}` };
+    expect((await verifyReceipts([relabelled]))[0].valid).toBe(false);
+  });
+
+  it("an unsigned receipt is reported as unsigned — never as valid", async () => {
+    const r = linkReceipt(settlementReceipt(confirmed("set_u"), "base-sepolia", new Date(OBSERVED_AT)), null);
+    expect(await verifyReceipts([r])).toEqual([{ receiptId: r.receiptId, signed: false, valid: false, reason: "UNSIGNED" }]);
+  });
+
+  it("signing does not change the chain: a mixed chain still links, and stripping a signature keeps the hash", async () => {
+    const repo = new InMemoryRepository(new CapitalLedger([], []));
+    const a = await repo.appendReceipt(settlementReceipt(confirmed("set_1"), "base-sepolia", new Date(OBSERVED_AT)));
+    const b = await repo.appendReceipt(settlementReceipt(confirmed("set_22"), "base-sepolia", new Date(OBSERVED_AT)), evmReceiptSigner(key));
+    expect(b.previousReceiptHash).toBe(receiptHash(a));
+    expect(verifyReceiptChain(await repo.listReceipts("run_1"))).toEqual({ ok: true });
+    const { signature: _s, ...stripped } = b;
+    expect(receiptHash(stripped as Receipt)).toBe(receiptHash(b));
+  });
+});
+
