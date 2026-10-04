@@ -1,6 +1,6 @@
 {
   "fromNodeId": "lead",
-  "highSeq": 76,
+  "highSeq": 83,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1548,6 +1548,155 @@
         "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
       ],
       "hash": "d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af"
+    },
+    {
+      "entryId": "ctx_061531dc6f1e856e",
+      "seq": 77,
+      "kind": "handoff",
+      "title": "Backlog after the sprint: all six unblocked items done (vault rail live, capital books, all rails through the route, signed receipts, stores, F54); F58 found and fixed",
+      "body": "feat/settlement-caller @ 8c14e8f, pushed. The reseed branch is merged up to date at abb31e9, with no history rewrite.\n\n1. B.4: Base and Tempo settle THROUGH MitraVault.sol (MITRA_*_SETTLEMENT_ACCOUNT=vault). The engine-signed permit's actionHash is the settlement commitment. Live: Base 0x0d875915…, Tempo 0x902c4743…, both CONFIRMED with evidence TESTNET_PASS. Mutation 10/10.\n2. Capital: settlement now moves vault books. reserved -> settling at begin; at confirm, settling and total fall, once (gated SETTLING->SETTLED, atomic on Postgres); x402 returns the unpaid remainder. /reservations/execute still only commits. Mutation 7/7.\n3. Solana through the agreement route, live: tx 3tR25Ybm…. Every rail has now settled an agreement through POST /api/v1/settlements live.\n4. Receipts are EIP-191 signed when MITRA_RECEIPT_SIGNER_KEY_FILE is set. The signature is over receiptHash, which excludes it, so the chain is unchanged. verifyReceipts checks them, and the receipts and evidence routes report per-receipt verdicts. Closes F53's open item.\n5. Stores:\n- Authorizations are listed; Postgres had been dropping recipientConstraint.\n- Agents: get_agent and find_agents are served over MCP; register_agent is withheld (F55).\n- Clearing epochs are stored.\n- F58: finalize_epoch used to finalize the client's own epoch object, forged transfers included, with no single-epoch rule. It now seals only a stored calculation, via finalizeEpochOnce. Request shape unchanged; your clearing tests pass.\n- Console: only the evidence and integrations pages remain fixtures.\n6. F54 fixed: userOperationHash equals the deployed EntryPoint v0.7's getUserOpHash (eth_call) and viem's. scripts/base-4337.mjs now refuses to run (exit 2) and points to the working transport; repair or delete is your call.\n\nSuites: TS 778 in memory; 825 on Postgres twice. Rust 106/106 on the reseed branch. dev-scripts flaked once on an RPC timeout and passed on rerun.\n\nSTILL YOURS: F55 caller identity (it decides whether accept/reject/fund/register_agent get served); the item 7 redeploy and the security contact.\n\nRemaining unbacked MCP tools: create_intent and get_intent. They need an Intent store and a decision on who an intent belongs to without caller identity.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F58",
+        "backlog",
+        "handoff",
+        "needs-lead",
+        "summary"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T09:56:55.361Z",
+      "parents": [
+        "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
+      ],
+      "hash": "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+    },
+    {
+      "entryId": "ctx_fd090da8eefc5a5d",
+      "seq": 78,
+      "kind": "handoff",
+      "title": "PRs #28 (sprint + backlog) and #29 (draft, reseed) are open into fix; both conflict with your overnight work and need your call on which MitraVault.sol is canonical",
+      "body": "#28: feat/settlement-caller -> fix/integrity-f40-f45. It contains #27, so merging it supersedes #27. #29 (DRAFT): feat/vault-reseed-security-txt -> fix. It must not merge before the program upgrade.\n\nBoth conflict with fix, which picked up 13 commits since we branched. DECISIONS FOR YOU:\n1. Two MitraVault.sol deployments.\n- fix: contracts/MitraVault.sol, Base 0x6a731a65…, Tempo 0x19b3c58d….\n- ours: contracts/src/MitraVault.sol, Base 0x78b82802…, Tempo 0xfadc63a6….\n- The deployments.json formats differ, and each side's code reads its own.\n- Yours keys mandates by holder alone (require mandates[holder].holder == 0). A stranger can squat an agent's only slot, and a revoked holder can never be re-granted. It does check the principal at spend, so there is no cross-principal drain.\n2. Failure numbering: fix has its own F52, and F45 twice. Ours run F52–F58 and need renumbering after yours.\n3. #29: you already embedded security.txt and upgraded devnet. #29's remaining value is the (principal, holder) reseed plus F57, which binds permits to their mandate; without F57 the reseed is unsafe.\n\nI did not resolve these conflicts, because the choices are yours. The details are in each PR body.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "conflict",
+        "handoff",
+        "mitravault",
+        "needs-lead",
+        "pr"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T10:38:56.986Z",
+      "parents": [
+        "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+      ],
+      "hash": "e928d6340cb08bb36ea9db73a31e2b7f0ffae8d26c18f5120b02a0363d3894e8"
+    },
+    {
+      "entryId": "ctx_cff395ebe61ad34e",
+      "seq": 79,
+      "kind": "handoff",
+      "title": "Purple backlog is rebased onto feat/mitra-vault-v2-reseed as feat/backlog-on-v2; EVM vault rails now settle through canonical v2",
+      "body": "DONE: feat/backlog-on-v2 = origin/feat/mitra-vault-v2-reseed (af90542) + backlog #1-#6, gitguardian.yaml, and 3 new commits. The MitraVaultTransport (B.4) is ported to contracts/MitraVault.sol v2. v2's SpendExecuted.actionHash is the permit's EIP-712 digest, not the commitment, so observe() decodes spendAuthorized calldata and binds the event by recomputing the digest. Limit is checked only pre-sign, which is now load-bearing. rails.ts picks the chain's non-__ deployments.json entry. Live, via /api/v1/settlements, TESTNET_PASS: Base 0xa607a6f9…2d71, Tempo 0x08160f4f…cf85. Suites: tsc clean; vitest 789; Postgres --no-file-parallelism 838 x2; forge 31/31; mutation 16/16. Our clearing finding renumbered F58->F60 (you use F58/F59). NEW F61 (open, for the lead): a v2 Mandate has no token, so limit/ceiling are raw units in whatever token the permit names. A leaked engine key with a USD-sized ceiling takes 5 BTC (contracts/test/MitraVaultTokenScope.t.sol reproduces it). Fix: add token to Mandate, or key [principal][holder][token], then invert that test. NEXT (pending decisions): MCP SSE transport; F55 caller identity auth model; MitraClearing.sol permissions; integration target branch; #29 Solana redeploy.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "B.4",
+        "F60",
+        "F61",
+        "handoff",
+        "v2",
+        "vault"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T17:55:35.511Z",
+      "parents": [
+        "d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af"
+      ],
+      "hash": "13b75a9945ff06a208cbd6f3c3b58b826e1ac5e39b6f8f2a4598a155655c292d"
+    },
+    {
+      "entryId": "ctx_2251f80eaa0cb751",
+      "seq": 80,
+      "kind": "decision",
+      "title": "MCP network transport serves legacy SSE and Streamable HTTP on one port, loopback by default, bearer token required off-loopback",
+      "body": "Starting Phase 5 transport on feat/backlog-on-v2 (integration target: feat/mitra-vault-v2-reseed, decided by human:purple 2026-10-04). Command: `npm run mcp -- --transport sse --port 3001`. Endpoints: GET /sse + POST /messages (the handoff's SSE; the SDK marks it deprecated) and /mcp (Streamable HTTP, what current clients speak). The server stays a thin HTTP client of the Mitra API, NOT the handoff's direct getStore()/kernel dispatch: the routes stay the only gate (FR-INT-002), and we rejected direct dispatch for that reason. Network exposure widens F55, so: bind 127.0.0.1 by default; refuse to bind a non-loopback host without MITRA_MCP_TOKEN (bearer token, compared in constant time); Host/Origin checks against DNS rebinding; one McpServer per session; a session cap. A token gates who can connect but is NOT caller identity: withheld tools stay withheld until F55 is resolved.",
+      "status": "active",
+      "scope": "mcp",
+      "tags": [
+        "F55",
+        "mcp",
+        "phase5",
+        "sse"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T18:01:13.816Z",
+      "parents": [
+        "13b75a9945ff06a208cbd6f3c3b58b826e1ac5e39b6f8f2a4598a155655c292d"
+      ],
+      "hash": "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
+    },
+    {
+      "entryId": "ctx_900d4fb8f7b16d7b",
+      "seq": 81,
+      "kind": "handoff",
+      "title": "MCP serves SSE and Streamable HTTP; PR #30 merges the backlog into feat/mitra-vault-v2-reseed and supersedes #28",
+      "body": "DONE: lib/mcp/http.ts plus `--transport sse` in scripts/mitra-mcp.ts (commit 511a849). Verified live against next start: the server bound to 0.0.0.0 with a token; SSE and Streamable clients each opened an agreement that read back OPEN; accept was refused. Mutation 14/15 killed (the 15th was removed as dead). PR #30 targets feat/mitra-vault-v2-reseed (integration target per human:purple) and fast-forwards from af90542. It contains all of #28. NEXT, pending decisions: (1) F55 auth model, either API keys or signed EIP-712/1271 requests; the MCP bearer token is NOT identity. (2) MitraClearing.sol access control for commitEpoch/recordSettlement, before Phase 7. (3) F61, which needs a v2 contract change and redeploy (lead). (4) #29 Solana reseed redeploy, or drop it. RISK: a plain parallel `DATABASE_URL=… npx vitest run` fails many files that share one DB; use --no-file-parallelism, as the ledger records.",
+      "status": "active",
+      "scope": "mcp",
+      "tags": [
+        "PR30",
+        "handoff",
+        "mcp",
+        "phase5"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T18:22:37.069Z",
+      "parents": [
+        "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
+      ],
+      "hash": "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
+    },
+    {
+      "entryId": "ctx_272e31889b140a71",
+      "seq": 82,
+      "kind": "handoff",
+      "title": "Lead's queue: merge #30 into v2-reseed, then F61 redeploy, #31 Solana upgrade, and decisions on F55 auth and MitraClearing permissions",
+      "body": "For the lead (full table in the PR #30 body):\n(1) Merge #30 into feat/mitra-vault-v2-reseed; it fast-forwards.\n(2) F61: add a token to the v2 Mandate (or key mandates by [principal][holder][token]), redeploy Base and Tempo, update deployments.json, and invert MitraVaultTokenScope.t.sol.\n(3) #31, the Solana reseed plus F57, is stacked on #30: after merge, cargo-build-sbf, `solana program upgrade` with the C4ZoTdNS… key, re-open mandates, SOLANA_LIVE re-proof.\n(4) F55: choose the caller-identity model, API keys or EIP-712/1271 signed requests.\n(5) MitraClearing.sol needs access control on commitEpoch/recordSettlement before we build Phase 7.\n(6) F-numbers: claim the next one in shared context first. Taken: lead F58/F59; ours F57/F60/F61.\n(7) Postgres CI needs --no-file-parallelism or per-worker schemas.\n(8) MCP dispatches via the API, not getStore(), on purpose.\nSuperseded PRs: #27 and #28 are contained in #30; #29 is replaced by #31; all can close after merge.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F55",
+        "F57",
+        "F61",
+        "PR30",
+        "PR31",
+        "lead",
+        "phase7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T18:59:25.399Z",
+      "parents": [
+        "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
+      ],
+      "hash": "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+    },
+    {
+      "entryId": "ctx_18c2ca81832f004e",
+      "seq": 83,
+      "kind": "handoff",
+      "title": "Lead Work Packages Complete: F61 Mandates, Solana Reseed Upgraded, MitraClearing Deployed",
+      "body": "Lead work packages completed and verified on-chain:\n1. Part 1 (F61 Token-Scoped Mandates): MitraVault.sol updated to key mandates by [principal][holder][token]. Deployed to Base Sepolia (0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b, blk 47687892) and Tempo Moderato (0x81798c6f4ff1257b53b0be512c979f2656269329, blk 38179538). 32/32 Foundry tests pass. Sagas re-verified live (100% verified via verify:saga-events).\n2. Part 2 (Solana Devnet Reseed Upgrade & PR #31): Upgraded program GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY on devnet with upgrade key C4ZoTdNS... (slot 507483795+). Merged PR #31 (feat/solana-reseed-on-v2) into feat/mitra-vault-v2-reseed. Live devnet tests (solana-transport: 41/41, solana-agreement-live: 1/1) pass green.\n3. Part 3 (MitraClearing Deployment): MitraClearing.sol deployed to Base Sepolia (0x2179bf055c62c57eeb4045957d57f7e460df76d9, blk 47688141) and Tempo Moderato (0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b, blk 38180738). Both verified operator() == deployer (0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D). 4/4 Foundry tests pass.\n\nHanding off to Purple:\n- F55: Implement caller identity (X-Mitra-Actor-Id) in HTTP API and MCP server to un-withhold fund, accept, reject, register_agent.\n- Phase 7 Live Epoch Runner: Implement scripts/run-live-clearing-epoch.mjs against the live deployed MitraClearing contracts.",
+      "status": "active",
+      "scope": "cross-chain",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-04T20:17:17.632Z",
+      "parents": [
+        "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+      ],
+      "hash": "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
     }
   ],
   "actors": [
@@ -1585,5 +1734,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af"
+  "tipHash": "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
 }
