@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 81,
+  "highSeq": 82,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1657,6 +1657,30 @@
         "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
       ],
       "hash": "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
+    },
+    {
+      "entryId": "ctx_272e31889b140a71",
+      "seq": 82,
+      "kind": "handoff",
+      "title": "Lead's queue: merge #30 into v2-reseed, then F61 redeploy, #31 Solana upgrade, and decisions on F55 auth and MitraClearing permissions",
+      "body": "For the lead (full table in the PR #30 body):\n(1) Merge #30 into feat/mitra-vault-v2-reseed; it fast-forwards.\n(2) F61: add a token to the v2 Mandate (or key mandates by [principal][holder][token]), redeploy Base and Tempo, update deployments.json, and invert MitraVaultTokenScope.t.sol.\n(3) #31, the Solana reseed plus F57, is stacked on #30: after merge, cargo-build-sbf, `solana program upgrade` with the C4ZoTdNS… key, re-open mandates, SOLANA_LIVE re-proof.\n(4) F55: choose the caller-identity model, API keys or EIP-712/1271 signed requests.\n(5) MitraClearing.sol needs access control on commitEpoch/recordSettlement before we build Phase 7.\n(6) F-numbers: claim the next one in shared context first. Taken: lead F58/F59; ours F57/F60/F61.\n(7) Postgres CI needs --no-file-parallelism or per-worker schemas.\n(8) MCP dispatches via the API, not getStore(), on purpose.\nSuperseded PRs: #27 and #28 are contained in #30; #29 is replaced by #31; all can close after merge.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F55",
+        "F57",
+        "F61",
+        "PR30",
+        "PR31",
+        "lead",
+        "phase7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T18:59:25.399Z",
+      "parents": [
+        "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
+      ],
+      "hash": "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
     }
   ],
   "actors": [
@@ -1694,5 +1718,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
+  "tipHash": "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
 }
