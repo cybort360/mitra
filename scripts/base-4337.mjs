@@ -34,6 +34,21 @@
  * That a counterfactual smart account is created, funded, and EXECUTED by the real
  * EntryPoint contract — the Base-native half of ADR-0011's delegation model.
  */
+
+// ── F54: this script cannot reach an EntryPoint, so it refuses to run ─────────
+// It calls EntryPoint v0.7 with the 11-field v0.6 `handleOps` tuple (v0.7 takes the
+// 9-field packed form) and passes raw creation bytecode as `initCode` (an EntryPoint
+// expects `factory ++ factoryCalldata`). Run as written it would spend gas on a
+// transaction that cannot decode. It is kept, not deleted, so its history and the
+// artifact-validation idea stay visible; whether to repair or remove it is the lead's
+// call. The working smart-account path is lib/adapters/base-4337-transport.ts
+// (live on Base Sepolia, PROOF_LEDGER), and lib/evm/erc4337.ts now computes the real
+// v0.7 hash. Set MITRA_RUN_BROKEN_4337_SCRIPT=1 only to study the failure.
+if (process.env.MITRA_RUN_BROKEN_4337_SCRIPT !== "1") {
+  console.error("scripts/base-4337.mjs is known-broken (forge/FAILURES.md F54) and spends nothing when refused.\n" +
+    "Use lib/adapters/base-4337-transport.ts (MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337) instead.");
+  process.exit(2);
+}
 import { readFileSync } from "node:fs";
 import {
   createPublicClient, createWalletClient, http,

@@ -2579,10 +2579,13 @@ the network) is a grading bug waiting for a caller; convert at the boundary, by 
 
 ## F54 — the repository's ERC-4337 code could not have reached any EntryPoint
 
-**Status:** worked around, not fixed — the live 4337 path (sprint item 3) does not use
-either artifact below; it uses viem's `toCoinbaseSmartAccount` and EntryPoint v0.6, and
-settled live on Base Sepolia (PROOF_LEDGER). Both artifacts are left as they are and
-marked here, because nothing in production imports them.
+**Status:** FIXED 2026-10-04 (backlog #6). `userOperationHash(op, { entryPoint, chainId })`
+now computes EntryPoint v0.7's `getUserOpHash` (packed gas fields, signature excluded,
+EntryPoint and chain id bound); it equals viem's `getUserOperationHash` and — live, by
+`eth_call` — the deployed EntryPoint v0.7's own `getUserOpHash` on Base Sepolia
+(`BASE_LIVE=1 npx vitest run tests/evm-standards-suite.test.ts -t ERC-4337`). The script
+now refuses to run (exit 2, spends nothing) and points at the working transport; repairing
+or deleting it is left to the lead. Original finding below.
 **Found:** 2026-10-03, while wiring `sendUserOp` through the Base transport.
 
 1. **`lib/evm/erc4337.ts` `userOperationHash` is not the hash an EntryPoint checks.**
