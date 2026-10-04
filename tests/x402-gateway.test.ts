@@ -116,6 +116,14 @@ describe("x402 gateway — pays only what the reservation approved", () => {
     expect(s.receiptId).toBe(`rcpt_${s.settlementId}`);
     expect(verifyReceiptChain(await repo.listReceipts("run_x402"))).toEqual({ ok: true });
     expect((await repo.getReservation(res.reservationId))!.status).toBe("SETTLED");
+    // Backlog #2: 0.05 was reserved, 0.01 paid — relative to before the reservation,
+    // total and available fall by 0.01, and nothing stays reserved or settling.
+    const v = (await repo.getVault("vault_base_ops"))!;
+    const b = vault();
+    expect(v.total).toBeCloseTo(b.total - 0.01, 6);
+    expect(v.available).toBeCloseTo(b.available - 0.01, 6);
+    expect(v.reserved).toBeCloseTo(b.reserved, 6);
+    expect(v.settling).toBeCloseTo(b.settling, 6);
   });
 
   const refusals: Array<[string, Parameters<typeof paidResource>[0], string, { amount?: number }?]> = [

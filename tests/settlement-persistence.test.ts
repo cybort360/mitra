@@ -148,6 +148,20 @@ describeDb("settlement persistence on postgres (sprint item 1)", () => {
     });
   });
 
+  it("five concurrent completions of one settlement move the capital once (backlog #2)", async () => {
+    const r = await repo.reserveCapital({
+      vaultId: "v_base", amount: 15, reservationId: "res_cap", runId: "r", intentId: "i", mandateId: "m_pay",
+      mandateVersion: 1, asset: "USDC", chain: "base", actionDigest: "sha256:x", expiresAt: "2026-10-01T13:00:00.000Z",
+    });
+    expect(r.ok).toBe(true);
+    expect(await repo.beginSettlement("res_cap")).not.toBeNull();
+    expect(await repo.beginSettlement("res_cap"), "begins once").toBeNull();
+    const wins = await Promise.all(Array.from({ length: 5 }, () => repo.completeSettlement("res_cap", 12)));
+    expect(wins.filter(Boolean)).toHaveLength(1);
+    const v = (await repo.getVault("v_base"))!;
+    expect([v.total, v.available, v.reserved, v.settling]).toEqual([988, 988, 0, 0]);
+  });
+
   it("a reservation's agreementId round-trips", async () => {
     const r = await repo.reserveCapital({
       vaultId: "v_base", amount: 15, reservationId: "res_rt", runId: "r", intentId: "i", mandateId: "m_pay",

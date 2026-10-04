@@ -25,10 +25,9 @@
  *
  * ## Not done here (recorded, not hidden)
  *
- * Vault capital positions are not moved: the reservation goes
- * `RESERVED → COMMITTED → SETTLING → SETTLED`, but `vault.reserved` is not drawn
- * down, exactly as `/reservations/execute` does not draw it down today. A
- * SettlementReceipt is written on confirmation (`lib/kernel/receipts.ts`); it is
+ * Vault capital moves with the reservation (backlog #2): `reserved → settling` when
+ * settlement begins, and on confirmation the reserved amount leaves `settling` and
+ * the paid amount leaves `total` (`settleCapital`). A SettlementReceipt is written on confirmation (`lib/kernel/receipts.ts`); it is
  * hash-chained per run but not yet signed.
  */
 
@@ -122,14 +121,16 @@ export async function settleAgreement(
   if (!await repo.consumeNonce(vault.vaultId, reservation.nonce, reservation.reservationId)) {
     return stopBeforeBroadcast("NONCE_ALREADY_CONSUMED");
   }
+  // The reservation becomes SETTLING and its capital moves reserved → settling, in
+  // one store operation. Null means another path moved it first; nothing has been
+  // broadcast, so this is a clean stop rather than an unknown outcome.
+  let began: Awaited<ReturnType<typeof repo.beginSettlement>>;
   try {
-    await repo.setReservationStatus(reservation.reservationId, "COMMITTED");
-    await repo.setReservationStatus(reservation.reservationId, "SETTLING");
+    began = await repo.beginSettlement(reservation.reservationId);
   } catch (e) {
-    // The reservation machine refused (another path moved it first). Nothing has
-    // been broadcast, so this is a clean stop rather than an unknown outcome.
     return stopBeforeBroadcast(`RESERVATION_NOT_EXECUTABLE: ${message(e)}`);
   }
+  if (!began) return stopBeforeBroadcast("RESERVATION_NOT_EXECUTABLE");
 
   // ── 4. broadcast ───────────────────────────────────────────────────────────
   let txHash: string;
@@ -192,6 +193,12 @@ async function finish(
     return { ok: true, httpStatus: 202, settlement: submitted, agreement };
   }
 
+  // Capital first, and exactly once: SETTLING → SETTLED is the gate, so a second,
+  // racing confirmation finds nothing to apply. The record updates below are
+  // idempotent and run either way, so a crash between the two is repaired by the
+  // next confirm rather than leaving a settled vault with a SUBMITTED record.
+  if (submitted.reservationId) await repo.completeSettlement(submitted.reservationId, submitted.amount);
+
   const confirmedRecord: Settlement = {
     ...submitted,
     status: "CONFIRMED",
@@ -205,7 +212,6 @@ async function finish(
   const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now));
   const settlement: Settlement = { ...confirmedRecord, receiptId: receipt.receiptId };
   await repo.updateSettlement(settlement);
-  if (settlement.reservationId) await repo.setReservationStatus(settlement.reservationId, "SETTLED");
   const settled: Agreement = { ...agreement, settledRef: settlement.settlementId, version: agreement.version + 1 };
   await repo.updateAgreement(settled);
   await event(repo, now, settled, settlement, "SUCCESS", "Agreement settled",

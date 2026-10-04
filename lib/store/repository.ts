@@ -194,6 +194,18 @@ export interface EconomicRepository {
   setReservationStatus(reservationId: string, status: Reservation["status"]): Promise<Reservation | null>;
 
   /**
+   * Settlement capital (backlog #2). Atomic in each store.
+   *
+   * `beginSettlement`: a RESERVED or COMMITTED reservation becomes SETTLING and its
+   * capital moves `reserved → settling`; null if it is in any other state.
+   * `completeSettlement`: SETTLING → SETTLED and `settleCapital` (settling drops by
+   * the reservation, total by what was paid, the remainder returns to available);
+   * false if it was not SETTLING, so a second confirmation cannot apply it twice.
+   */
+  beginSettlement(reservationId: string): Promise<Reservation | null>;
+  completeSettlement(reservationId: string, paidAmount: number): Promise<boolean>;
+
+  /**
    * Insert or replace a whole reservation row.
    *
    * Exists because a reservation is created from two sources at once: the store
