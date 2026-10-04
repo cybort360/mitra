@@ -261,7 +261,7 @@ export interface EconomicRepository {
   /**
    * Clearing epochs (backlog #5). `saveEpoch` upserts; `insertEpoch` refuses an id
    * that exists (an epoch is opened once). The clearing route works on the STORED
-   * epoch, never a client-supplied copy, wherever the server opened it (F58).
+   * epoch, never a client-supplied copy, wherever the server opened it (F60).
    */
   getEpoch(epochId: string): Promise<ClearingEpoch | null>;
   listEpochs(): Promise<ClearingEpoch[]>;

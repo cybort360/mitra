@@ -171,7 +171,7 @@ export async function POST(req: Request) {
 
   if (body.action === "calculate_epoch") {
     // The STORED epoch when this server opened it; a client-supplied one is only
-    // computed over, never stored (F58).
+    // computed over, never stored (F60).
     const stored = await repo.getEpoch((body.epoch as ClearingEpoch)?.epochId ?? "");
     const epoch = stored ?? (body.epoch as ClearingEpoch);
     const inputObligations = (body.obligations as Obligation[] | undefined) ?? storeObligations;
@@ -217,7 +217,7 @@ export async function POST(req: Request) {
   }
 
   if (body.action === "finalize_epoch") {
-    // F58: this used to finalize the epoch object the CLIENT sent, after checking only
+    // F60: this used to finalize the epoch object the CLIENT sent, after checking only
     // its status — so forged net positions or transfers could be "finalized". It now
     // seals only an epoch this server opened and calculated, from its STORED result,
     // and applies the single-epoch rule (an obligation in at most one finalized

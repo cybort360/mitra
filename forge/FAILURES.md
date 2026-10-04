@@ -2649,8 +2649,11 @@ That is also why the Console could only show fixtures. Same class as F52: a writ
 that reports success and persists nothing. Now an append-only log with positions
 (`listEventsSince`), shared by the SSE stream.
 
-## F58 — the clearing route finalized whatever epoch the client sent
+## F60 — the clearing route finalized whatever epoch the client sent
 
+**Numbering:** recorded as F58 in commit `d8d869b` on `feat/settlement-caller`; renumbered
+F60 on `feat/backlog-on-v2`, because the lead's line already uses F58 (Tempo token
+addresses) and F59 (truncated transaction logging) for other findings.
 **Status:** fixed on `feat/settlement-caller` (backlog #5). Reproduced as a test first
 (`tests/stores-backlog5.test.ts`, "THE ATTACK").
 **Found:** 2026-10-04, while giving clearing epochs a store.
@@ -2683,3 +2686,30 @@ unchanged; the lead's clearing tests pass. Mutation 4/4.
 | ~~No on-chain program~~ | ~~Capital is a database row, not an enforced account~~ | **CLOSED.** `mitra-vault` is live on devnet and all six PRD §52 clauses are verified. The remaining gap is that the *kernel* still holds capital locally in Postgres — the program proves the boundary, it does not yet hold production capital. See the phase audit |
 | Devnet airdrop reports errors while succeeding | `solana airdrop` printed rate-limit failures and still credited 5 SOL | Never treat CLI output as the claim. `phase2-readiness.mjs` reads `getBalance` from the node, so a false "failed" cannot be mistaken for unfunded, or a false success for funded. |
 | ~~Ledger is process-local on the kernel path~~ **RESOLVED** | Routes now go through `getStore()`; `InMemoryRepository` / `PostgresRepository` behind one interface | `tests/persistence.test.ts` — "routes served by postgres", incl. nonce surviving a simulated restart |
+
+## F61 — a v2 mandate bounds raw units, not value: it names no token
+
+**Status:** OPEN — `evidence: TESTED, blocker: BLOCKED_INTERNAL` (the canonical
+`contracts/MitraVault.sol` `Mandate` struct has no token; closing it changes the
+deployed contract and needs the lead's decision and a redeploy).
+**Found:** 2026-10-04, porting the vault payment path (B.4) to v2 on `feat/backlog-on-v2`.
+**Reproduced:** `cd contracts && forge test --match-contract MitraVaultTokenScope` —
+`test_F61_a_usd_sized_ceiling_lets_a_leaked_engine_key_take_5_btc` passes today.
+
+A v2 mandate is keyed `[principal][holder]` and carries `limit` and `ceiling` as bare
+`uint64` raw units. `spendAuthorized` debits `vaults[principal][permit.token]` — whichever
+token the permit names. So a principal who opens a mandate meaning "100 USD per spend, 500
+USD in total" (`100e6`, `500e6`) has also authorised `500e6` raw units of every other token
+in their vault: with an 8-decimal BTC token deposited, 5 BTC. The test does exactly that
+with an engine-signed permit and a stranger as relayer and recipient.
+
+The engine is trusted to choose the token, so this is not reachable through Mitra's own
+engine: `MitraVaultTransport` signs only for tokens in its rail's registry
+(`UNREGISTERED_TOKEN_FOR_VAULT_RAIL`, tested offline). The exposure is a **leaked engine
+key** — precisely the case an on-chain ceiling exists to bound, and here it does not bound
+value. The caller variant (`contracts/src/MitraVault.sol`) bound the mandate to one token
+and checked `permit.token == m.token`.
+
+Options for the lead: add `address token` to `Mandate` (set at `openMandate`, checked in
+`spendAuthorized`), or key mandates `[principal][holder][token]`. Either way, invert the
+reproduction test to expect a revert — do not delete it.

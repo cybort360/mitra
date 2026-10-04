@@ -284,7 +284,7 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE mitra.authorizations ADD COLUMN IF NOT EXISTS recipient_constraint TEXT;
 
   -- Clearing epochs (backlog #5). The route finalizes the STORED epoch, never a
-  -- client-supplied copy (F58).
+  -- client-supplied copy (F60).
   CREATE TABLE IF NOT EXISTS mitra.clearing_epochs (
     epoch_id   TEXT PRIMARY KEY,
     status     TEXT NOT NULL,

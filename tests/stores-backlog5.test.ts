@@ -1,6 +1,6 @@
 /**
  * Backlog #5: the stores that replaced fixtures — authorizations, agents, clearing
- * epochs — and F58, the clearing route finalizing a client-supplied epoch.
+ * epochs — and F60, the clearing route finalizing a client-supplied epoch.
  * Runs against whichever backend `prepareStore` selects (Postgres with DATABASE_URL).
  */
 import { beforeEach, describe, expect, it } from "vitest";
@@ -37,7 +37,7 @@ describe("agents are read from the store", () => {
   });
 });
 
-describe("clearing epochs are stored, and only a stored calculation is finalized (F58)", () => {
+describe("clearing epochs are stored, and only a stored calculation is finalized (F60)", () => {
   const ob = (id: string, d: string, c: string, amount: number) => ({ obligationId: id, debtor: d, creditor: c, amount: { asset: "USDC", amount }, status: "ACCEPTED" });
   const obligations = [ob("o1", "a", "b", 10), ob("o2", "b", "a", 4), ob("o3", "b", "c", 3)];
 
