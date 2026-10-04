@@ -13,9 +13,6 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 solana-program = { version = "2.3", features = ["borsh"] }
-# Embeds the program's security contact and source in the ELF (`.security.txt`
-# section), which explorers display (sprint item 7; the lead's package A).
-solana-security-txt = "1.1"
 
 # Embeds a `security.txt` section in the ELF so block explorers (SolanaFM,
 # OtterSec, Solana Explorer) render a disclosure contact and policy link without the

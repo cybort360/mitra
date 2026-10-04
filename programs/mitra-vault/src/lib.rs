@@ -59,21 +59,6 @@ use solana_program::system_instruction;
 
 solana_program::entrypoint!(process);
 
-// security.txt (sprint item 7; values from the lead's package A,
-// docs/HANDOFF_SOLANA_VERIFICATION_AND_EVM_VAULTS.md). Unconditional, like the
-// entrypoint above: this crate is a program, not a library other programs link.
-// The contact address and project URL must be confirmed live by the lead before
-// the redeploy — a published security contact nobody reads sends reports nowhere.
-solana_security_txt::security_txt! {
-    name: "mitra-vault",
-    project_url: "https://mitra.network",
-    contacts: "email:security@mitra.network",
-    policy: "https://github.com/cybort360/mitra/blob/main/docs/SECURITY.md",
-    preferred_languages: "en",
-    source_code: "https://github.com/cybort360/mitra",
-    auditors: "Pending Independent Audit"
-}
-
 /// Dispatches on Anchor's instruction discriminator.
 ///
 /// The `data.len() < 8` guard is Anchor's own behaviour: it computes

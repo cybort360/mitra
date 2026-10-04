@@ -76,7 +76,7 @@ export const vaultPda = (principal: PublicKey, programId = VAULT_PROGRAM_ID) =>
 
 /**
  * `[b"mandate", principal, holder]` — reseeded in sprint item 7 (was `[b"mandate", holder]`).
- * Matches the program on `feat/vault-reseed-security-txt`; the program deployed
+ * Matches the program on `feat/solana-reseed-on-v2`; the program deployed
  * before that redeploy still uses the old seed.
  */
 export const mandatePda = (principal: PublicKey, holder: PublicKey, programId = VAULT_PROGRAM_ID) =>

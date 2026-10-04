@@ -2651,7 +2651,7 @@ that reports success and persists nothing. Now an append-only log with positions
 
 ## F57 — the approved mandate reseed, shipped alone, would have re-opened F51 across principals
 
-**Status:** fixed before deployment, on `feat/vault-reseed-security-txt` (sprint item 7). Not
+**Status:** fixed before deployment, on `feat/vault-reseed-security-txt` (sprint item 7), replayed onto the v2 line as `feat/solana-reseed-on-v2` (the lead's security.txt kept, ours dropped). Not
 deployed: the SBF build and program upgrade are the lead's (upgrade authority `C4ZoTdNS…`).
 **Found:** 2026-10-04, while implementing the reseed the lead approved in seq 55.
 

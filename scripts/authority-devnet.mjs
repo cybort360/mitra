@@ -102,7 +102,7 @@ const findPda = (seeds) => {
 };
 
 // Reseeded (sprint item 7): [b"mandate", principal, holder]. Matches the program on
-// feat/vault-reseed-security-txt — run this harness against the program only AFTER
+// feat/solana-reseed-on-v2 — run this harness against the program only AFTER
 // that version is deployed; against the earlier deployment these addresses are wrong.
 const mandate = findPda([Buffer.from("mandate"), authority.publicKey.toBuffer(), Buffer.from(agent.toBytes())]);
 const vault = findPda([Buffer.from("vault"), authority.publicKey.toBuffer()]);
