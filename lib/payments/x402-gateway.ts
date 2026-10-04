@@ -31,7 +31,7 @@ import { ExactEvmScheme } from "@x402/evm/exact/client";
 import type { Settlement } from "@/lib/domain/types";
 import type { EconomicRepository } from "@/lib/store/repository";
 import { planX402Payment, X402_NETWORK, x402SettlementIdFor, type X402Plan } from "@/lib/kernel/x402";
-import { settlementReceipt } from "@/lib/kernel/receipts";
+import { settlementReceipt, type ReceiptSigner } from "@/lib/kernel/receipts";
 
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
@@ -67,6 +67,8 @@ export interface X402PayInput {
   fetchImpl?: typeof fetch;
   /** Recorded on the receipt's chain evidence. */
   network?: string;
+  /** Signs the SettlementReceipt (backlog #4); absent, the receipt is unsigned. */
+  receiptSigner?: ReceiptSigner;
 }
 
 export interface X402PayResult {
@@ -176,7 +178,7 @@ export async function payX402(input: X402PayInput): Promise<X402PayResult> {
   await repo.completeSettlement(reservation.reservationId, p.amount);
   const now = input.now();
   const confirmed: Settlement = { ...s, status: "CONFIRMED", confirmedAt: now.toISOString(), evidenceLevel: "TESTNET_PASS" };
-  const receipt = await repo.appendReceipt(settlementReceipt(confirmed, input.network ?? "base-sepolia", now));
+  const receipt = await repo.appendReceipt(settlementReceipt(confirmed, input.network ?? "base-sepolia", now), input.receiptSigner);
   const final: Settlement = { ...confirmed, receiptId: receipt.receiptId };
   await repo.updateSettlement(final);
   return { response, refusal: null, settlement: final };

@@ -34,7 +34,7 @@
 import type { Agreement, Settlement } from "@/lib/domain/types";
 import type { EconomicRepository } from "@/lib/store/repository";
 import { planAgreementSettlement } from "@/lib/kernel/settlement";
-import { settlementReceipt } from "@/lib/kernel/receipts";
+import { settlementReceipt, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type { Rails, SettlementRail } from "@/lib/settlement/rails";
 
 export type SettleOutcome =
@@ -56,7 +56,7 @@ function canPersist(repo: EconomicRepository): repo is SettlementStore {
 export async function settleAgreement(
   repo: EconomicRepository,
   rails: Rails,
-  input: { agreementId: string; reservationId: string; now: Date },
+  input: { agreementId: string; reservationId: string; now: Date; receiptSigner?: ReceiptSigner },
 ): Promise<SettleOutcome> {
   // A store that cannot write the agreement back would pay and then forget it
   // paid. Refuse up front rather than discover it after the transfer.
@@ -149,7 +149,7 @@ export async function settleAgreement(
   await repo.updateSettlement(settlement);
 
   // ── 5. verify ──────────────────────────────────────────────────────────────
-  return finish(repo, rail, agreement, settlement, input.now);
+  return finish(repo, rail, agreement, settlement, input.now, input.receiptSigner);
 }
 
 /**
@@ -159,7 +159,7 @@ export async function settleAgreement(
 export async function confirmSettlement(
   repo: EconomicRepository,
   rails: Rails,
-  input: { settlementId: string; now: Date },
+  input: { settlementId: string; now: Date; receiptSigner?: ReceiptSigner },
 ): Promise<SettleOutcome> {
   if (!canPersist(repo)) return refuse(501, "STORE_CANNOT_PERSIST_SETTLEMENT");
   const settlement = await repo.getSettlement(input.settlementId);
@@ -171,7 +171,7 @@ export async function confirmSettlement(
   if (settlement.status !== "SUBMITTED" || !settlement.txHash) return refuse(409, `SETTLEMENT_${settlement.status}`, settlement);
   const rail = rails[settlement.chain];
   if (!rail) return refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED");
-  return finish(repo, rail, agreement, settlement, input.now);
+  return finish(repo, rail, agreement, settlement, input.now, input.receiptSigner);
 }
 
 async function finish(
@@ -180,6 +180,7 @@ async function finish(
   agreement: Agreement,
   submitted: Settlement,
   now: Date,
+  receiptSigner?: ReceiptSigner,
 ): Promise<SettleOutcome> {
   let confirmed = false;
   try {
@@ -209,7 +210,7 @@ async function finish(
   // points at a receipt that does not exist. A crash in between leaves a receipt
   // for a transfer the chain confirmed — true, and re-used on the next confirm,
   // because appendReceipt returns an existing receipt id unchanged.
-  const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now));
+  const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now), receiptSigner);
   const settlement: Settlement = { ...confirmedRecord, receiptId: receipt.receiptId };
   await repo.updateSettlement(settlement);
   const settled: Agreement = { ...agreement, settledRef: settlement.settlementId, version: agreement.version + 1 };

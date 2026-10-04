@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getStore } from "@/lib/store/provider";
 import { getRails } from "@/lib/settlement/rails";
 import { bundleToJson, verifyEvidenceBundle } from "@/lib/evm/evidence";
-import { verifyReceiptChain } from "@/lib/kernel/receipts";
+import { verifyReceiptChain, verifyReceipts } from "@/lib/kernel/receipts";
 
 /**
  * Settlement evidence (PRD §21.4, sprint item 2).
@@ -45,7 +45,7 @@ export async function GET(req: Request) {
       bundle: bundleToJson(bundle),
       verdict: verifyEvidenceBundle(bundle),
       receipt: receipts.find((r) => r.receiptId === bundle.receiptId) ?? null,
-      receiptChain: { receipts, verdict: verifyReceiptChain(receipts) },
+      receiptChain: { receipts, verdict: verifyReceiptChain(receipts), signatures: await verifyReceipts(receipts) },
     },
     backend,
   });

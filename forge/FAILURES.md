@@ -2568,9 +2568,11 @@ testnet settlement as public-network evidence. Bundles now take their `chain` fr
 `networkName(chain, chainId)` (`"base-sepolia"`), and a mutation reverting to the raw
 chain is killed.
 
-**Still open — receipts are unsigned.** §17.4 lists `signer`; these receipts carry
-`signer: "unsigned:mitra-settlement-service"` so the field cannot be read as a
-signature that does not exist. Signing them is open work.
+**~~Still open — receipts are unsigned.~~ CLOSED 2026-10-04 (backlog #4).** With
+`MITRA_RECEIPT_SIGNER_KEY_FILE` set, each receipt carries an EIP-191 signature over its
+`receiptHash` and `signer: "eip191:<address>"`; `verifyReceipts` recovers it, and the
+receipts and evidence routes report a per-receipt verdict. Without a key, `signer` stays
+`"unsigned:mitra-settlement-service"`.
 
 **RULE ADDED:** (15) a field reused across vocabularies (`"base"` the rail, `"base"`
 the network) is a grading bug waiting for a caller; convert at the boundary, by name.

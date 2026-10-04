@@ -12,7 +12,9 @@
  * to have sent NOTHING, which is the half of the property a happy-path test cannot
  * see.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createPublicClient, createWalletClient, erc20Abi, http, type PublicClient } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
@@ -227,6 +229,25 @@ describe("settlement evidence through the route (sprint item 2)", () => {
     expect(body.data.receiptChain.verdict).toEqual({ ok: true });
     // A third party re-verifies from the JSON alone.
     expect(verifyEvidenceBundle(bundleFromJson(body.data.bundle))).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
+  });
+
+  it("with MITRA_RECEIPT_SIGNER_KEY_FILE set, the settlement's receipt is signed and verifies (backlog #4)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mitra-rcpt-"));
+    const keyFile = join(dir, "receipt.key");
+    writeFileSync(keyFile, "aa".repeat(32), { mode: 0o600 });
+    const saved = process.env.MITRA_RECEIPT_SIGNER_KEY_FILE;
+    process.env.MITRA_RECEIPT_SIGNER_KEY_FILE = keyFile;
+    try {
+      __setRailsForTests(baseRail(recorder().transport));
+      await repo.saveAgreement(accepted("ag_signed"));
+      const { body: r } = await reserveFor("ag_signed");
+      expect((await settle("ag_signed", r.data.reservationId)).status).toBe(200);
+      const body = await (await getEvidence(settlementIdFor("ag_signed"))).json();
+      expect(body.data.receipt.signer).toBe(`eip191:${privateKeyToAccount(`0x${"aa".repeat(32)}`).address}`);
+      expect(body.data.receiptChain.signatures).toEqual([{ receiptId: `rcpt_${settlementIdFor("ag_signed")}`, signed: true, valid: true }]);
+    } finally {
+      if (saved === undefined) delete process.env.MITRA_RECEIPT_SIGNER_KEY_FILE; else process.env.MITRA_RECEIPT_SIGNER_KEY_FILE = saved;
+    }
   });
 
   it("a submitted-but-unconfirmed settlement has no evidence yet (404), and no receipt", async () => {

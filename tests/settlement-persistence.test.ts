@@ -139,6 +139,15 @@ describeDb("settlement persistence on postgres (sprint item 1)", () => {
       expect(verifyReceiptChain(chain)).toEqual({ ok: true });
     });
 
+    it("a signed receipt survives the JSONB round trip and still verifies (backlog #4)", async () => {
+      const { evmReceiptSigner } = await import("@/lib/settlement/receipt-signer");
+      const { privateKeyToAccount } = await import("viem/accounts");
+      const { verifyReceipts } = await import("@/lib/kernel/receipts");
+      await repo.appendReceipt(draft("set_signed"), evmReceiptSigner(privateKeyToAccount(`0x${"99".repeat(32)}`)));
+      const [stored] = await repo.listReceipts("run_r");
+      expect((await verifyReceipts([stored]))[0]).toMatchObject({ signed: true, valid: true });
+    });
+
     it("concurrent appends of the same receipt id store it once", async () => {
       const results = await Promise.all(Array.from({ length: 5 }, () => repo.appendReceipt(draft("set_same"))));
       // Compared by hash: the winner returns its own object, the others the stored
