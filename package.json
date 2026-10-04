@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "mcp": "tsx scripts/mitra-mcp.ts"
+    "mcp": "tsx scripts/mitra-mcp.ts",
+    "contracts:setup": "cd contracts && forge install foundry-rs/forge-std --no-git",
+    "contracts:test": "cd contracts && forge test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.31.0",
@@ -25,6 +27,7 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@openzeppelin/contracts": "5.4.0",
     "@solana/web3.js": "^1.99.0",
     "@types/node": "^22.18.0",
     "@types/pg": "^8.23.1",

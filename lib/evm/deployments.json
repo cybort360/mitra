@@ -1,0 +1,22 @@
+{
+  "42431": {
+    "network": "tempo-moderato",
+    "contract": "MitraVault",
+    "address": "0xfadc63a689a7ce2e0af4e772f3216994643c8d24",
+    "txHash": "0x7fc16dd09689dce3ef743724be4984fc2dfdc7c778302f8c5366e420b78058e6",
+    "block": 38060186,
+    "deployer": "0x7823d6bEA51cC21C5d8588C7ff72E33130848116",
+    "deployedAt": "2026-10-04T00:06:49.108Z",
+    "runtimeCodeMatchesArtifact": true
+  },
+  "84532": {
+    "network": "base-sepolia",
+    "contract": "MitraVault",
+    "address": "0x78b82802ad2da2dc136a5c03eabd8c4fefa265cf",
+    "txHash": "0x6c2c28da13b00e0a7a5e85d898cb67bc6a420327ac143a79a6466597de3463c4",
+    "block": 47652046,
+    "deployer": "0x7823d6bEA51cC21C5d8588C7ff72E33130848116",
+    "deployedAt": "2026-10-04T00:06:40.220Z",
+    "runtimeCodeMatchesArtifact": true
+  }
+}
