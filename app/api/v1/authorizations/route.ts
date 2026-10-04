@@ -29,6 +29,14 @@ const proposalSchema = z.object({
   now: z.string().datetime().optional(),
 });
 
+/** Recorded authorization decisions, newest first; `?runId=` for one run (backlog #5). */
+export async function GET(req: Request) {
+  const runId = new URL(req.url).searchParams.get("runId") ?? undefined;
+  const { repo, backend } = await getStore();
+  const data = await repo.listAuthorizations(runId);
+  return NextResponse.json({ data, count: data.length, backend });
+}
+
 export async function POST(req: Request) {
   const parsed = proposalSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

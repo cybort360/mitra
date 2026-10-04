@@ -2525,6 +2525,30 @@ That is also why the Console could only show fixtures. Same class as F52: a writ
 that reports success and persists nothing. Now an append-only log with positions
 (`listEventsSince`), shared by the SSE stream.
 
+## F58 — the clearing route finalized whatever epoch the client sent
+
+**Status:** fixed on `feat/settlement-caller` (backlog #5). Reproduced as a test first
+(`tests/stores-backlog5.test.ts`, "THE ATTACK").
+**Found:** 2026-10-04, while giving clearing epochs a store.
+
+`POST /api/v1/clearing` with `action: "finalize_epoch"` took `epoch: z.any()` from the
+request and transitioned it to `FINALIZED` after checking only `epoch.status ===
+"CHALLENGE"`. Net positions, residual transfers and obligation ids were all the client's
+— a forged settlement vector came back "finalized". It also called neither
+`finalizeEpoch` (no `resultHash`) nor `finalizeEpochOnce`, so SECURITY.md's "an obligation
+enters at most one finalized epoch" was unenforced on the route even though the kernel
+implements it. Harmless only while nothing persisted epochs.
+
+**Fix:** epochs are stored (`mitra.clearing_epochs`; in-memory map; same seed on both).
+`open_epoch` inserts once (`EPOCH_EXISTS`); `calculate_epoch` and `challenge` work on the
+stored epoch when the server opened it (`persisted: true`); `finalize_epoch` requires a
+stored epoch (`EPOCH_NOT_FOUND`), seals its STORED calculation through
+`finalizeEpochOnce` against the stored finalized epochs, and saves it. Request shape
+unchanged; the lead's clearing tests pass. Mutation 4/4.
+
+**Also found in backlog #5:** Postgres dropped `Authorization.recipientConstraint` on write
+(no column) — added.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

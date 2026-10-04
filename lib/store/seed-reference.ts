@@ -22,6 +22,7 @@
  */
 import type { Pool } from "pg";
 import {
+  agents as seedAgents, clearingEpochs as seedEpochs,
   agreements, deliverables, mandates, obligations, reservations, runs, settlements,
   spaces, vaults,
 } from "@/lib/store/seed";
@@ -30,6 +31,8 @@ export interface SeedCounts {
   vaults: number; mandates: number; reservations: number;
   spaces: number; agreements: number;
   obligations: number; settlements: number; runs: number; deliverables: number;
+  agents: number;
+  epochs: number;
 }
 
 export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
@@ -158,6 +161,22 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
     );
   }
 
+  for (const e of seedEpochs) {
+    await pool.query(
+      `INSERT INTO mitra.clearing_epochs (epoch_id, status, document) VALUES ($1,$2,$3::jsonb)
+       ON CONFLICT (epoch_id) DO UPDATE SET status=EXCLUDED.status, document=EXCLUDED.document`,
+      [e.epochId, e.status, JSON.stringify(e)],
+    );
+  }
+
+  for (const a of seedAgents) {
+    await pool.query(
+      `INSERT INTO mitra.agents (agent_id, status, document) VALUES ($1,$2,$3::jsonb)
+       ON CONFLICT (agent_id) DO UPDATE SET status=EXCLUDED.status, document=EXCLUDED.document`,
+      [a.agentId, a.status, JSON.stringify(a)],
+    );
+  }
+
   // **Counts are WORLD SIZE, not rows inserted by this call.**
   //
   // The first version returned `rowCount`, so a second call reported 0 for
@@ -180,5 +199,7 @@ export async function seedReferenceData(pool: Pool): Promise<SeedCounts> {
     settlements: await count("settlements", "settlement_id"),
     runs: await count("runs", "run_id"),
     deliverables: await count("deliverables", "deliverable_id"),
+    agents: await count("agents", "agent_id"),
+    epochs: await count("clearing_epochs", "epoch_id"),
   };
 }

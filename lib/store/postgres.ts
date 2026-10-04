@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type {
+  Agent, ClearingEpoch,
   Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
@@ -505,12 +506,28 @@ export class PostgresRepository implements EconomicRepository {
       `INSERT INTO mitra.authorizations
          (authorization_id, run_id, intent_id, mandate_id, mandate_version, vault_id,
           decision, action_digest, asset, amount_ceiling, chain, expires_at, nonce,
-          reason_codes, signer, version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+          reason_codes, signer, version, recipient_constraint)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [auth.authorizationId, auth.runId, auth.intentId, auth.mandateId, auth.mandateVersion,
         auth.vaultId, auth.decision, auth.actionDigest, auth.asset, auth.amountCeiling,
-        auth.chain, auth.expiresAt, auth.nonce, auth.reasonCodes, auth.signer, auth.version],
+        auth.chain, auth.expiresAt, auth.nonce, auth.reasonCodes, auth.signer, auth.version,
+        auth.recipientConstraint ?? null],
     );
+  }
+
+  async listAuthorizations(runId?: string): Promise<Authorization[]> {
+    const { rows } = runId
+      ? await this.pool.query("SELECT * FROM mitra.authorizations WHERE run_id = $1 ORDER BY created_at DESC", [runId])
+      : await this.pool.query("SELECT * FROM mitra.authorizations ORDER BY created_at DESC");
+    return rows.map((r): Authorization => ({
+      authorizationId: String(r.authorization_id), runId: String(r.run_id ?? ""), intentId: String(r.intent_id ?? ""),
+      mandateId: String(r.mandate_id), mandateVersion: num(r.mandate_version), vaultId: String(r.vault_id),
+      decision: String(r.decision) as Authorization["decision"], actionDigest: String(r.action_digest),
+      asset: String(r.asset) as Authorization["asset"], amountCeiling: num(r.amount_ceiling),
+      ...(r.recipient_constraint != null ? { recipientConstraint: String(r.recipient_constraint) } : {}),
+      chain: String(r.chain) as Authorization["chain"], expiresAt: new Date(String(r.expires_at)).toISOString(),
+      nonce: num(r.nonce), reasonCodes: (r.reason_codes as string[]) ?? [], signer: String(r.signer), version: num(r.version),
+    }));
   }
 
   /**
@@ -556,6 +573,42 @@ export class PostgresRepository implements EconomicRepository {
       "SELECT * FROM mitra.event_log WHERE seq > $1 ORDER BY seq ASC LIMIT $2", [cursor, limit],
     );
     return rows.map((r) => ({ seq: num(r.seq), event: rowToEvent(r) }));
+  }
+
+  async getEpoch(epochId: string): Promise<ClearingEpoch | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.clearing_epochs WHERE epoch_id = $1", [epochId]);
+    return rows[0] ? (rows[0].document as ClearingEpoch) : null;
+  }
+
+  async listEpochs(): Promise<ClearingEpoch[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.clearing_epochs ORDER BY created_at DESC");
+    return rows.map((r) => r.document as ClearingEpoch);
+  }
+
+  async insertEpoch(epoch: ClearingEpoch): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      "INSERT INTO mitra.clearing_epochs (epoch_id, status, document) VALUES ($1,$2,$3::jsonb) ON CONFLICT (epoch_id) DO NOTHING",
+      [epoch.epochId, epoch.status, JSON.stringify(epoch)],
+    );
+    return rowCount === 1;
+  }
+
+  async saveEpoch(epoch: ClearingEpoch): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.clearing_epochs (epoch_id, status, document) VALUES ($1,$2,$3::jsonb)
+       ON CONFLICT (epoch_id) DO UPDATE SET status = EXCLUDED.status, document = EXCLUDED.document`,
+      [epoch.epochId, epoch.status, JSON.stringify(epoch)],
+    );
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.agents ORDER BY agent_id");
+    return rows.map((r) => r.document as Agent);
+  }
+
+  async getAgent(agentId: string): Promise<Agent | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.agents WHERE agent_id = $1", [agentId]);
+    return rows[0] ? (rows[0].document as Agent) : null;
   }
 
   async listMandates(): Promise<Mandate[]> {

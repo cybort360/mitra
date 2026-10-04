@@ -25,7 +25,7 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import type { ReceiptDraft, ReceiptSigner } from "@/lib/kernel/receipts";
@@ -35,6 +35,8 @@ export interface SeedCounts {
   vaults: number; mandates: number; reservations: number;
   spaces: number; agreements: number;
   obligations: number; settlements: number; runs: number; deliverables: number;
+  agents: number;
+  epochs: number;
 }
 
 export interface ReservationInput {
@@ -216,6 +218,8 @@ export interface EconomicRepository {
   putReservation(reservation: Reservation): Promise<Reservation>;
 
   recordAuthorization(auth: Authorization): Promise<void>;
+  /** Every authorization decision recorded, newest first; optionally one run's (backlog #5). */
+  listAuthorizations(runId?: string): Promise<Authorization[]>;
 
   // ── Sagas (F49) ───────────────────────────────────────────────────────────
   // The recovery kernel had complete unit coverage and no write path at all:
@@ -246,4 +250,22 @@ export interface EconomicRepository {
   listEventsSince(cursor: number, limit?: number): Promise<Array<{ seq: number; event: RunEvent }>>;
   /** Every mandate. Read-only here; mandates are written by the authority path. */
   listMandates(): Promise<Mandate[]>;
+
+  /**
+   * Agents (backlog #5). Read-only: registration has no write path yet, because the
+   * API cannot tell who is registering (F55) — anyone could register an agent under
+   * any name or wallet.
+   */
+  listAgents(): Promise<Agent[]>;
+
+  /**
+   * Clearing epochs (backlog #5). `saveEpoch` upserts; `insertEpoch` refuses an id
+   * that exists (an epoch is opened once). The clearing route works on the STORED
+   * epoch, never a client-supplied copy, wherever the server opened it (F58).
+   */
+  getEpoch(epochId: string): Promise<ClearingEpoch | null>;
+  listEpochs(): Promise<ClearingEpoch[]>;
+  insertEpoch(epoch: ClearingEpoch): Promise<boolean>;
+  saveEpoch(epoch: ClearingEpoch): Promise<void>;
+  getAgent(agentId: string): Promise<Agent | null>;
 }
