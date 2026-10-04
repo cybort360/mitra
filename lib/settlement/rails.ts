@@ -26,8 +26,8 @@
  * | base   | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `BASE_RPC_URL`; optional `MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337\|vault` |
  * | tempo  | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `TEMPO_RPC_URL`; optional `MITRA_TEMPO_SETTLEMENT_ACCOUNT=vault` |
  *
- * `vault` (package B.4) pays THROUGH the deployed `MitraVault.sol`
- * (`lib/evm/deployments.json`): the key is principal, mandate engine and relayer on
+ * `vault` (package B.4) pays THROUGH the deployed canonical v2 `contracts/MitraVault.sol`
+ * (`lib/evm/deployments.json`, the chain's non-`__` entry): the key is principal, mandate engine and relayer on
  * testnet; `MITRA_EVM_VAULT_HOLDER` names the agent holding the mandate. The payer is
  * the principal whose vault position pays.
  * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
@@ -158,13 +158,18 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
   return rails;
 }
 
-/** The deployed MitraVault for a chain, from lib/evm/deployments.json — or a refusal. */
+/**
+ * The CANONICAL MitraVault (v2) for a chain, from lib/evm/deployments.json — or a
+ * refusal. The file is keyed by network name (`baseSepolia`, `moderato`); entries whose
+ * key carries a `__` suffix (e.g. `__callerVariant`) are other deployments kept for the
+ * record and are never chosen, because their ABI is not the one this transport speaks.
+ */
 function deployedVault(chainId: number): `0x${string}` {
   const file = "lib/evm/deployments.json";
-  const all = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, { address?: string }>) : {};
-  const address = all[String(chainId)]?.address;
-  if (!address) throw new Error(`NO_MITRA_VAULT_DEPLOYED_ON_${chainId}: run scripts/deploy-evm-vault.mjs`);
-  return address as `0x${string}`;
+  const all = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, { chainId?: number; address?: string }>) : {};
+  const hit = Object.entries(all).find(([key, v]) => !key.includes("__") && v.chainId === chainId && v.address);
+  if (!hit) throw new Error(`NO_MITRA_VAULT_DEPLOYED_ON_${chainId}: run scripts/deploy-evm-vault.mjs`);
+  return hit[1].address as `0x${string}`;
 }
 
 function vaultTransport(

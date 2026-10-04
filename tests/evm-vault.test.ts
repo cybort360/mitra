@@ -1,5 +1,8 @@
 /**
- * Sprint item 6: MitraVault.sol, live on the deployed contracts.
+ * Sprint item 6: the CALLER VARIANT (`contracts/src/MitraVault.sol`), live on its
+ * deployments — `baseSepolia__callerVariant` / `moderato__callerVariant` in
+ * lib/evm/deployments.json. The canonical v2 contract (`contracts/MitraVault.sol`) is
+ * exercised live through the settlement route in tests/evm-vault-transport.test.ts.
  *
  * The contract's own suite is Foundry (`cd contracts && forge test`); this file
  * exercises the DEPLOYED bytecode on Base Sepolia (BASE_VAULT_LIVE=1) and Tempo
@@ -23,7 +26,7 @@ import { BASE_ASSETS, settlementCommitment } from "@/lib/adapters/base";
 import { TEMPO_TOKENS, tempoCommitment } from "@/lib/adapters/tempo";
 
 const KEY = ".dev-keys/evm-testnet.key";
-const ARTIFACT = "contracts/out/MitraVault.sol/MitraVault.json";
+const ARTIFACT = "contracts/out/src/MitraVault.sol/MitraVault.json";
 const deployments = existsSync("lib/evm/deployments.json") ? JSON.parse(readFileSync("lib/evm/deployments.json", "utf8")) : {};
 
 const tempo = defineChain({
@@ -34,24 +37,24 @@ const tempo = defineChain({
 const RAILS = [
   {
     name: "Base Sepolia", flag: "BASE_VAULT_LIVE", chain: baseSepolia, rpc: process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org",
-    token: BASE_ASSETS[84532].USDC.address, chainId: 84532,
+    token: BASE_ASSETS[84532].USDC.address, chainId: 84532, deployment: "baseSepolia__callerVariant",
     commit: (i: { settlementId: string; from: string; to: string; amount: number }) =>
       settlementCommitment({ ...i, asset: "USDC", chainId: 84532 }),
   },
   {
     name: "Tempo Moderato", flag: "TEMPO_VAULT_LIVE", chain: tempo, rpc: process.env.TEMPO_RPC_URL ?? "https://rpc.moderato.tempo.xyz",
-    token: TEMPO_TOKENS.PathUSD.mint, chainId: 42431,
+    token: TEMPO_TOKENS.PathUSD.mint, chainId: 42431, deployment: "moderato__callerVariant",
     commit: (i: { settlementId: string; from: string; to: string; amount: number }) =>
       tempoCommitment({ ...i, amount: { asset: "PathUSD", amount: i.amount }, network: "moderato" }),
   },
 ] as const;
 
 for (const rail of RAILS) {
-  const live = process.env[rail.flag] === "1" && existsSync(KEY) && existsSync(ARTIFACT) && deployments[String(rail.chainId)];
+  const live = process.env[rail.flag] === "1" && existsSync(KEY) && existsSync(ARTIFACT) && deployments[rail.deployment];
   describe.skipIf(!live)(`live MitraVault on ${rail.name} (${rail.flag}=1)`, () => {
     it("pays exactly what the engine authorized, to exactly whom; and refuses replay, strangers and redirection", async () => {
       const abi = JSON.parse(readFileSync(ARTIFACT, "utf8")).abi as Abi;
-      const vault = deployments[String(rail.chainId)].address as Hex;
+      const vault = deployments[rail.deployment].address as Hex;
       const me = privateKeyToAccount(`0x${readFileSync(KEY, "utf8").trim().replace(/^0x/, "")}`);
       const stranger = privateKeyToAccount(`0x${"55".repeat(32)}`);
       const client = createPublicClient({ chain: rail.chain, transport: http(rail.rpc) }) as PublicClient;

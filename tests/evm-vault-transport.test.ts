@@ -1,23 +1,25 @@
 /**
- * Package B.4: Mitra settles THROUGH MitraVault.sol (`lib/adapters/evm-vault-transport.ts`).
+ * Package B.4, on the canonical v2 contract (`contracts/MitraVault.sol`): Mitra settles
+ * THROUGH the vault (`lib/adapters/evm-vault-transport.ts`).
  *
- * Offline: the confirmation rule on receipts built from the real ABI, and `pay()`
- * against a scripted node — every refusal checked to send nothing, and the happy path
- * checked by decoding what was actually submitted and recovering the engine's
+ * Offline: the confirmation rule on transactions built from the real v2 ABI — calldata
+ * AND receipt, since v2's event carries the permit digest, not Mitra's commitment — and
+ * `pay()` against a scripted node: every refusal checked to send nothing, and the happy
+ * path checked by decoding what was actually submitted and recovering the engine's
  * signature from it. The live runs (through the agreement route, on Base Sepolia and
  * Tempo Moderato) are gated on BASE_VAULT_LIVE / TEMPO_VAULT_LIVE below.
  */
 import { describe, expect, it } from "vitest";
 import {
-  custom, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionResult, keccak256, parseTransaction,
-  recoverTypedDataAddress, type Hex, type TransactionSerialized,
+  custom, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, encodeFunctionResult, hashTypedData,
+  keccak256, parseTransaction, recoverTypedDataAddress, type Hex, type TransactionSerialized,
 } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { BASE_ASSETS } from "@/lib/adapters/base";
-import { MITRA_VAULT_ABI, MitraVaultTransport, SPEND_PERMIT_TYPES, observeVaultSpend } from "@/lib/adapters/evm-vault-transport";
+import { MITRA_VAULT_ABI, MitraVaultTransport, SPEND_PERMIT_TYPES, observeVaultSpend, vaultDomain } from "@/lib/adapters/evm-vault-transport";
 
-const VAULT = "0x78b82802ad2da2dc136a5c03eabd8c4fefa265cf" as const;
+const VAULT = "0x9c2c2d42a1a282b665bc67f407017b7605e51e8f" as const;
 const PRINCIPAL = "0x7823d6bea51cc21c5d8588c7ff72e33130848116" as const;
 const HOLDER = "0x000000000000000000000000000000000000a11c" as const;
 const TO = "0x1111111111111111111111111111111111111111" as const;
@@ -25,51 +27,71 @@ const USDC = BASE_ASSETS[84532].USDC.address.toLowerCase() as Hex;
 const TOKENS = new Set([USDC]);
 const ACTION = `0x${"ab".repeat(32)}` as Hex;
 const TX = `0x${"cd".repeat(32)}`;
+const CHAIN = 84532;
 
-function receipt(over: {
+type Permit = { principal: Hex; holder: Hex; token: Hex; actionHash: Hex; amount: bigint; recipient: Hex; mandateVersion: number; deadline: bigint };
+
+/** A v2 spend, as the chain records it: the submitted calldata and the receipt. */
+function spend(over: {
   status?: "success" | "reverted"; to?: string; principal?: Hex; holder?: Hex; token?: Hex; amount?: bigint;
-  eventFrom?: string; transferFrom?: Hex; transferAmount?: bigint; noTransfer?: boolean;
+  eventFrom?: string; eventPrincipal?: Hex; eventRecipient?: Hex; eventAmount?: bigint; eventDigest?: Hex;
+  transferFrom?: Hex; transferAmount?: bigint; noTransfer?: boolean; input?: Hex; chainId?: number;
 } = {}) {
-  const amount = over.amount ?? 10_000n;
-  const token = over.token ?? USDC;
-  const spent = {
+  const permit: Permit = {
+    principal: over.principal ?? PRINCIPAL, holder: over.holder ?? HOLDER, token: over.token ?? USDC, actionHash: ACTION,
+    amount: over.amount ?? 10_000n, recipient: TO, mandateVersion: 1, deadline: 2_000_000_000n,
+  };
+  const digest = hashTypedData({ domain: vaultDomain(CHAIN, VAULT), types: SPEND_PERMIT_TYPES, primaryType: "SpendPermit", message: permit });
+  const executed = {
     address: over.eventFrom ?? VAULT,
-    topics: encodeEventTopics({ abi: MITRA_VAULT_ABI, eventName: "SpendExecuted", args: { principal: over.principal ?? PRINCIPAL, holder: over.holder ?? HOLDER, recipient: TO } }) as Hex[],
-    data: encodeAbiParameters([{ type: "address" }, { type: "uint256" }, { type: "bytes32" }, { type: "uint64" }], [token, amount, ACTION, 1n]),
+    topics: encodeEventTopics({ abi: MITRA_VAULT_ABI, eventName: "SpendExecuted",
+      args: { principal: over.eventPrincipal ?? permit.principal, recipient: over.eventRecipient ?? TO, token: permit.token } }) as Hex[],
+    data: encodeAbiParameters([{ type: "uint256" }, { type: "bytes32" }], [over.eventAmount ?? permit.amount, over.eventDigest ?? digest]),
   };
   const transfer = {
-    address: token,
+    address: permit.token,
     topics: encodeEventTopics({ abi: MITRA_VAULT_ABI, eventName: "Transfer", args: { from: over.transferFrom ?? VAULT, to: TO } }) as Hex[],
-    data: encodeAbiParameters([{ type: "uint256" }], [over.transferAmount ?? amount]),
+    data: encodeAbiParameters([{ type: "uint256" }], [over.transferAmount ?? permit.amount]),
   };
   return {
-    txHash: TX, vault: VAULT, principal: PRINCIPAL, holder: HOLDER, tokens: TOKENS,
-    receipt: { status: over.status ?? ("success" as const), to: over.to ?? VAULT, blockNumber: 99n, logs: over.noTransfer ? [spent] : [transfer, spent] },
+    txHash: TX, vault: VAULT, chainId: over.chainId ?? CHAIN, principal: PRINCIPAL, holder: HOLDER, tokens: TOKENS,
+    input: over.input ?? encodeFunctionData({ abi: MITRA_VAULT_ABI, functionName: "spendAuthorized", args: [permit, "0x1234"] }),
+    receipt: { status: over.status ?? ("success" as const), to: over.to ?? VAULT, blockNumber: 99n, logs: over.noTransfer ? [executed] : [transfer, executed] },
   };
 }
 
-describe("observeVaultSpend — what counts as a payment through the vault", () => {
-  it("a vault spend for this principal's mandate, with the tokens leaving the vault, is observed", () => {
-    expect(observeVaultSpend(receipt())).toEqual({
+describe("observeVaultSpend — what counts as a payment through the v2 vault", () => {
+  it("a vault spend for this principal's mandate, with the tokens leaving the vault, is observed — commitment from calldata", () => {
+    expect(observeVaultSpend(spend())).toEqual({
       txHash: TX, block: 99, carriedCommitment: ACTION, from: PRINCIPAL, to: TO, amountAtomic: 10_000n, asset: USDC,
     });
   });
-  const refused: Array<[string, Parameters<typeof receipt>[0]]> = [
+  const refused: Array<[string, Parameters<typeof spend>[0]]> = [
     ["the transaction reverted", { status: "reverted" }],
     ["the transaction did not call the vault", { to: TO }],
+    ["the calldata is not spendAuthorized", { input: encodeFunctionData({ abi: MITRA_VAULT_ABI, functionName: "mandates", args: [PRINCIPAL, HOLDER] }) }],
+    ["the calldata is garbage", { input: "0xdeadbeef" }],
     ["the spend was another principal's", { principal: TO }],
+    ["the calldata names another principal, whatever the event says", { principal: TO, eventPrincipal: PRINCIPAL }],
     ["the spend was under another holder's mandate", { holder: TO }],
     ["the spend paid an unregistered token", { token: TO }],
+    ["no SpendExecuted was emitted by the vault", { eventFrom: TO }],
+    ["the event names another principal", { eventPrincipal: TO }],
+    ["the event names another recipient", { eventRecipient: PRINCIPAL }],
+    ["the event's amount differs from the permit", { eventAmount: 9_999n }],
+    ["the event is for a different permit (digest mismatch)", { eventDigest: `0x${"ee".repeat(32)}` }],
+    ["the digest was computed for another chain", { chainId: 8453 }],
     ["no tokens moved", { noTransfer: true }],
     ["the tokens came from somewhere other than the vault", { transferFrom: PRINCIPAL }],
     ["the moved amount differs from the spend", { transferAmount: 9_999n }],
-    ["a SpendExecuted log was emitted by some other contract", { eventFrom: TO }],
   ];
-  for (const [why, over] of refused) it(`not observed when ${why}`, () => expect(observeVaultSpend(receipt(over))).toBeNull());
+  for (const [why, over] of refused) it(`not observed when ${why}`, () => expect(observeVaultSpend(spend(over))).toBeNull());
 });
 
-/** A scripted node. `mandate` is what `mandates(principal, holder)` returns. */
-function node(mandate: readonly [Hex, Hex, bigint, bigint, bigint, bigint, bigint, boolean], chainId = 84532) {
+type MandateTuple = readonly [Hex, Hex, bigint, bigint, bigint, bigint, number, Hex, boolean];
+
+/** A scripted node. `mandate` is what v2's `mandates(principal, holder)` returns. */
+function node(mandate: MandateTuple, chainId = 84532) {
   const calls: Array<{ method: string; params: unknown[] }> = [];
   const transport = custom({
     request: async ({ method, params }: { method: string; params?: unknown[] }) => {
@@ -93,8 +115,9 @@ function node(mandate: readonly [Hex, Hex, bigint, bigint, bigint, bigint, bigin
 describe("MitraVaultTransport.pay — refuses before signing, pays exactly what was asked", () => {
   const key = privateKeyToAccount(`0x${"77".repeat(32)}`);
   const NOW = 1_800_000_000_000;
-  const live = (over: Partial<{ engine: Hex; token: Hex; limit: bigint; expires: bigint; version: bigint; revoked: boolean }> = {}) =>
-    [over.engine ?? key.address, over.token ?? USDC, over.limit ?? 100_000n, 1_000_000n, 0n, over.expires ?? BigInt(NOW / 1000 + 3600), over.version ?? 3n, over.revoked ?? false] as const;
+  const live = (over: Partial<{ principal: Hex; engine: Hex; limit: bigint; ceiling: bigint; spent: bigint; expires: bigint; version: number; revoked: boolean }> = {}): MandateTuple =>
+    [over.principal ?? key.address, HOLDER, over.limit ?? 100_000n, over.ceiling ?? 1_000_000n, over.spent ?? 0n,
+      over.expires ?? BigInt(NOW / 1000 + 3600), over.version ?? 3, over.engine ?? key.address, over.revoked ?? false];
   const make = (n: ReturnType<typeof node>) => new MitraVaultTransport({
     chain: baseSepolia, vault: VAULT, principal: key.address, holder: HOLDER, engine: key, relayer: key, tokens: TOKENS, transport: n.transport, now: () => NOW,
   });
@@ -115,12 +138,14 @@ describe("MitraVaultTransport.pay — refuses before signing, pays exactly what 
   }
 
   const onchain: Array<[string, Parameters<typeof live>[0], string]> = [
-    ["there is no mandate", { version: 0n }, "MANDATE_NOT_FOUND"],
+    ["there is no mandate (zero record)", { principal: "0x0000000000000000000000000000000000000000", version: 0 }, "MANDATE_NOT_FOUND"],
+    ["the record is for another principal", { principal: TO }, "MANDATE_NOT_FOUND"],
     ["this key is not the mandate's engine", { engine: TO }, "POLICY_ENGINE_MISMATCH"],
-    ["the mandate is for another token", { token: TO }, "MANDATE_TOKEN_MISMATCH"],
     ["the mandate is revoked", { revoked: true }, "MANDATE_REVOKED"],
     ["the mandate has expired", { expires: BigInt(NOW / 1000) }, "MANDATE_EXPIRED"],
+    // v2 never checks the limit at spend: this refusal is the only enforcement there is.
     ["the amount exceeds the mandate's limit", { limit: 9_999n }, "EXCEEDS_MANDATE_LIMIT"],
+    ["the ceiling has no headroom", { ceiling: 100_000n, spent: 90_001n }, "EXCEEDS_MANDATE_CEILING"],
   ];
   for (const [why, over, reason] of onchain) {
     it(`refuses when ${why}, and sends nothing`, async () => {
@@ -130,12 +155,17 @@ describe("MitraVaultTransport.pay — refuses before signing, pays exactly what 
     });
   }
 
+  it("an amount exactly at the limit, and exactly filling the ceiling, is paid", async () => {
+    const n = node(live({ limit: 10_000n, ceiling: 100_000n, spent: 90_000n }));
+    expect((await make(n).pay(ask)).txHash).toBe(TX);
+  });
+
   it("refuses a node on another chain", async () => {
     const n = node(live(), 8453);
     await expect(make(n).pay(ask)).rejects.toThrow("CHAIN_MISMATCH");
   });
 
-  it("submits spendAuthorized with the permit it was asked for, signed by the engine", async () => {
+  it("submits spendAuthorized with the permit it was asked for, signed by the engine under the v2 domain", async () => {
     const n = node(live());
     expect((await make(n).pay(ask)).txHash).toBe(TX);
     const raw = n.calls.find((c) => c.method === "eth_sendRawTransaction")!.params[0] as TransactionSerialized;
@@ -143,14 +173,26 @@ describe("MitraVaultTransport.pay — refuses before signing, pays exactly what 
     expect(tx.to?.toLowerCase()).toBe(VAULT);
     const { functionName, args } = decodeFunctionData({ abi: MITRA_VAULT_ABI, data: tx.data! });
     expect(functionName).toBe("spendAuthorized");
-    const [permit, sig] = args as unknown as [{ principal: Hex; holder: Hex; token: Hex; actionHash: Hex; amount: bigint; recipient: Hex; mandateVersion: bigint; deadline: bigint }, Hex];
-    expect(permit).toMatchObject({ principal: key.address, holder: HOLDER, actionHash: ACTION, amount: 10_000n, recipient: TO, mandateVersion: 3n, deadline: BigInt(NOW / 1000 + 900) });
+    const [permit, sig] = args as unknown as [Permit, Hex];
+    expect(permit).toMatchObject({ principal: key.address, holder: HOLDER, actionHash: ACTION, amount: 10_000n, recipient: TO, mandateVersion: 3, deadline: BigInt(NOW / 1000 + 900) });
+    expect(permit.token.toLowerCase()).toBe(USDC);
     const signer = await recoverTypedDataAddress({
       domain: { name: "MitraVault", version: "1", chainId: 84532, verifyingContract: VAULT },
       types: SPEND_PERMIT_TYPES, primaryType: "SpendPermit", message: permit, signature: sig,
     });
     expect(signer).toBe(key.address);
-    void keccak256;
+
+    // What pay() submitted is what observe() accepts, given the vault's v2 receipt —
+    // the commitment recovered from calldata, the event bound by the permit digest.
+    const digest = hashTypedData({ domain: vaultDomain(84532, VAULT), types: SPEND_PERMIT_TYPES, primaryType: "SpendPermit", message: permit });
+    const logs = [
+      { address: VAULT, topics: encodeEventTopics({ abi: MITRA_VAULT_ABI, eventName: "SpendExecuted", args: { principal: key.address, recipient: TO, token: USDC } }) as Hex[],
+        data: encodeAbiParameters([{ type: "uint256" }, { type: "bytes32" }], [10_000n, digest]) },
+      { address: USDC, topics: encodeEventTopics({ abi: MITRA_VAULT_ABI, eventName: "Transfer", args: { from: VAULT, to: TO } }) as Hex[],
+        data: encodeAbiParameters([{ type: "uint256" }], [10_000n]) },
+    ];
+    expect(observeVaultSpend({ txHash: TX, vault: VAULT, chainId: 84532, principal: key.address, holder: HOLDER, tokens: TOKENS, input: tx.data!,
+      receipt: { status: "success", to: VAULT, blockNumber: 7n, logs } })?.carriedCommitment).toBe(ACTION);
   });
 });
 
@@ -171,11 +213,16 @@ import { POST as settlementsPOST } from "@/app/api/v1/settlements/route";
 import { GET as evidenceGET } from "@/app/api/v1/settlements/evidence/route";
 
 const KEY = ".dev-keys/evm-testnet.key";
+/** v2's principal-side surface (contracts/MitraVault.sol). */
 const VAULT_ADMIN_ABI = parseAbi([
-  "function positions(address principal, address token) view returns (uint256 available, uint256 escrowed, bool frozen)",
+  "function vaults(address principal, address token) view returns (uint256 total, uint256 available, uint256 reserved, uint256 escrowed, uint256 encumbered, uint256 settling, uint256 frozen, bool emergencyFreeze)",
   "function deposit(address token, uint256 amount)",
-  "function openMandate(address holder, address engine, address token, uint128 limit, uint128 ceiling, uint64 expiresAt)",
+  "function openMandate(address holder, uint64 limit, uint64 ceiling, uint64 expiresAt, address policyEngine)",
+  "function amendMandate(address holder, uint64 newLimit, uint64 newCeiling, uint64 newExpiresAt)",
 ]);
+/** The canonical (v2) deployment for a chain: never a `__callerVariant` entry. */
+const canonical = (deployments: Record<string, { chainId?: number; address?: string }>, chainId: number) =>
+  Object.entries(deployments).find(([k, v]) => !k.includes("__") && v.chainId === chainId)?.[1];
 const tempoChain = (rpc: string) => defineChain({ id: 42431, name: "Tempo Moderato", nativeCurrency: { name: "USD", symbol: "USD", decimals: 18 }, rpcUrls: { default: { http: [rpc] } } });
 
 const LIVE_RAILS = [
@@ -196,12 +243,12 @@ afterEach(() => { __setRailsForTests(null); globalThis.__mitraStore = undefined;
 
 for (const rail of LIVE_RAILS) {
   const deployments = existsSync("lib/evm/deployments.json") ? JSON.parse(readFileSync("lib/evm/deployments.json", "utf8")) : {};
-  const live = process.env[rail.flag] === "1" && existsSync(KEY) && deployments[String(rail.viem.id)];
-  describe.skipIf(!live)(`live: an ACCEPTED agreement settles through MitraVault on ${rail.chain} (${rail.flag}=1)`, () => {
+  const live = process.env[rail.flag] === "1" && existsSync(KEY) && canonical(deployments, rail.viem.id);
+  describe.skipIf(!live)(`live: an ACCEPTED agreement settles through MitraVault v2 on ${rail.chain} (${rail.flag}=1)`, () => {
     it("pays through spendAuthorized, confirms from the chain, and the evidence verifies", async () => {
       const me = privateKeyToAccount(`0x${readFileSync(KEY, "utf8").trim().replace(/^0x/, "")}`);
       const holder = `0x${keccak256(new TextEncoder().encode(`mitra-vault-holder:${me.address}`)).slice(-40)}` as Hex;
-      const vaultAddr = deployments[String(rail.viem.id)].address as Hex;
+      const vaultAddr = canonical(deployments, rail.viem.id)!.address as Hex;
       const client = createPublicClient({ chain: rail.viem, transport: http(rail.rpc) }) as PublicClient;
       const wallet = createWalletClient({ chain: rail.viem, transport: http(rail.rpc), account: me });
       const gp = await client.getGasPrice();
@@ -213,11 +260,19 @@ for (const rail of LIVE_RAILS) {
       };
 
       // One-time, conditional provisioning: a mandate for `holder` with headroom, and capital in the position.
-      const [, , , ceiling, spent, expiresAt, version, revoked] = await client.readContract({ address: vaultAddr, abi: MITRA_VAULT_ABI, functionName: "mandates", args: [me.address, holder] });
-      if (version === 0n || revoked || expiresAt <= BigInt(Math.floor(Date.now() / 1000) + 600) || spent + 10_000n > ceiling) {
-        await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "openMandate", args: [holder, me.address, rail.token, 100_000n, spent + 1_000_000n, BigInt(Math.floor(Date.now() / 1000) + 30 * 86_400)] });
+      // v2 opens a (principal, holder) mandate once; after that it is amended, never reopened.
+      const [mPrincipal, , , ceiling, spent, expiresAt, , engine, revoked] = await client.readContract({ address: vaultAddr, abi: MITRA_VAULT_ABI, functionName: "mandates", args: [me.address, holder] });
+      const until = BigInt(Math.floor(Date.now() / 1000) + 30 * 86_400);
+      if (mPrincipal === "0x0000000000000000000000000000000000000000") {
+        await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "openMandate", args: [holder, 100_000n, 1_000_000n, until, me.address] });
+      } else {
+        expect(revoked, "the test holder's mandate was revoked; derive a new holder").toBe(false);
+        expect(engine.toLowerCase()).toBe(me.address.toLowerCase());
+        if (expiresAt <= BigInt(Math.floor(Date.now() / 1000) + 600) || spent + 10_000n > ceiling) {
+          await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "amendMandate", args: [holder, 100_000n, spent + 1_000_000n, until] });
+        }
       }
-      const [available] = await client.readContract({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "positions", args: [me.address, rail.token as Hex] });
+      const [, available] = await client.readContract({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "vaults", args: [me.address, rail.token as Hex] });
       if (available < 10_000n) {
         await write({ address: rail.token, abi: erc20Abi, functionName: "approve", args: [vaultAddr, 100_000n] });
         await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "deposit", args: [rail.token, 100_000n] });
