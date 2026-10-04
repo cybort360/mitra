@@ -1,99 +1,175 @@
 # Mitra Co-Developer Handoff Specification
-## Multi-Rail Settlement Transports & Live Infrastructure
+## Phase 5 (Agent Ecosystem & Dual-Transport MCP) & Phase 7 (On-Chain Clearing)
 
 ---
 
 ### Scope & Division of Labor
 
 > [!NOTE]
-> **Showcase Division:** **Project Prometheus** (Commercial Agreement lifecycle, guarded spend, TALOS saga recovery) and **Project Pando** (Bilateral obligation collection, deterministic conservation netting, epoch clearing) are being handled directly by the lead developer and are **NOT** part of this handoff.
+> **Baseline Status:**
+> - Multi-rail EVM Vaults deployed and verified on **Base Sepolia** (`84532`) and **Tempo Moderato** (`42431`) at address `0x6a731a654A9bF96b0Fa8A99a4c86F37C2C4eea9c`.
+> - Phase 6 Distributed Sagas (`ADR-0012`) verified live on-chain with automated compensation (`lockEscrow` → `refundEscrow`). Runnable via `npm run verify:saga-events`. Full 66-character hashes verified without truncation (`F52`).
+> - Context audit: **PASS** (`ok=true`, 65 entries verified). Test suite: **PASS** (43 test files, 614 tests passing).
 
-This handoff covers the **Settlement & Live Transport Infrastructure** (PRD Phases 8 & 9 and on-chain adapter integration):
-1. **Base Sepolia Live Transport** (`lib/adapters/base.ts` — EIP-712, ERC-1271, ERC-4337 UserOps)
-2. **Tempo Moderato Live Transport** (`lib/adapters/tempo.ts` — TIP-20 transfers & MPP)
-3. **Solana Devnet Settlement Binding** (`lib/adapters/solana.ts` — `programs/mitra-vault` on-chain interaction)
+This handoff specifies the implementation and live verification of **Phase 5** and **Phase 7** per `docs/product/MITRA_PRD.md` (§14, §19–§25, §52):
 
----
-
-### Status Baseline (Current Head: `fix/integrity-f40-f45`)
-
-* **Tests:** 497 TS tests passing (37 files passed, 3 persistence files self-skip cleanly offline), 88 Rust tests passing in `programs/mitra-vault`. Zero RPC flakes.
-* **TypeScript:** `npm run typecheck` (`tsc --noEmit`) passes with 0 errors.
-* **PRD §4.5 Discharged:** Failure is a state transition, not an exception (`lib/kernel/commerce-recovery.ts` and `app/api/v1/sagas/route.ts`).
+1. **Phase 5: Agent Ecosystem & Dual-Transport MCP Server** (`bin/mitra-mcp.ts`, `lib/mcp/server.ts`)
+2. **Phase 7: On-Chain Clearing & Multilateral Netting** (`contracts/MitraClearing.sol`, `scripts/run-live-clearing-epoch.mjs`)
 
 ---
 
-## Assigned Work: Multi-Rail Settlement Transports
+## 1. Ground Rules & Invariants (Non-Negotiable)
 
-### 1. Base Sepolia Transport Driver (`lib/adapters/base.ts`)
-
-#### Objective
-Currently, `BaseSettlementAdapter` throws `UnconfiguredAdapterError` when no transport is provided. This task connects live Base Sepolia execution.
-
-#### Canonical RPC & Environment
-* **RPC Endpoint:** `https://sepolia.base.org` (or Coinbase Developer Platform / Alchemy Base Sepolia)
-* **Chain ID:** `84532`
-
-#### Implementation Steps
-1. In [`lib/adapters/base.ts`](../lib/adapters/base.ts), implement a concrete `BaseTransport` using `viem`:
-   - `sendUserOp(userOp)`: Packages and submits the UserOperation envelope with the EIP-712 structured mandate authorization hash.
-   - `verify1271(walletAddress, digest, signature)`: Validates smart contract wallet signatures via ERC-1271 `isValidSignature(bytes32,bytes)`.
-2. Guard against false execution: Never return a fabricated transaction hash. If transport fails or is unconfigured, throw `UnconfiguredAdapterError`.
-3. Gate live network probes under `process.env.BASE_LIVE === "1"`.
+1. **Repository files are the source of truth** (`AGENTS.md`). Prior chat summaries are not authoritative.
+2. **The Mechanism to Protect:**
+   $$\text{HOW MUCH MAY I SPEND} \longrightarrow \text{WHO AUTHORIZED IT} \longrightarrow \text{MAY THIS EXACT INSTRUCTION MOVE CAPITAL}$$
+   $$\text{Mandate} \longrightarrow \text{Policy Engine} \longrightarrow \text{Execution Guard}$$
+   **An `ALLOW` decision is never permission to move value.** The execution guard or on-chain contract independently re-derives whether *this exact instruction* may move capital.
+3. **No Direct Capital Verbs in MCP Surface:**
+   External agents must never hold raw transfer or key verbs (`lib/mcp/surface.ts`). All exposed MCP tools must be verbs on commercial intent.
+4. **Evidence Discipline (BUILD_FOUNDRY §2):**
+   Every claim requires `evidence` and `blocker`. Never truncate transaction hashes in logs or evidence ledgers (`F52`).
 
 ---
 
-### 2. Tempo Moderato Transport Driver (`lib/adapters/tempo.ts`)
+## 2. Work Package 1: Phase 5 — Dual-Transport MCP Server
 
-#### Objective
-Currently, `TempoSettlementAdapter` provides domain definitions, TIP-20 currency discovery, and MPP metadata formatting, but throws `UnconfiguredAdapterError` on `settle()` without a transport.
+### 2.1 Objective
+External agents (Cursor, Claude Desktop, LangChain, AutoGPT) must be able to participate in Mitra-governed commerce without holding keys or direct capital access (PRD §22, §24, §52 Phase 5).
 
-#### Canonical RPC & Environment
-* **RPC Endpoint:** `https://rpc.moderato.tempo.xyz`
-* **Chain ID:** `42431`
+### 2.2 Dual-Transport Architecture
+Implement a single core MCP server class with switchable transports:
+- **`stdio` Transport (Default)**: Direct pipe for local tools and IDE extensions (e.g. Cursor, Claude Desktop).
+- **`SSE / HTTP` Transport**: Server-Sent Events over HTTP (configurable `--port`) for remote/cloud agents.
 
-#### Critical Guards (from `FAILURES.md`)
-* **F12 & F40 Guard:** `eth_getBalance` returns a constant dummy placeholder (`0xa5bf`) on Moderato, not an actual balance. Native value transfers are explicitly refused by the node (`value transfer not allowed`). **Settlement must occur strictly in TIP-20 tokens via contract calls.**
-* **Rate-Limit Guard:** Moderato testnet returns `-32002` ("Resource temporarily unavailable") during bursts. All JSON-RPC requests must use exponential backoff retry (up to 3 attempts with $500\text{ms} \times 2^n$ delay), matching [`scripts/fund-tempo.mjs`](../scripts/fund-tempo.mjs).
-* **Payment Confirmation:** Payment verification must be derived from decoded `Transfer` event logs matching the target address and token mint, **never** from balance deltas (which miss transfers due to TIP-20 transfer fee deductions).
-* Gate live network probes under `process.env.TEMPO_LIVE === "1"`.
+```text
+                    ┌────────────────────────────┐
+                    │      MitraMcpServer        │
+                    │ (Core 17 Intent-Only Tools)│
+                    └─────────────┬──────────────┘
+                                  │
+                  ┌───────────────┴───────────────┐
+                  ▼                               ▼
+       ┌─────────────────────┐         ┌─────────────────────┐
+       │   StdioTransport    │         │    SseTransport     │
+       │ (Cursor, Claude CLI)│         │(Remote Agents / K8s)│
+       └─────────────────────┘         └─────────────────────┘
+```
+
+### 2.3 Implementation Details
+1. **Core Server (`lib/mcp/server.ts` or `bin/mitra-mcp.ts`)**:
+   - Initialize `@modelcontextprotocol/sdk` (Server, StdioServerTransport, SSEServerTransport).
+   - Enforce `assertNoCapitalVerb(mcpTools)` at server startup.
+   - Register all 17 tools from [`lib/mcp/surface.ts`](../lib/mcp/surface.ts):
+     `mitra_register_agent`, `mitra_get_agent`, `mitra_find_agents`, `mitra_create_intent`, `mitra_get_intent`, `mitra_request_authorization`, `mitra_create_agreement`, `mitra_fund_agreement`, `mitra_submit_deliverable`, `mitra_accept_deliverable`, `mitra_reject_deliverable`, `mitra_get_obligations`, `mitra_get_exposure`, `mitra_get_recovery`, `mitra_request_clearing`, `mitra_get_settlement`, `mitra_get_receipt`, `mitra_get_timeline`.
+2. **Dispatch Wiring**:
+   Connect tool calls to `getStore()` (`lib/store/provider.ts`) and kernel functions (`evaluateProposal`, `applyAgreementOpWithSaga`).
+3. **CLI Options**:
+   - `npx tsx bin/mitra-mcp.ts --transport stdio`
+   - `npx tsx bin/mitra-mcp.ts --transport sse --port 3001`
+4. **Integration Test (`tests/mcp-server.test.ts`)**:
+   Verify tool enumeration, prohibition enforcement, and intent creation across both stdio and SSE modes.
 
 ---
 
-### 3. Solana Devnet Settlement Binding (`lib/adapters/solana.ts`)
+## 3. Work Package 2: Phase 7 — On-Chain Clearing (`MitraClearing.sol`)
 
-#### Objective
-Wire `SolanaSettlementAdapter` to interact directly with the deployed `programs/mitra-vault` on Solana devnet (`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY`).
+### 3.1 Objective
+Move clearing from purely local graph reduction to on-chain verifiable epoch commitments and settled residual transfers (PRD §14, §19, §20, §21, §52 Phase 7).
 
-#### Implementation Steps
-1. Use `@solana/web3.js` with Helius Devnet RPC (or configured `SOLANA_RPC_URL`).
-2. Implement instruction dispatch for `withdraw` and `settle` binding against the vault PDA.
-3. Assert exact amounts and single-use permit consumption.
+### 3.2 Why Option B (Dedicated On-Chain Contract) is Mandated
+1. **Non-Repudiation (PRD §14.8):** `inputsRoot` and `resultHash` are anchored on-chain with immutable block timestamps, preventing the clearing engine from behaving as an opaque private database.
+2. **Challenge Window Enforcement (PRD §14.5):** Contract enforces `block.timestamp >= challengeExpiresAt` before finalization.
+3. **Single-Epoch Guarantee (F47):** Smart contract enforces that an `epochId` cannot be finalized or settled twice.
+4. **Decoupled Settlement (PRD §4.6):** `MitraClearing` manages epoch states; `BaseSettlementAdapter` and `TempoSettlementAdapter` execute residual transfers.
+
+### 3.3 Implementation Details
+1. **Solidity Contract (`contracts/MitraClearing.sol`)**:
+   ```solidity
+   // SPDX-License-Identifier: MIT
+   pragma solidity ^0.8.24;
+
+   contract MitraClearing {
+       enum EpochStatus { UNKNOWN, OPEN, CHALLENGE, FINALIZED, SETTLED }
+
+       struct EpochRecord {
+           bytes32 inputsRoot;
+           bytes32 resultHash;
+           uint64 challengeExpiresAt;
+           EpochStatus status;
+           bytes32 settlementReceiptHash;
+       }
+
+       mapping(bytes32 => EpochRecord) public epochs;
+
+       event EpochCommitted(bytes32 indexed epochId, bytes32 inputsRoot, bytes32 resultHash, uint64 challengeExpiresAt);
+       event EpochFinalized(bytes32 indexed epochId, bytes32 resultHash);
+       event EpochSettled(bytes32 indexed epochId, bytes32 settlementReceiptHash);
+
+       function commitEpoch(bytes32 epochId, bytes32 inputsRoot, bytes32 resultHash, uint64 challengeDuration) external {
+           require(epochs[epochId].status == EpochStatus.UNKNOWN, "EPOCH_EXISTS");
+           epochs[epochId] = EpochRecord({
+               inputsRoot: inputsRoot,
+               resultHash: resultHash,
+               challengeExpiresAt: uint64(block.timestamp + challengeDuration),
+               status: EpochStatus.CHALLENGE,
+               settlementReceiptHash: bytes32(0)
+           });
+           emit EpochCommitted(epochId, inputsRoot, resultHash, uint64(block.timestamp + challengeDuration));
+       }
+
+       function finalizeEpoch(bytes32 epochId) external {
+           EpochRecord storage e = epochs[epochId];
+           require(e.status == EpochStatus.CHALLENGE, "INVALID_STATUS");
+           require(block.timestamp >= e.challengeExpiresAt, "CHALLENGE_WINDOW_OPEN");
+           e.status = EpochStatus.FINALIZED;
+           emit EpochFinalized(epochId, e.resultHash);
+       }
+
+       function recordSettlement(bytes32 epochId, bytes32 receiptHash) external {
+           EpochRecord storage e = epochs[epochId];
+           require(e.status == EpochStatus.FINALIZED, "NOT_FINALIZED");
+           e.status = EpochStatus.SETTLED;
+           e.settlementReceiptHash = receiptHash;
+           emit EpochSettled(epochId, receiptHash);
+       }
+   }
+   ```
+2. **Deploy to Testnets**:
+   Deploy `MitraClearing.sol` to Base Sepolia (`84532`) and Tempo Moderato (`42431`) using `.dev-keys/evm-testnet.json`.
+3. **Live Harness (`scripts/run-live-clearing-epoch.mjs`)**:
+   - Construct a 3-party netting cycle (Alice, Bob, Carol).
+   - Execute deterministic netting via `lib/kernel/clearing.ts` (`netObligations`).
+   - Call `commitEpoch` on-chain.
+   - Finalize after challenge window.
+   - Settle residual obligations via `BaseSettlementAdapter` / `TempoSettlementAdapter`.
+   - Call `recordSettlement` and print full 66-character tx hashes.
 
 ---
 
-### Working Agreement & Commands for the Co-Developer
+## 4. Working Agreement & Commands for Purple
 
 ```bash
-# 1. Pull latest and review context digest
+# 1. Pull latest tip on active branch
 git pull origin fix/integrity-f40-f45
+
+# 2. Sync shared context & verify hash chain
+node shared-context-mcp/dist/cli.js sync
+node shared-context-mcp/dist/cli.js audit
 node shared-context-mcp/dist/cli.js digest
 
-# 2. Check baseline health before starting
+# 3. Verify baseline before changes
 npm run typecheck
 npm test
-cargo test -p mitra-vault
 
-# 3. Announce start of work in shared context
+# 4. Announce starting work package
 node shared-context-mcp/dist/cli.js say \
-  --kind progress \
-  --title "Starting Base Sepolia / Tempo transport drivers" \
-  --scope "settlement"
+  --author "agent:claude-purple" \
+  --kind task \
+  --title "Starting Phase 5 Dual-Transport MCP Server" \
+  --scope "ecosystem"
 
-# 4. Verify live adapter tests (when configured)
-BASE_LIVE=1 npx vitest run tests/settlement-adapters.test.ts
-TEMPO_LIVE=1 npx vitest run tests/tempo-adapter.test.ts
-
-# 5. Commit and audit
-node shared-context-mcp/dist/cli.js audit
+# 5. Push progress and sync
+git add -A && git commit -m "..." && git push origin fix/integrity-f40-f45
+node shared-context-mcp/dist/cli.js sync
 ```
