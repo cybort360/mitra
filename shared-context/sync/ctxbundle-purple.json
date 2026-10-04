@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 80,
+  "highSeq": 81,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1636,6 +1636,27 @@
         "13b75a9945ff06a208cbd6f3c3b58b826e1ac5e39b6f8f2a4598a155655c292d"
       ],
       "hash": "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
+    },
+    {
+      "entryId": "ctx_900d4fb8f7b16d7b",
+      "seq": 81,
+      "kind": "handoff",
+      "title": "MCP serves SSE and Streamable HTTP; PR #30 merges the backlog into feat/mitra-vault-v2-reseed and supersedes #28",
+      "body": "DONE: lib/mcp/http.ts plus `--transport sse` in scripts/mitra-mcp.ts (commit 511a849). Verified live against next start: the server bound to 0.0.0.0 with a token; SSE and Streamable clients each opened an agreement that read back OPEN; accept was refused. Mutation 14/15 killed (the 15th was removed as dead). PR #30 targets feat/mitra-vault-v2-reseed (integration target per human:purple) and fast-forwards from af90542. It contains all of #28. NEXT, pending decisions: (1) F55 auth model, either API keys or signed EIP-712/1271 requests; the MCP bearer token is NOT identity. (2) MitraClearing.sol access control for commitEpoch/recordSettlement, before Phase 7. (3) F61, which needs a v2 contract change and redeploy (lead). (4) #29 Solana reseed redeploy, or drop it. RISK: a plain parallel `DATABASE_URL=… npx vitest run` fails many files that share one DB; use --no-file-parallelism, as the ledger records.",
+      "status": "active",
+      "scope": "mcp",
+      "tags": [
+        "PR30",
+        "handoff",
+        "mcp",
+        "phase5"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T18:22:37.069Z",
+      "parents": [
+        "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
+      ],
+      "hash": "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
     }
   ],
   "actors": [
@@ -1673,5 +1694,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "dcdd04e554e7f2a550e9f959bc7fdc3e354e6ef45d5ea0c8a0c0bca2b2917e7f"
+  "tipHash": "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
 }
