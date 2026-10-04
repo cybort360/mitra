@@ -279,6 +279,26 @@ export const MIGRATIONS: string[] = [
   -- pay no agreement. ADD COLUMN IF NOT EXISTS so a database created earlier
   -- gains it on the next migrate, which CREATE TABLE IF NOT EXISTS cannot do.
   ALTER TABLE mitra.reservations ADD COLUMN IF NOT EXISTS agreement_id TEXT;
+  -- The authorization's recipient constraint was accepted and then dropped on write
+  -- (backlog #5): the column did not exist, so a listed authorization lost it.
+  ALTER TABLE mitra.authorizations ADD COLUMN IF NOT EXISTS recipient_constraint TEXT;
+
+  -- Clearing epochs (backlog #5). The route finalizes the STORED epoch, never a
+  -- client-supplied copy (F58).
+  CREATE TABLE IF NOT EXISTS mitra.clearing_epochs (
+    epoch_id   TEXT PRIMARY KEY,
+    status     TEXT NOT NULL,
+    document   JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+
+  -- Agents (backlog #5). Read-only through the API until callers are identified (F55).
+  CREATE TABLE IF NOT EXISTS mitra.agents (
+    agent_id   TEXT PRIMARY KEY,
+    status     TEXT NOT NULL,
+    document   JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
 
   -- Receipts (PRD §17), hash-chained per run. Terminal records: the application
   -- has no UPDATE or DELETE path. UNIQUE (run_id, seq) is the backstop against a

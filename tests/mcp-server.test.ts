@@ -23,12 +23,13 @@ import * as receipts from "@/app/api/v1/receipts/route";
 import * as accounting from "@/app/api/v1/accounting/route";
 import * as clearing from "@/app/api/v1/clearing/route";
 import * as events from "@/app/api/v1/events/route";
+import * as agents from "@/app/api/v1/agents/route";
 
 type Handler = { GET?: (r: Request) => Promise<Response>; POST?: (r: Request) => Promise<Response> };
 const ROUTES: Record<string, Handler> = {
   "/api/v1/agreements": agreements, "/api/v1/authorizations": authorizations, "/api/v1/obligations": obligations as Handler,
   "/api/v1/sagas": sagas, "/api/v1/settlements": settlements, "/api/v1/settlements/evidence": evidence,
-  "/api/v1/receipts": receipts, "/api/v1/accounting": accounting, "/api/v1/clearing": clearing, "/api/v1/events": events,
+  "/api/v1/receipts": receipts, "/api/v1/accounting": accounting, "/api/v1/clearing": clearing, "/api/v1/events": events, "/api/v1/agents": agents,
 };
 
 /** Every request the server made, so tests can assert what reached the API. */
@@ -63,7 +64,7 @@ describe("what the MCP server exposes", () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([...servedToolNames()].sort());
-    for (const withheld of ["mitra_fund_agreement", "mitra_accept_deliverable", "mitra_reject_deliverable"]) {
+    for (const withheld of ["mitra_fund_agreement", "mitra_accept_deliverable", "mitra_reject_deliverable", "mitra_register_agent"]) {
       expect(names, `${withheld} must stay off the surface until the API identifies callers`).not.toContain(withheld);
     }
     for (const verb of prohibitedDirectTools) expect(names).not.toContain(verb);
@@ -163,6 +164,8 @@ describe("served tools go through the real routes", () => {
       ["mitra_get_receipt", { runId: "run_501" }, "/api/v1/receipts?runId=run_501"],
       ["mitra_get_exposure", {}, "/api/v1/accounting"],
       ["mitra_get_timeline", { runId: "run_501" }, "/api/v1/events?runId=run_501"],
+      ["mitra_get_agent", { agentId: "agent_buyer_07" }, "/api/v1/agents?agentId=agent_buyer_07"],
+      ["mitra_find_agents", { capability: "market_research", chain: "solana" }, "/api/v1/agents?capability=market_research&chain=solana"],
     ] as const) {
       seen = [];
       await client.callTool({ name, arguments: args });
