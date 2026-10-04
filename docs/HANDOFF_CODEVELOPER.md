@@ -7,9 +7,11 @@
 
 > [!NOTE]
 > **Baseline Status:**
-> - Multi-rail EVM Vaults deployed and verified on **Base Sepolia** (`84532`) and **Tempo Moderato** (`42431`) at address `0x6a731a654A9bF96b0Fa8A99a4c86F37C2C4eea9c`.
-> - Phase 6 Distributed Sagas (`ADR-0012`) verified live on-chain with automated compensation (`lockEscrow` → `refundEscrow`). Runnable via `npm run verify:saga-events`. Full 66-character hashes verified without truncation (`F52`).
-> - Context audit: **PASS** (`ok=true`, 65 entries verified). Test suite: **PASS** (43 test files, 614 tests passing).
+> - Multi-rail EVM Canonical Vault v2 (`[principal][holder]` + `actionHash` permit, ADR-0009 invariants preserved) deployed and verified on **Base Sepolia** (`84532`, `0x9c2c2d42a1a282b665bc67f407017b7605e51e8f`) and **Tempo Moderato** (`42431`, `0xaa46c23adefed6687cb2180d8a14cf88c6688ee6`).
+> - `PERMIT_TYPEHASH` verified on-chain via `eth_call 0x30adf81f`: `0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`.
+> - Phase 6 Distributed Sagas (`ADR-0012`) re-evidenced on-chain with automated compensation (`lockEscrow` → `refundEscrow`). Runnable via `npm run verify:saga-events`. Full un-truncated 66-character hashes verified live (`F52`).
+> - All 5 Verification Gates: **PASS** (Gate 1 Typecheck: 0 errors; Gate 2 Vitest: 737 passed, 0 failed; Gate 3 Foundry: 30/30 passed; Gate 4 Sagas: 100% verified; Gate 5 Shared Context: 76 entries audited, `ok=true`, tip `d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af`).
+> - Active branch: `feat/mitra-vault-v2-reseed` (tip `e9b710f`).
 
 This handoff specifies the implementation and live verification of **Phase 5** and **Phase 7** per `docs/product/MITRA_PRD.md` (§14, §19–§25, §52):
 
@@ -151,7 +153,7 @@ Move clearing from purely local graph reduction to on-chain verifiable epoch com
 
 ```bash
 # 1. Pull latest tip on active branch
-git pull origin fix/integrity-f40-f45
+git pull origin feat/mitra-vault-v2-reseed
 
 # 2. Sync shared context & verify hash chain
 node shared-context-mcp/dist/cli.js sync
@@ -161,6 +163,7 @@ node shared-context-mcp/dist/cli.js digest
 # 3. Verify baseline before changes
 npm run typecheck
 npm test
+forge test
 
 # 4. Announce starting work package
 node shared-context-mcp/dist/cli.js say \
@@ -170,6 +173,6 @@ node shared-context-mcp/dist/cli.js say \
   --scope "ecosystem"
 
 # 5. Push progress and sync
-git add -A && git commit -m "..." && git push origin fix/integrity-f40-f45
+git add -A && git commit -m "..." && git push origin feat/mitra-vault-v2-reseed
 node shared-context-mcp/dist/cli.js sync
 ```
