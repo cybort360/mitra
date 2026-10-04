@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080" role="img" aria-label="Mitra multilateral obligation network collapsing into a single central clearing point">
+  <title>MITRA — multilateral obligations collapse into one net position</title>
+  <desc>Left: six parties generate eleven pairwise obligations as a dense mesh. Centre: obligations converge through a netting funnel. Right: one minimal central clearing point emits a single residual transfer. Settled nodes carry amber accent.</desc>
+  <defs>
+    <radialGradient id="vignette" cx="50%" cy="46%" r="72%">
+      <stop offset="0%" stop-color="#0d1524"/>
+      <stop offset="62%" stop-color="#080b12"/>
+      <stop offset="100%" stop-color="#03050a"/>
+    </radialGradient>
+    <linearGradient id="meshFade" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2f6bff" stop-opacity=".10"/>
+      <stop offset="72%" stop-color="#4d8dff" stop-opacity=".62"/>
+      <stop offset="100%" stop-color="#7ab4ff" stop-opacity=".95"/>
+    </linearGradient>
+    <linearGradient id="nettingFade" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2f6bff" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#9ec5ff" stop-opacity=".85"/>
+    </linearGradient>
+    <filter id="softGlow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="tightGlow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="amberGlow" x="-160%" y="-160%" width="420%" height="420%">
+      <feGaussianBlur stdDeviation="16" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#vignette)"/>
+
+  <!-- GRID: 96px Swiss module -->
+  <g stroke="#5b8cff" stroke-opacity=".055" stroke-width="1">
+    <path d="M0 96H1920M0 192H1920M0 288H1920M0 384H1920M0 480H1920M0 576H1920M0 672H1920M0 768H1920M0 864H1920M0 960H1920"/>
+    <path d="M96 0V1080M192 0V1080M288 0V1080M384 0V1080M480 0V1080M576 0V1080M672 0V1080M768 0V1080M864 0V1080M960 0V1080M1056 0V1080M1152 0V1080M1248 0V1080M1344 0V1080M1440 0V1080M1536 0V1080M1632 0V1080M1728 0V1080M1824 0V1080"/>
+  </g>
+
+  <!-- ============ REGION 1: MULTILATERAL MESH ============ -->
+  <g id="mesh">
+    <!-- obligation edges -->
+    <g stroke="url(#meshFade)" stroke-width="1.5" fill="none">
+      <path d="M232 356 L432 268 L648 392"/>
+      <path d="M232 356 L648 392"/>
+      <path d="M232 356 L416 636"/>
+      <path d="M432 268 L416 636"/>
+      <path d="M432 268 L716 596"/>
+      <path d="M648 392 L716 596"/>
+      <path d="M648 392 L416 636"/>
+      <path d="M416 636 L716 596"/>
+      <path d="M648 392 L296 796"/>
+      <path d="M296 796 L416 636"/>
+      <path d="M296 796 L716 596"/>
+      <path d="M716 596 L880 424"/>
+      <path d="M232 356 L880 424"/>
+      <path d="M880 424 L296 796"/>
+    </g>
+    <!-- edge weight ticks -->
+    <g stroke="#8fbcff" stroke-opacity=".5" stroke-width="2" stroke-linecap="round">
+      <path d="M340 312h14"/><path d="M540 330h14"/><path d="M324 496h14"/>
+      <path d="M424 452h14"/><path d="M574 432h14"/><path d="M682 494h14"/>
+      <path d="M566 616h14"/><path d="M356 716h14"/><path d="M506 696h14"/>
+    </g>
+
+    <!-- parties -->
+    <g filter="url(#softGlow)">
+      <circle cx="232" cy="356" r="9" fill="#04070d" stroke="#5b9bff" stroke-width="2.5"/>
+      <circle cx="432" cy="268" r="7" fill="#04070d" stroke="#5b9bff" stroke-width="2"/>
+      <circle cx="648" cy="392" r="9" fill="#04070d" stroke="#5b9bff" stroke-width="2.5"/>
+      <circle cx="296" cy="796" r="7" fill="#04070d" stroke="#5b9bff" stroke-width="2"/>
+      <circle cx="716" cy="596" r="9" fill="#04070d" stroke="#5b9bff" stroke-width="2.5"/>
+    </g>
+    <!-- settled party: amber accent -->
+    <g filter="url(#amberGlow)">
+      <circle cx="416" cy="636" r="13" fill="#04070d" stroke="#ffb340" stroke-width="3"/>
+      <circle cx="416" cy="636" r="4.5" fill="#ffb340"/>
+    </g>
+    <!-- clearing engine party -->
+    <circle cx="880" cy="424" r="10" fill="#04070d" stroke="#9ec5ff" stroke-width="2.5"/>
+
+    <g font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-size="15" fill="#c9dcff" letter-spacing="1.1">
+      <text x="150" y="330">BUYER AGENT</text>
+      <text x="416" y="240">RESEARCH AGENT</text>
+      <text x="666" y="380">EVALUATOR</text>
+      <text x="232" y="828">KEEPER / RECOVERY</text>
+      <text x="736" y="622">DATA AGENT</text>
+      <text x="380" y="672" fill="#ffce8a">PROVIDER</text>
+      <text x="900" y="416" fill="#e2edff">CLEARING</text>
+    </g>
+    <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="11" fill="#5f7fb8" letter-spacing=".6">
+      <text x="150" y="348">A</text><text x="416" y="258">B</text><text x="666" y="398">C</text>
+      <text x="232" y="846">D</text><text x="736" y="640">E</text><text x="366" y="690" fill="#c98f2e">F</text>
+      <text x="900" y="434">G</text>
+    </g>
+  </g>
+
+  <!-- ============ REGION 2: NETTING FUNNEL ============ -->
+  <g id="netting">
+    <g stroke="url(#nettingFade)" stroke-width="1.25" fill="none" stroke-opacity=".9">
+      <path d="M880 424 C1060 424 1200 520 1306 540"/>
+      <path d="M416 636 C900 636 1170 600 1306 547"/>
+      <path d="M716 596 C1000 596 1180 572 1306 545"/>
+      <path d="M648 392 C1000 392 1180 508 1306 537"/>
+      <path d="M232 356 C880 356 1180 486 1306 534"/>
+      <path d="M296 796 C1000 796 1180 618 1306 551"/>
+      <path d="M432 268 C1060 268 1190 496 1306 531"/>
+    </g>
+    <!-- netting epoch gates -->
+    <g stroke="#5b8cff" stroke-opacity=".14" stroke-width="1">
+      <path d="M1056 366 V760"/><path d="M1176 366 V760"/>
+    </g>
+    <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="11" fill="#4d6b9e" letter-spacing=".5">
+      <text x="1046" y="356">OPEN</text>
+      <text x="1166" y="356">FROZEN</text>
+    </g>
+  </g>
+
+  <!-- ============ REGION 3: THE CLEARING POINT ============ -->
+  <g id="clearingPoint" filter="url(#softGlow)">
+    <circle cx="1392" cy="544" r="86" fill="none" stroke="#4d8dff" stroke-opacity=".18" stroke-width="1"/>
+    <circle cx="1392" cy="544" r="56" fill="none" stroke="#6ba4ff" stroke-opacity=".30" stroke-width="1"/>
+    <circle cx="1392" cy="544" r="30" fill="#071019" stroke="#a8cdff" stroke-width="2.5"/>
+    <circle cx="1392" cy="544" r="9" fill="#cfe2ff" filter="url(#tightGlow)"/>
+  </g>
+  <g font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-size="13" fill="#93b6e8" letter-spacing="2.4" text-anchor="middle">
+    <text x="1392" y="668">CENTRAL CLEARING POINT</text>
+  </g>
+
+  <!-- residual transfer out -->
+  <g stroke="#ffb340" stroke-width="2" fill="none" filter="url(#amberGlow)">
+    <path d="M1478 538 L1668 538"/>
+  <path d="M1478 560 L1668 560" stroke-opacity=".45" stroke-width="1.25"/>
+  </g>
+  <circle cx="1676" cy="549" r="7" fill="#04070d" stroke="#ffb340" stroke-width="2.5" filter="url(#amberGlow)"/>
+  <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="12" fill="#ffce8a" letter-spacing=".7">
+    <text x="1724" y="602" text-anchor="end" fill="#ffb340">2 TRANSFERS</text>
+    <text x="1724" y="622" text-anchor="end">A&#8594;B $3 &#183; A&#8594;D $2</text>
+  </g>
+
+  <!-- ============ TYPOGRAPHY ============ -->
+  <g font-family="'Inter','Helvetica Neue',Arial,sans-serif" fill="#eaf2ff">
+    <text x="96" y="86" font-size="15" letter-spacing="7">MITRA</text>
+    <text x="96" y="108" font-size="11" fill="#5f7fb8" letter-spacing="2.6">FINANCIAL COORDINATION LAYER</text>
+    <text x="1824" y="86" font-size="11" fill="#5f7fb8" letter-spacing="2.6" text-anchor="end">AUTHORITY &#183; COMMERCE &#183; CLEARING &#183; RECOVERY</text>
+    <text x="1824" y="108" font-size="11" fill="#3f5c88" letter-spacing="2" text-anchor="end">A &#8594; B $10 &#183; B &#8594; C $7 &#183; C &#8594; A $5 &#183; A &#8594; D $2</text>
+  </g>
+  <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="12" fill="#5f7fb8" letter-spacing=".6">
+    <text x="96" y="1002">14 OBLIGATIONS</text>
+    <text x="330" y="1002">7 PARTIES</text>
+    <text x="512" y="1002">4 NET POSITIONS</text>
+    <text x="700" y="1002" fill="#c98f2e">SETTLED</text>
+    <text x="1824" y="1002" text-anchor="end" fill="#3f5c88">CLEARING EPOCH 04 &#183; FROZEN &#8594; CALCULATING &#8594; SETTLED</text>
+  </g>
+  <g stroke="#5b8cff" stroke-opacity=".22" stroke-width="1">
+    <path d="M96 1184 H1824"/>
+  </g>
+</svg>
