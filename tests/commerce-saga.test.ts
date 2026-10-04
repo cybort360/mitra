@@ -231,4 +231,37 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
     expect(f.saga?.timeoutPolicy, "an empty policy falls back to a default").toBeTruthy();
     expect(f.agreement.status).toBe("FUNDED");
   });
+
+  it("funding with onChainEscrow pre-commits the on-chain refund route and sets escrowRef (PRD §15.5, ADR-0012)", async () => {
+    const { agreement } = await opened();
+    const jobId = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    const onChainEscrow = {
+      chain: "baseSepolia",
+      contractAddress: "0x6a731a654423d64afb9839742c3e48c6c54eea9c",
+      jobId,
+      timeout: Math.floor(Date.now() / 1000) + 3600,
+    };
+
+    const f = await drive(repo, space(), agreement, "fund", { onChainEscrow });
+    expect(f.agreement.escrowRef).toBe(jobId);
+    expect(f.saga?.status).toBe("ARMED");
+
+    const expectedRouteId = `route_refund_${jobId.slice(0, 10)}`;
+    expect(f.saga?.compensationRoutes).toEqual([expectedRouteId]);
+
+    // Start execution and advance to submit
+    const e = await drive(repo, f.space, f.agreement, "startExecution");
+    const sub = await drive(repo, e.space, e.agreement, "submitDeliverable");
+
+    // Reject deliverable: walks through to RECOVERED with the on-chain route
+    const r = await drive(repo, sub.space, sub.agreement, "rejectDeliverable", {
+      onChainEscrow,
+      failureReason: "ON_CHAIN_DELIVERABLE_REJECTED",
+    });
+
+    expect(r.agreement.status).toBe("REJECTED");
+    expect(r.saga?.status).toBe("RECOVERED");
+    expect(r.saga?.routeAttempts?.[expectedRouteId]).toBe(1);
+  });
 });
+

@@ -52,3 +52,7 @@ programs/*/Cargo.lock
 # secrets tests exist to prevent, and the directory is 32MB of RocksDB besides.
 test-ledger/
 .dev-logs/
+
+# Foundry build artefacts for contracts/
+out/
+cache/

@@ -10,6 +10,35 @@
 //! instruction here re-derives authority from the account itself. No caller can
 //! supply their own authorization.
 
+
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "mitra-vault",
+    // Both URLs are derived from the repository's ACTUAL remote
+    // (git remote -v -> github.com/cybort360/mitra) and the file that exists at
+    // docs/SECURITY.md.
+    //
+    // The handoff proposed `https://mitra.network` and
+    // `email:security@mitra.network`. **Neither appears anywhere in this
+    // repository except in that handoff document itself.** Publishing a disclosure
+    // contact that nobody controls is worse than publishing none: a researcher who
+    // mails it and gets nothing has learned the program is unmaintained. That is the
+    // F39/F40 failure shape — an unverifiable external fact, asserted in a config,
+    // where a real domain would have to be confirmed to exist.
+    //
+    // GitHub Security Advisories is used as the contact because it is a real
+    // mechanism the repository already has, not because it is the nicest option.
+    // If a monitored `security@` mailbox is later configured, replace this here.
+    contacts: "https://github.com/cybort360/mitra/security/advisories/new",
+    policy: "https://github.com/cybort360/mitra/blob/main/docs/SECURITY.md",
+    preferred_languages: "en",
+    source_code: "https://github.com/cybort360/mitra",
+    // Stated as ABSENCE, not as a pending promise. docs/SECURITY.md says outright
+    // that no independent audit has been performed, and an explorers' panel should
+    // not imply one is scheduled.
+    auditors: "None. This program has NOT been independently audited."
+}
+
 pub mod anchor_parity;
 pub mod rent;
 pub mod state;

@@ -1,0 +1,20 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["node_modules"]
+# solc 0.8.24+ for the EIP-712 and custom-error features the contract uses.
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+# `via_ir = true` reverses an earlier decision to leave it off. Reason: with nine
+# parameters, `spendAuthorized` hits solc's "Stack too deep" in the legacy codegen.
+#
+# The original reasoning was that via_ir changes overflow-check elision and this
+# contract leans on checked arithmetic. That reasoning is now judged LESS important
+# than compiling at all, because unchecked arithmetic in code that does not exist is
+# not a safety property. The arithmetic guards are `require`s on explicit comparisons,
+# not overflow-dependent, so they survive either codegen.
+#
+# If a future compiler still overflows the stack, the correct fix is a struct
+# parameter — NOT removing a guard.
+via_ir = true

@@ -86,6 +86,13 @@ const OpenAgreementSchema = z.object({
   }),
 });
 
+const OnChainEscrowSchema = z.object({
+  chain: z.string().min(1),
+  contractAddress: z.string().min(1),
+  jobId: z.string().min(1),
+  timeout: z.number().optional(),
+});
+
 const TransitionAgreementSchema = z.object({
   op: z.enum([
     "fund",
@@ -102,6 +109,7 @@ const TransitionAgreementSchema = z.object({
   artifactRefs: z.array(z.string()).optional(),
   contentHash: z.string().optional(),
   failureReason: z.string().optional(),
+  onChainEscrow: OnChainEscrowSchema.optional(),
 });
 
 const AgreementPostSchema = z.discriminatedUnion("op", [
@@ -231,6 +239,7 @@ export async function POST(req: Request) {
       artifactRefs: body.artifactRefs,
       contentHash: body.contentHash,
       failureReason: body.failureReason,
+      onChainEscrow: body.onChainEscrow,
     },
   );
 

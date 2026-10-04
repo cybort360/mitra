@@ -20,6 +20,7 @@ part that was hard to recover.
 | [0009](0009-mandate-semantics-reuse-engraving.md) | Mandate semantics reuse Engraving's model; refuse COTI and its status machine | Accepted |
 | [0010](0010-space-is-a-scope-not-a-container.md) | Space is a scope entities reference, not a container that stores them; `Space.agreementIds` removed as unenforced duplication | Accepted |
 | [0011](0011-space-governance-is-two-modes-chosen-by-participants.md) | **LOCKED.** Space governance is ADMIN or QUORUM, chosen by its participants; marketplace rules referenced by digest, never absorbed | Accepted |
+| [0012](0012-distributed-sagas-over-local-vault-primitives.md) | Sagas are distributed state machines over local vault primitives, not monolithic contracts | Proposed |
 
 ## Format
 

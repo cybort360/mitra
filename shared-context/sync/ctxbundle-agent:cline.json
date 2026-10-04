@@ -1,6 +1,6 @@
 {
   "fromNodeId": "agent:cline",
-  "highSeq": 45,
+  "highSeq": 66,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -866,6 +866,455 @@
         "5a2cf58da5674165f93c80671dffa86ea3836bafba781ad8136619c14fa27523"
       ],
       "hash": "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
+    },
+    {
+      "entryId": "ctx_e68be46f59177192",
+      "seq": 46,
+      "kind": "progress",
+      "title": "F49 step 3 — Layer B routes (/api/v1/sagas) and Moderato RPC backoff",
+      "body": "Step 3 complete: added app/api/v1/sagas/route.ts and tests/sagas-api.test.ts (4 tests). Sagas produced by real commercial rejection lifecycles are now queryable via HTTP by sagaId or runId filter. Fixed Moderato RPC -32002 rate-limit flakiness in scripts/fund-tempo.mjs and tests/dev-scripts.test.ts using exponential backoff and staggered balance requests. Updated forge/EXECUTION_PLAN.md and forge/PROOF_LEDGER.md: Recovery phase promoted to INTEGRATED.",
+      "status": "active",
+      "scope": "recovery",
+      "tags": [
+        "f49",
+        "recovery",
+        "rpc",
+        "sagas",
+        "step3"
+      ],
+      "authorId": "agent",
+      "createdAt": "2026-10-03T06:29:22.884Z",
+      "parents": [
+        "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
+      ],
+      "hash": "a7b5ec16fc9ab4211d6f8e24a56cbaba26d0fa0bec2e1620e1c80f141890b34c"
+    },
+    {
+      "entryId": "ctx_8dc74302e2fff642",
+      "seq": 47,
+      "kind": "handoff",
+      "title": "Handoff to co-developer: Phase 1 (Agreements Write), Phase 2 (Clearing), Phase 3 (Settlement)",
+      "body": "Step 3 (Layer B routes: /api/v1/sagas) and Moderato RPC backoff committed at 97887fc and pushed to origin/fix/integrity-f40-f45. Head is clean, 497 TS tests pass, 88 Rust tests pass. Complete phase-by-phase execution guide authored in artifacts: Phase 1 (POST /api/v1/agreements write surface for Prometheus), Phase 2 (POST /api/v1/clearing netting pipeline for Pando), Phase 3 (Base and Tempo live transports).",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "clearing",
+        "commerce",
+        "handoff",
+        "pando",
+        "phases",
+        "prometheus"
+      ],
+      "authorId": "agent",
+      "createdAt": "2026-10-03T06:36:30.361Z",
+      "parents": [
+        "a7b5ec16fc9ab4211d6f8e24a56cbaba26d0fa0bec2e1620e1c80f141890b34c"
+      ],
+      "hash": "0fcf850d8e0eacbf9a1c899959d26f0adf5b8a94a721a16c675b830f015a7cc6"
+    },
+    {
+      "entryId": "ctx_4bcfc903fc985d50",
+      "seq": 48,
+      "kind": "task",
+      "title": "Starting settlement transports on feat/settlement-transports — Tempo first, then Base, then Solana",
+      "body": "Taking docs/HANDOFF_CODEVELOPER.md (settlement and live transports). Branch feat/settlement-transports, cut from fix/integrity-f40-f45 at 0691338.\n\nORDER, and why: (1) Tempo Moderato first. tempo-pay.mjs and fund-tempo.mjs already exist and the faucet is callable over RPC, so a live TIP-20 settlement can be proven from a fresh machine. (2) Base Sepolia second. It needs bridged L2 gas, and this machine has no .dev-keys. (3) Solana binding to the mitra-vault PDA last.\n\nCONSTRAINTS I am holding to: the transports implement the EXISTING BaseTransport/TempoTransport/SolanaTransport interfaces in lib/adapters. The handoff names sendUserOp/verify1271 methods that the code does not define, and the code is the source of truth. The no-transport path stays a throw of UnconfiguredAdapterError. Tempo confirmation comes from decoded Transfer logs only (F40), with 3-attempt backoff on -32002. Live tests stay gated behind TEMPO_LIVE=1 or BASE_LIVE=1.\n\nBASELINE on this machine (separate from the handoff's claim): 485 pass / 49 skip. The 12-test gap to 497 is dev-scripts, which self-skips without .dev-keys. Rust 88/88, but only under rustc 1.98.1 and only from programs/mitra-vault/. Lockfile was out of sync, so npm ci failed. Fixed in b7ff650.\n\nTO VERIFY BEFORE CLAIMING: BASE_ASSETS.USDC is the Base MAINNET USDC address, yet the adapter runs at chainId 84532. That looks like the F39/F40 class (a registry wrong for its chain). I will check eth_getCode on Sepolia before recording it.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "base",
+        "phase-8",
+        "phase-9",
+        "solana",
+        "tempo",
+        "transport"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T10:56:19.772Z",
+      "parents": [
+        "0fcf850d8e0eacbf9a1c899959d26f0adf5b8a94a721a16c675b830f015a7cc6"
+      ],
+      "hash": "68fe2dce7c87adf71a450ec734fec41943159a089a0470635c802b78966d42d9"
+    },
+    {
+      "entryId": "ctx_444d6f079287b50f",
+      "seq": 49,
+      "kind": "finding",
+      "title": "BASE_ASSETS.USDC is the mainnet address and has no code on Base Sepolia; the adapter settles on 84532",
+      "body": "lib/adapters/base.ts sets BASE_ASSETS.USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913, which is Base MAINNET USDC. The registry is keyed by symbol only, not by chain. On sepolia.base.org, eth_getCode for that address returns 0 bytes and symbol() returns nothing. Circle's Base Sepolia USDC is 0x036CbD53842c5426634e7929541eC2318f3dCF7e: 1798 bytes of code, symbol() = USDC. So a Base Sepolia USDC settlement would target an address with no contract. This is the same class as F39/F40 (a registry that is wrong for its chain). I will fix it on feat/settlement-transports by keying the registry by chain id, and add a BASE_LIVE test that reads symbol() from the node.\n\nAlso recorded: Tempo live settlement VERIFIED on Moderato through TempoSettlementAdapter + ModeratoTransport. The memo equals the EIP-712 commitment on-chain (txs are in PROOF_LEDGER, commit c0fd267). fund-tempo.mjs crashed on a fresh address (null receipt), fixed in the same commit.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F39-class",
+        "base",
+        "phase-8",
+        "registry"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T11:16:16.899Z",
+      "parents": [
+        "68fe2dce7c87adf71a450ec734fec41943159a089a0470635c802b78966d42d9"
+      ],
+      "hash": "0a05e1e5b5e3f4c6c3a542cdb610248a8c89267cecda8fdbf42ac96773c9ad96"
+    },
+    {
+      "entryId": "ctx_8cc23bd8a75c9200",
+      "seq": 50,
+      "kind": "decision",
+      "title": "Base and Tempo both settle live through SettlementAdapter; the commitment is on-chain on both rails",
+      "body": "Branch feat/settlement-transports. Not pushed at the time of writing.\n\nDECISION: how the commitment travels on each rail. Tempo uses TIP-20 transferWithMemo, with the EIP-712 commitment as the indexed memo (event topic 0x57bc7354...). Base uses a plain ERC-20 transfer with the 32-byte commitment appended to the calldata. A live test showed USDC ignores the suffix, at +522 gas. I REJECTED plain transfer: the link between settlement and payment would then exist only in Mitra's own records, which is the local truth PRD 21.4 says a counterparty cannot check. On both rails verify() decodes the tx calldata for the intended recipient and amount, requires the commitment, and confirms only from a Transfer log matching the token, recipient and exact amount. Neither rail reads a balance.\n\nDEVIATION FROM docs/HANDOFF_CODEVELOPER.md: the handoff names sendUserOp/verify1271 on BaseTransport. The code's interface is send/verify, and I implemented that. The Base path is an EOA transfer. ERC-4337 (scripts/base-4337.mjs) is NOT wired through the transport. That is the next Base step if smart-account settlement is wanted.\n\nDEFECTS FIXED, each reproduced first: BASE_ASSETS held mainnet USDC on Sepolia (0 bytes of code there), so the registry is now keyed by chain id. settlementCommitment signed whole units as amountAtomic and threw on any fractional amount. fund-tempo.mjs crashed on null receipts on a fresh address.\n\nEVIDENCE: Tempo txs 0x013cbff9..., 0x8fb53e05...; Base tx 0xcd1778b0... (full hashes in PROOF_LEDGER). Mutation audits: Tempo 15/15, Base 18/18. Suite 547 pass / 40 skip.\n\nSTILL TRUE: no route or kernel code constructs any settlement adapter. Phases 8 and 9 are TESTED/PARTIAL, not done. Solana binding to the mitra-vault PDA is next.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "base",
+        "evidence",
+        "phase-8",
+        "phase-9",
+        "tempo",
+        "transport"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T11:48:29.224Z",
+      "parents": [
+        "0a05e1e5b5e3f4c6c3a542cdb610248a8c89267cecda8fdbf42ac96773c9ad96"
+      ],
+      "hash": "251289c8e066d4c0f1513fd4891955713474819abff981933ac38a909e2fe759"
+    },
+    {
+      "entryId": "ctx_378e7a61eb6fbf6b",
+      "seq": 51,
+      "kind": "blocker",
+      "title": "mitra-vault: any signer can issue a permit against any mandate, and a permit can spend a vault its holder does not own",
+      "body": "VERIFIED in-process against the real mitra_vault::dispatch, with real AccountInfos, rustc 1.98.1. NOT exercised on devnet.\n\nGAP 1, spend_authorized (lib.rs ~771): there is no check that vault_account belongs to the permit's holder. It checks program ownership of vault, authorization and mandate, and checks authorization.holder == mandate.holder. It never checks vault.authority == mandate.holder, and never re-derives the vault PDA from the holder. Repro: the attacker opens their own mandate and permit, then passes the victim's vault PDA. The result is Ok(()), the attacker receives 5000 lamports, and the victim's available drops 10000 to 5000. The existing tests/spend_integration.rs fixture already builds the vault with Vault::new(Pubkey::new_unique(), ...), an authority unrelated to the holder, so the suite has been passing over this.\n\nGAP 2, authorize (lib.rs ~631): policy_engine only has to be a signer. The program never checks that it is the holder, or any key recorded on the mandate. Repro: a stranger key issues a 5000-unit permit against the victim's mandate, and the result is Ok(()). This contradicts ADR-0009 decision 2 ('Only the program may author an Authorization. The kernel may propose') and the open_mandate doc comment ('it cannot mint a permit').\n\nCOMBINED: the recipient is a caller-chosen account that neither the permit nor action_hash binds. With gap 2 alone, anyone can issue permits against a victim's mandate with fresh action_hashes and spend the victim's vault to themselves, one mandate.limit at a time. Fixing gap 1 alone does NOT close this.\n\nIMPACT ON MY WORK: I am not binding SolanaSettlementAdapter to spend_authorized until this is fixed. A settlement transport over a drainable vault would put a live claim on top of it.\n\nWHO: the deployed program GkQQtmVX... has upgrade authority C4ZoTdNSPkC6WeAPZQ4kXVDyvrZ5NY7YCxvMUY2pSefD (the lead). Only the lead can redeploy. Repro tests are in my scratchpad, ready to become regression tests on a fix branch.\n\nFIX SHAPE, not applied, for discussion: (a) spend_authorized re-derives the vault PDA from mandate.holder and checks vault.authority; (b) authorize requires the holder to sign, or a policy-engine key recorded on the mandate at open time; (c) bind the recipient into the permit (store it, or require action_hash to commit to it) so a valid permit cannot be redirected.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "ADR-0009",
+        "authorize",
+        "execution-guard",
+        "mitra-vault",
+        "needs-lead",
+        "spend_authorized"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T12:06:40.839Z",
+      "parents": [
+        "251289c8e066d4c0f1513fd4891955713474819abff981933ac38a909e2fe759"
+      ],
+      "hash": "122e8fa4e0255a9cf0ed3a54558ac7465875f368b28d13a6e6bed0a62dc87b33"
+    },
+    {
+      "entryId": "ctx_12de11eeef4bf707",
+      "seq": 52,
+      "kind": "task",
+      "title": "Fixing mitra-vault permit binding on fix/vault-permit-binding — code and tests only, NOT deployed",
+      "body": "Fix for blocker ctx_378e7a61eb6fbf6b. Branch fix/vault-permit-binding, cut from fix/integrity-f40-f45 at 0691338. No deploy: only the lead (C4ZoTdNS...) can upgrade GkQQtmVX....\n\nA THIRD GAP found while designing the fix: spend_authorized requires no signer at all, and the recipient is caller-chosen. So any observer can redeem any unspent on-chain permit to themselves.\n\nDESIGN, following the PRD ('the principal's mandate'; authority.create({agentId,...}) is the principal's call; an agent spend vault is 'linked to one agent mandate') and ADR-0009 decision 2:\n- Mandate gains principal + policy_engine. open_mandate is signed by the PRINCIPAL, who must be the authority of the named vault. The agent no longer grants itself a mandate. This reverses the 'self-binding by holder' comment, deliberately.\n- authorize: the signer must equal mandate.policy_engine. Takes a recipient, which is stored in the Authorization.\n- spend_authorized: the vault must be the PDA of mandate.principal, with matching authority, and the recipient must equal authorization.recipient.\n- amend_mandate: the principal may amend or revoke. The holder may ONLY revoke (it can stop itself but not widen itself).\n- Legacy 96/97-byte mandates still load but are UNBOUND, and cannot authorize or spend (fail closed).\nLayouts change: MANDATE_LEN 97 -> 137, AUTHORIZATION_LEN 98 -> 130. New errors 6015-6018. The devnet scripts (authority-devnet.mjs) must change with the redeploy. I will list exactly what in the handoff, not edit them blind.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "layout-change",
+        "mitra-vault",
+        "needs-lead"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T14:04:56.341Z",
+      "parents": [
+        "122e8fa4e0255a9cf0ed3a54558ac7465875f368b28d13a6e6bed0a62dc87b33"
+      ],
+      "hash": "dd6b377bf5994a67846da1cbb00e8b9625d33766139b623f3f67efc28a7da633"
+    },
+    {
+      "entryId": "ctx_a8144f51f6b237b7",
+      "seq": 53,
+      "kind": "handoff",
+      "title": "F51 vault fix is on fix/vault-permit-binding (6464bb1): needs lead review, an SBF build and a devnet redeploy",
+      "body": "For the lead (upgrade authority C4ZoTdNS...). Resolves blocker ctx_378e7a61eb6fbf6b in code only. Branch fix/vault-permit-binding, pushed, cut from fix/integrity-f40-f45.\n\nDONE: Mandate is bound to { principal, policy_engine }. The principal signs open_mandate over its own vault. Only the named engine may authorize. The permit records its recipient. spend checks the principal's vault PDA, that vault's recorded authority, and the payee. The principal amends; the holder may only revoke. Legacy mandates are inert (6018). Full write-up in forge/FAILURES.md F51; FR-VAULT-006 is now PARTIAL in INVARIANTS.md.\n\nEVIDENCE: Rust 103 pass / 0 fail. tests/permit_binding.rs has 13 handler-level tests, each refusal paired with the legitimate path. Mutation audit 14/14. TS 497 pass on this branch.\n\nYOUR DECISIONS, please review rather than accept:\n(1) open_mandate now takes the principal as signer, reversing the 'self-binding by holder' design.\n(2) amend: the holder may still revoke itself.\n(3) The mandate PDA is still seeded by holder only, so one mandate per agent and a first-grant squat is possible (DoS, not theft). Reseeding by [principal, holder] is the fix if you want it.\n\nNOT DONE: no SBF build (cargo-build-sbf is not on my machine) and no devnet run. scripts/authority-devnet.mjs encodes the OLD layouts and must change at redeploy. F51 lists the new account and arg layouts.\n\nBLOCKS: binding SolanaSettlementAdapter to spend_authorized on feat/settlement-transports. I will not build that until this is reviewed, because the transport's arg layout depends on it.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F51",
+        "mitra-vault",
+        "needs-lead",
+        "redeploy"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T14:13:52.655Z",
+      "parents": [
+        "dd6b377bf5994a67846da1cbb00e8b9625d33766139b623f3f67efc28a7da633"
+      ],
+      "hash": "ec7fff6d870e4617f64143d6e60ad5ce39e5573730801c6f3ad179b741f1b2bb"
+    },
+    {
+      "entryId": "ctx_034bc2b5fbec3b30",
+      "seq": 54,
+      "kind": "handoff",
+      "title": "READ FIRST (lead): purple session 2026-10-03 — vault drain vulnerability fixed but not deployed; Base and Tempo settle live; three branches",
+      "body": "Index of everything human:purple + agent:claude-purple did on 2026-10-03. Detail is in seq 48-53. Nothing here was merged to main or to fix/integrity-f40-f45. This bundle commit is the only thing pushed to your branch.\n\n1. SECURITY: ACTION NEEDED (seq 51, 53; forge/FAILURES.md F51 on fix/vault-permit-binding)\nThe deployed mitra-vault (GkQQtmVX... on devnet) lets a stranger move any principal's capital. Three ways: (a) spend_authorized debits whatever vault the caller names; (b) authorize accepts ANY signer as the policy engine; (c) spend_authorized has no signer and the caller picks the payee, so anyone can redeem anyone's unspent permit. Underneath: the agent grants and widens its own mandate, and no mandate names a vault or principal. Each was reproduced against the real dispatch. The existing spend fixtures built vaults unrelated to the mandate, so the suite asserted the attack as success.\nFIX: branch fix/vault-permit-binding @ 6464bb1, cut from your branch. Principal-signed, vault-bound mandates; an engine named on the mandate; the recipient bound into the permit; the holder may only revoke. Rust 103/103, mutation 14/14, TS 497 pass.\nNEEDS YOU: review 3 design choices (listed in seq 53), an SBF build, a redeploy (you hold the upgrade key C4ZoTdNS...), and updating authority-devnet.mjs to the new layouts.\n\n2. SETTLEMENT TRANSPORTS (seq 48-50), branch feat/settlement-transports\n- Tempo: ModeratoTransport. transferWithMemo carries the EIP-712 commitment on-chain. verify reads decoded logs only. Backoff on -32002. LIVE on Moderato, 2 txs.\n- Base: BaseRpcTransport (viem, EOA). An ERC-20 transfer with the commitment appended to the calldata. LIVE on Base Sepolia, 1 tx, 0.01 USDC.\n- Fixed along the way: BASE_ASSETS had mainnet USDC on Sepolia (no contract there); the Base commitment signed whole units and threw on fractions; fund-tempo.mjs crashed on null receipts; package-lock was out of sync (npm ci failed).\n- Phases 8/9 are TESTED/PARTIAL: no route or kernel code calls any settlement adapter yet. The Base ERC-4337 path is not wired.\n- Solana binding is PARKED until F51 is reviewed, because its instruction layout depends on the fix.\n\n3. QUESTION FOR YOU before we wire settlement into the execute path: who holds EVM vault signing keys (server custody vs external signer), and which agreement states may release payment (Prometheus)? We will not decide either for you.\n\nNew dev keys on purple's machine (testnet only): EVM 0x7823d6bea51cc21c5d8588c7ff72e33130848116, Solana ETjm3HV8RpKkGdWNShv2GZsL9ricWnVnnLqoK5QnWBf1.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F51",
+        "needs-lead",
+        "security",
+        "settlement",
+        "summary"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T14:54:00.697Z",
+      "parents": [
+        "ec7fff6d870e4617f64143d6e60ad5ce39e5573730801c6f3ad179b741f1b2bb"
+      ],
+      "hash": "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
+    },
+    {
+      "entryId": "ctx_4c88878251d252d4",
+      "seq": 55,
+      "kind": "decision",
+      "title": "Lead response: EVM signing keys, payment release states, and F51 design approval",
+      "body": "Decisions and answers to Purple's Seq 53 & Seq 54 questions:\n\n1. EVM VAULT SIGNING KEYS:\nFor testnet execution (Base Sepolia & Tempo Moderato), use the local relayer execution key (.dev-keys/evm-testnet.key) operating as an authorized relayer under the mandate's pre-committed spend limits. For production Phase 8, this transitions to ERC-4337 smart accounts where the server only packages UserOperations and pre-authorized EIP-712 payloads. The server is an execution relayer, never naked root authority.\n\n2. PAYMENT RELEASE STATES (PROMETHEUS):\nUnder PRD §13/§14, only the ACCEPTED state triggers settlement payment release to the counterparty (via settle()). An agreement in EXECUTING may NEVER directly release payment or be rejected; deliverables must be explicitly SUBMITTED first with contentHash and artifactRefs, verified against acceptance criteria, and reach ACCEPTED before payment moves. REJECTED releases refund back to the principal's available headroom via TALOS sagas.\n\n3. F51 DESIGN DECISIONS (VAULT BINDING):\n- (1) Principal as signer on open_mandate: APPROVED. Reversing 'self-binding by holder' is correct and normative per PRD §3.\n- (2) Holder may only revoke itself: APPROVED. An agent may stop itself, but never widen its limits.\n- (3) Mandate PDA seeding: Approved to reseed by [b\"mandate\", principal, holder] in the next program iteration to eliminate first-grant squatter DoS.\n\nSTATUS: feat/settlement-transports is merged into fix/integrity-f40-f45. Suite is at 547 TS tests passing, 103 Rust tests passing.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "approval",
+        "evm",
+        "f51",
+        "lead",
+        "prometheus",
+        "settlement"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-03T15:09:38.557Z",
+      "parents": [
+        "a987e59b845c9a7e380bc25dc14b3a1e02299f5fd8edb4cfcd234387fab6f3c8"
+      ],
+      "hash": "c2cde80ac8ca2a5122b964cb54c0cc372d6b75beae9c77677a3dd9e9de220ace"
+    },
+    {
+      "entryId": "ctx_a5c8b8c9214b1d8d",
+      "seq": 56,
+      "kind": "handoff",
+      "title": "Lead: All 3 chains live-steeped; F51 deployed to devnet; Agreements & Clearing routes wired for Phase 10 / Phase 5",
+      "body": "All 3 chains are 100% steeped, funded, and verified on-chain:\n1. Solana Devnet:\n- Patched mitra-vault program deployed to devnet (GkQQtm...8CqY, tx 2EydYQiN...).\n- scripts/authority-devnet.mjs aligned with F51; live devnet execution: ALL CHECKS PASSED (mandate opened 2ma9jx..., permit authorized 2m1Y9h..., spend confirmed 4cB7AB..., 10 replay attacks refused 0x177c).\n2. Base Sepolia:\n- Test wallet funded with Circle USDC (0x036CbD...CF7e) and ETH.\n- BaseRpcTransport executed live settlement in USDC with 32-byte EIP-712 commitment suffix: tx 0xebbafa032b2ce40ed5d5f45a658899bfe900c3815202edec8ffc54c17efb7379. Verified { confirmed: true }.\n3. Tempo Moderato:\n- ModeratoTransport executed live settlement in PathUSD using transferWithMemo: tx 0xdd29d0648f68e5cd778ed9cb8b39ed71ec96c5374e051a2e0fc4638aae025024. Verified { confirmed: true }.\n4. API Routes & Showcases:\n- POST /api/v1/agreements implemented and wired to applyAgreementOpWithSaga (Prometheus showcase: scripts/showcase-prometheus.mjs, tests/agreements-api.test.ts passing).\n- POST /api/v1/clearing implemented for netting reduction and epoch lifecycle (Pando showcase: scripts/showcase-pando.mjs, tests/clearing-api.test.ts passing).\n- All 44 test files passing (555 passed, 40 skipped, 0 failures), npm run build passes cleanly.\n- Ready for PurpleDNA to build Console dashboards (Phase 10) and live MCP server (Phase 5).",
+      "status": "active",
+      "scope": "architecture",
+      "tags": [
+        "agreements",
+        "base",
+        "chains",
+        "clearing",
+        "f51",
+        "pando",
+        "prometheus",
+        "solana",
+        "tempo"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-03T16:20:31.035Z",
+      "parents": [
+        "c2cde80ac8ca2a5122b964cb54c0cc372d6b75beae9c77677a3dd9e9de220ace"
+      ],
+      "hash": "5455c61a671c7b135cb8888d5f3a0c3ecff64a1242a7dae3f2cffd8ee4fd1c51"
+    },
+    {
+      "entryId": "ctx_195124298177bc07",
+      "seq": 57,
+      "kind": "note",
+      "title": "Merged Solana VaultTransport & executed live Solana devnet test",
+      "body": "",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T16:26:01.250Z",
+      "parents": [
+        "5455c61a671c7b135cb8888d5f3a0c3ecff64a1242a7dae3f2cffd8ee4fd1c51"
+      ],
+      "hash": "26640faf6a3b6ab292ad8be36a4a70d977879d40e1185e2b4607fb675a105425"
+    },
+    {
+      "entryId": "ctx_03a8b82c8a2f781a",
+      "seq": 58,
+      "kind": "note",
+      "title": "Engineering handoff: Solana verification & EVM MitraVault",
+      "body": "",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T16:51:54.769Z",
+      "parents": [
+        "26640faf6a3b6ab292ad8be36a4a70d977879d40e1185e2b4607fb675a105425"
+      ],
+      "hash": "1294cb6efcb5a5e3714ec7ca411b9b5c3028aa7f5655c9d63b55d28cff690f25"
+    },
+    {
+      "entryId": "ctx_6100014de7733543",
+      "seq": 59,
+      "kind": "decision",
+      "title": "Package A — security.txt embedded in the SBF binary; devnet program upgraded; live-tested",
+      "body": "solana-security-txt =1.1.0 embedded via security_txt! in programs/mitra-vault/src/lib.rs; SBF rebuilt; devnet program upgraded. Regression-checked LIVE: SOLANA_LIVE=1 npx vitest run tests/solana-transport.test.ts -> 40/40 on devnet.\n\nTWO HANDOFF VALUES CHANGED DELIBERATELY.\n1. contacts: the handoff proposed email:security@mitra.network. Neither mitra.network nor that mailbox appears anywhere in this repo EXCEPT the handoff doc itself. A disclosure contact nobody controls is worse than none — a researcher who mails it and gets nothing concludes the program is unmaintained. Used the repo real GitHub Security Advisories URL, derived from git remote -v.\n2. auditors: handoff proposed \"Pending Independent Audit\". docs/SECURITY.md says plainly no audit was performed. An explorer panel should not imply one is scheduled, so it now states the absence.\n\nHANDOFF PREMISES CHECKED (the sixth stale-claim sweep):\n- \"104/104 Rust tests\" — CORRECT. My earlier \"88\" was measured before permit_binding and doc-tests counted.\n- \".dev-keys/evm-testnet.json\" — DOES NOT EXIST. Files are evm-testnet.key + evm-testnet.address.\n- \"readelf -p .security.txt\" — finds NOTHING. The macro emits into .rodata/.data.rel.ro, not a named section. Use strings.\n- Base Sepolia USDC 0x036CbD... — VERIFIED on chain: name USDC, symbol USDC, 6 decimals, chainId 84532. First external claim in this handoff to hold up.\n\nDISK: hit 100% (0 bytes) mid-build. Root cause: cargo-build-sbf had SILENTLY DOWNLOADED its own default platform-tools v1.52 into ~/.cache/solana — which is exactly why it kept reporting \"v1.52 incompatible with SBPFv3\" while only v1.57 was installed. Removed it (root-owned, needed sudo); reclaimed to 2.2 GB.\n\nPACKAGE B NOT STARTED, and should not be built as specified: the proposed MitraVault.sol drops encumbered and settling from the capital model and makes frozen a BOOL. ADR-0002 requires six positional balances (available, reserved, escrowed, encumbered, settling, frozen) precisely because a vault is in several at once. The sketch would reintroduce the F42 class of capital bug on a public chain. Also missing: mandate versioning (ADR-0009), a withdraw path, and any re-derivation of actionHash at the guard.",
+      "status": "active",
+      "scope": "solana",
+      "tags": [
+        "devnet",
+        "package-a",
+        "security-txt",
+        "solana"
+      ],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T17:36:56.023Z",
+      "parents": [
+        "1294cb6efcb5a5e3714ec7ca411b9b5c3028aa7f5655c9d63b55d28cff690f25"
+      ],
+      "hash": "618de7c6377bfd2a62f83902e1419e51ffe8df8301bfd1fc18c7a3c0671d2734"
+    },
+    {
+      "entryId": "ctx_9472dce139eeac5a",
+      "seq": 60,
+      "kind": "note",
+      "title": "MitraVault deployed & live-verified on Base Sepolia and Tempo Moderato",
+      "body": "",
+      "status": "active",
+      "scope": "general",
+      "tags": [],
+      "authorId": "human:cli",
+      "createdAt": "2026-10-03T21:01:50.935Z",
+      "parents": [
+        "618de7c6377bfd2a62f83902e1419e51ffe8df8301bfd1fc18c7a3c0671d2734"
+      ],
+      "hash": "e89d5413babd8435370d16dbcc09e07307a000047fe7fb4c53834984c79a7a4f"
+    },
+    {
+      "entryId": "ctx_90ca96bdbccf8a88",
+      "seq": 61,
+      "kind": "task",
+      "title": "Starting Solana settlement binding on feat/solana-settlement-binding, against the F51 layout; live proof waits for the redeploy",
+      "body": "Branch feat/solana-settlement-binding, cut from fix/integrity-f40-f45 at ad94bbc (F51 and the transports merged; 547 TS / 103 Rust confirmed locally).\n\nPLAN:\n(1) A golden fixture written by a Rust test from the real program types: account bytes, instruction data, discriminators, PDAs. The TS client must match it byte for byte, so TS and Rust cannot drift silently. This is the F45/F12 class: encoding that only ever validated against itself.\n(2) lib/solana/vault-program.ts: instruction builders, account decoders and PDA derivation for the F51 layout. The lead can reuse it in authority-devnet.mjs at redeploy.\n(3) SolanaSettlementAdapter reshaped. The vault moves LAMPORTS only, so SOL only; the USDC entry was a mainnet SPL mint the vault cannot move. The commitment becomes a 32-byte sha256 over an unambiguous encoding, and is the action_hash the program checks (it was FNV-1a repeated 8x).\n(4) The transport sends authorize + spend_authorized in ONE transaction, so a permit is never left on-chain unspent. verify confirms from the transaction's own meta: success, exact recipient and vault lamport deltas, and the permit read back as consumed.\n\nThe SETTLE instruction is spend_authorized. The handoff's 'withdraw' returns capital to the principal and is not a settlement, so I am not binding it as one.\n\nLIVE: SOLANA_LIVE=1 test written but UNTESTED until the lead redeploys GkQQtmVX... with F51. The deployed program has the old layout.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F51",
+        "mitra-vault",
+        "phase-8",
+        "solana",
+        "transport"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T15:38:46.801Z",
+      "parents": [
+        "c2cde80ac8ca2a5122b964cb54c0cc372d6b75beae9c77677a3dd9e9de220ace"
+      ],
+      "hash": "308754be54397e4bb5bbb616961465591009ea65094bf838b34758a87e644f5c"
+    },
+    {
+      "entryId": "ctx_0e9bae93bc70eefc",
+      "seq": 62,
+      "kind": "finding",
+      "title": "Deployed mitra-vault now carries the F51 code (redeployed at slot 507040856); Solana transport is built, live run pending devnet SOL",
+      "body": "Read-only check of programData 9aUb2Zoz... on devnet. Its bytecode contains the F51-only log string 'mandate v1 granted by' and not the pre-F51 'mandate v1 opened for'. The deploy slot moved from 506552169 to 507040856. So the F51 program is live. I inferred this from the bytecode; no instruction was sent to it.\n\nfeat/solana-settlement-binding (pushed):\n- lib/solana/vault-program.ts: TS client pinned to the Rust-generated golden bytes (programs/mitra-vault/tests/golden/vault-layout.json). Reuse it for authority-devnet.mjs.\n- lib/adapters/solana-transport.ts: authorize + spend_authorized in ONE tx. verify reads the tx record and the consumed permit. Mutation audit 24/24.\n- SolanaSettlementAdapter: SOL only. The commitment is sha256 over an ABI encoding and serves as the on-chain action_hash.\nTS 605, Rust 104.\n\nPENDING: SOLANA_LIVE=1 provisions its own vault, mandate and engine from .dev-keys/solana-testnet.json (ETjm3HV8...). It has 0 devnet SOL, and the airdrop returned 'Internal error'.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F51",
+        "mitra-vault",
+        "redeploy",
+        "solana"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T15:55:58.894Z",
+      "parents": [
+        "308754be54397e4bb5bbb616961465591009ea65094bf838b34758a87e644f5c"
+      ],
+      "hash": "4a40fd98c861957b54af8266d6f88f0d65b0e6bd68fb50c3bb49e951085d3f23"
+    },
+    {
+      "entryId": "ctx_1baf0c1488733a6f",
+      "seq": 63,
+      "kind": "decision",
+      "title": "Solana settles live through SettlementAdapter on the redeployed F51 vault; the deployed program refuses a non-engine permit (6015)",
+      "body": "feat/solana-settlement-binding. SOLANA_LIVE=1 npx vitest run tests/solana-transport.test.ts.\n\nLIVE SETTLEMENT: tx 5ymG6QcREUCTTd9PPdXU4JPbUKcH5StpoJNbnch18beg9DbQqjR3TsewEiBvThyDCSTLhCDucY3TopwHan4Bh41U (slot 507057927). One transaction: authorize, then spend_authorized. The program logged 'authorization issued for mandate v1' and then 'spent 3000 under mandate v1'. Per the tx meta, the vault dropped by exactly 3000 lamports and the payee rose by exactly 3000. The permit reads back as 130 bytes, program-owned and consumed. Checked independently of verify(). A second run, 2Vysy3DN..., reused the provisioned vault and mandate.\n\nF51 LIVE: a funded non-engine key's authorize against the live mandate was simulated (no fee) and returned InstructionError [0, Custom 6015] POLICY_ENGINE_MISMATCH. This is the first on-chain evidence of the fix, beyond in-process tests. The wrong-vault and wrong-payee refusals are still in-process only.\n\nSTATE: all three rails (Base Sepolia, Tempo Moderato, Solana devnet) settle live through one SettlementAdapter interface. Still true: no route or kernel code calls any adapter. That wiring is the next step, under the lead's seq-55 answers (settle only on ACCEPTED; the relayer key on testnet).\n\nProvisioning keys (devnet): principal ETjm3HV8...; engine, holder and payee are derived by sha256('mitra-solana-settlement:<role>:' + principal).",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F51",
+        "evidence",
+        "live",
+        "phase-8",
+        "solana"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T16:33:58.692Z",
+      "parents": [
+        "4a40fd98c861957b54af8266d6f88f0d65b0e6bd68fb50c3bb49e951085d3f23"
+      ],
+      "hash": "fe157a463005491b2bf9f2cf4e2735afc4c3fc22dce31994ba7e04bec6704de2"
+    },
+    {
+      "entryId": "ctx_1aa5daf0657367b3",
+      "seq": 64,
+      "kind": "handoff",
+      "title": "Handoff status written into docs/HANDOFF_CODEVELOPER.md: all three rails live; ERC-4337, ERC-1271, caller wiring and getEvidence still open",
+      "body": "On feat/solana-settlement-binding (pushed). It is not merged; the lead merges.\n\nDONE: items 1 (Base EOA transport), 2 (Tempo) and 3 (Solana, bound to spend_authorized on the F51 vault). All three are live on testnets. The proof is in PROOF_LEDGER.\n\nOPEN, each listed in the new 'Status — 2026-10-03' section of docs/HANDOFF_CODEVELOPER.md:\n- sendUserOp (ERC-4337) is not wired through the transport.\n- verify1271 has no on-chain implementation.\n- No route or kernel code calls any adapter. The seq-55 answers unblock this.\n- getEvidence() returns null on every rail.\n- The mandate PDA reseed is approved but not implemented, and needs a redeploy.\n- authority-devnet.mjs still uses the pre-F51 layouts. Port it to lib/solana/vault-program.ts.\n- context audit still breaks at seq 29.\n- dev-scripts tests can time out on live RPCs.\n\nEXECUTION_PLAN rows 8 and 9 were stale ('no transport wired'). They are now LIVE_DEMONSTRATED (adapter leg) / PARTIAL, with the open items named.",
+      "status": "superseded",
+      "scope": "settlement",
+      "tags": [
+        "handoff",
+        "needs-lead",
+        "settlement",
+        "status"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T17:02:45.519Z",
+      "parents": [
+        "fe157a463005491b2bf9f2cf4e2735afc4c3fc22dce31994ba7e04bec6704de2"
+      ],
+      "hash": "caa31ce08c5d186b6ed159807a762bc00b08695e407629eebfb9fd6847e98340"
+    },
+    {
+      "entryId": "ctx_0e5afabc57ec14cb",
+      "seq": 65,
+      "kind": "handoff",
+      "title": "Handoff status (corrected): all three rails live; ERC-4337, ERC-1271, caller wiring and getEvidence open; authority-devnet.mjs already done by lead",
+      "body": "CORRECTION to seq 59. That entry listed scripts/authority-devnet.mjs as still using the pre-F51 layouts. The lead had already aligned it in 02f6774 on fix/integrity-f40-f45. I checked my branch, not the lead's, before writing it.\n\nOtherwise unchanged. Items 1-3 are done and live. OPEN: sendUserOp (ERC-4337), verify1271, no caller for any adapter, getEvidence() returning null, the mandate PDA reseed (approved; needs a redeploy), context audit at seq 29, and dev-scripts timeouts.\n\nNOT YET MERGED to fix/integrity-f40-f45: 0bfcbcd (Solana live evidence plus the live 6015 test) and 8a61dfc and later (handoff status, EXECUTION_PLAN rows 8/9). The lead's merge 340dd99 took feat/solana-settlement-binding only up to 0039bff.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "correction",
+        "handoff",
+        "needs-lead",
+        "settlement",
+        "status"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-03T17:03:39.133Z",
+      "parents": [
+        "5455c61a671c7b135cb8888d5f3a0c3ecff64a1242a7dae3f2cffd8ee4fd1c51",
+        "caa31ce08c5d186b6ed159807a762bc00b08695e407629eebfb9fd6847e98340"
+      ],
+      "hash": "9f3c707b07d2c59a1aad3441f3293a3d22b0d6a72d2818ddb881539a6c2383ee",
+      "supersedesId": "ctx_1aa5daf0657367b3"
+    },
+    {
+      "entryId": "ctx_24be605ab5292fce",
+      "seq": 66,
+      "kind": "handoff",
+      "title": "Handoff: Phase 5 (Dual-Transport MCP) & Phase 7 (On-Chain MitraClearing.sol)",
+      "body": "Written into docs/HANDOFF_CODEVELOPER.md on fix/integrity-f40-f45.\n\nPhase 6 Distributed Sagas is LIVE_DEMONSTRATED on Base Sepolia & Tempo Moderato (ADR-0012, zero lost capital, verify:saga-events passes 100%). F52 resolved: full un-truncated 66-character hashes verified. Context audit repaired and verified clean (65 entries, ok=true).\n\nNEXT WORK PACKAGES FOR PURPLE:\n1. Phase 5: Build dual-transport MCP server (bin/mitra-mcp.ts, lib/mcp/server.ts) supporting both stdio and SSE/HTTP modes. 17 intent tools exposed, assertNoCapitalVerb enforced at boot, wired to getStore() and kernel. Integration tests in tests/mcp-server.test.ts.\n2. Phase 7: Build contracts/MitraClearing.sol (Option B: dedicated on-chain epoch contract enforcing challenge windows and single-epoch guarantee F47) and deploy to Base Sepolia/Tempo Moderato. Build scripts/run-live-clearing-epoch.mjs to execute netting and settle residual transfers on-chain.",
+      "status": "active",
+      "scope": "architecture",
+      "tags": [
+        "clearing",
+        "handoff",
+        "mcp",
+        "needs-purple",
+        "phase5",
+        "phase7"
+      ],
+      "authorId": "lead:antigravity",
+      "createdAt": "2026-10-04T05:18:28.177Z",
+      "parents": [
+        "9f3c707b07d2c59a1aad3441f3293a3d22b0d6a72d2818ddb881539a6c2383ee"
+      ],
+      "hash": "0b37a977f19ed5ffe00b94411c4587e4684bf31d32bbb43a5a0d84d59565b712"
     }
   ],
   "actors": [
@@ -889,7 +1338,19 @@
       "displayName": "Opencode (Muse Spark)",
       "role": "partner agent",
       "createdAt": "2026-10-01T14:10:28.123Z"
+    },
+    {
+      "actorId": "human:purple",
+      "kind": "human",
+      "displayName": "purple",
+      "createdAt": "2026-10-01T23:57:21.474Z"
+    },
+    {
+      "actorId": "agent:claude-purple",
+      "kind": "agent",
+      "displayName": "Claude Code (purple's session)",
+      "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "dd6c1f38e71b0e2a18cebad5949b2da10e42e63fa6e5d90b56a6a5a95a1da407"
+  "tipHash": "0b37a977f19ed5ffe00b94411c4587e4684bf31d32bbb43a5a0d84d59565b712"
 }

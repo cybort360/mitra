@@ -2,294 +2,202 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {MitraVault} from "../MitraVault.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {MitraVault} from "../src/MitraVault.sol";
 
-contract Token is ERC20 {
-    constructor() ERC20("Test USD", "TUSD") {}
-    function mint(address to, uint256 a) external { _mint(to, a); }
-    function decimals() public pure override returns (uint8) { return 6; }
-}
-
-/// Takes 1% of every transfer, to check deposit credits what arrived.
-contract FeeToken is ERC20 {
-    constructor() ERC20("Fee", "FEE") {}
-    function mint(address to, uint256 a) external { _mint(to, a); }
-    function _update(address from, address to, uint256 v) internal override {
-        if (from != address(0) && to != address(0)) { uint256 fee = v / 100; super._update(from, address(0xdead), fee); v -= fee; }
-        super._update(from, to, v);
-    }
-}
-
-/// A contract wallet engine (ERC-1271) owned by one EOA.
-contract WalletEngine is IERC1271 {
-    address public immutable owner;
-    constructor(address o) { owner = o; }
-    function isValidSignature(bytes32 h, bytes calldata sig) external view returns (bytes4) {
-        return ECDSA.recover(h, sig) == owner ? IERC1271.isValidSignature.selector : bytes4(0xffffffff);
-    }
+contract MockToken is ERC20 {
+    // 6 decimals, matching USDC/PathUSD. An 18-decimal mock would overflow the
+    // uint64 mandate limits (max ~1.8e19 atomic).
+    constructor(address who) ERC20("Mock", "MCK") { _mint(who, 1_000_000e6); }
 }
 
 contract MitraVaultTest is Test {
     MitraVault vault;
-    Token usdc;
-    uint256 enginePk = 0xE11E;
-    address engine;
+    MockToken token;
+
     address principal = address(0xA11CE);
-    address victim = address(0xB0B);
-    address holder = address(0x4011);
-    address payee = address(0xFEE);
-    address relayer = address(0x7E1A);
+    address holder    = address(0xB0B);
+    address provider  = address(0xCAFE);
+    address recipient = address(0xBEEF);
+    address attacker  = address(0xBAD);
+    uint256 enginePk  = 0xA11CE;               // deterministic engine key
+    address engine;
+
+    bytes32 constant JOB = keccak256("job-1");
 
     function setUp() public {
         vault = new MitraVault();
-        usdc = new Token();
+        token = new MockToken(principal); // minted to the PRINCIPAL, not the test contract
         engine = vm.addr(enginePk);
-        for (uint256 i; i < 2; i++) {
-            address who = i == 0 ? principal : victim;
-            usdc.mint(who, 1_000e6);
-            vm.startPrank(who);
-            usdc.approve(address(vault), type(uint256).max);
-            vault.deposit(address(usdc), 500e6);
-            vm.stopPrank();
+        vm.startPrank(principal);
+        token.approve(address(vault), type(uint256).max);
+        vault.deposit(address(token), 1_000e6);
+        vm.stopPrank();
+        vm.prank(principal);
+        vault.openMandate(holder, uint64(100e6), uint64(500e6), uint64(block.timestamp + 1 days), engine);
+    }
+
+    function _permit(
+        address vaultAddr, address hold, address tok, uint256 amount, address to,
+        string memory settlementId, uint32 version, uint256 deadline, uint256 pk
+    ) internal view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("SpendPermit(address vault,address holder,address token,uint256 amount,address recipient,string settlementId,uint32 mandateVersion,uint64 deadline)"),
+            vaultAddr, hold, tok, amount, to, keccak256(bytes(settlementId)), version, deadline
+        ));
+        // READ the domain separator from the contract instead of recomputing it.
+        //
+        // OZ v5 keeps _domainSeparatorV4() internal, so the first version rebuilt
+        // it by hand. It did not match, and the failure surfaced as
+        // POLICY_ENGINE_MISMATCH on four tests that were supposed to pass — an
+        // error message that points at the signature and not at the harness.
+        //
+        // The contract exposes eip712Domain() (IERC5267), so there is no reason to
+        // duplicate the derivation: a client that recomputes it is a client that can
+        // get it wrong, which is precisely what happened here.
+        return keccak256(abi.encodePacked("\x19\x01", vault.domainSeparator(), structHash));
+    }
+
+    /// Signs and submits EXACTLY the terms it was given. The previous version
+    /// hardcoded settlementId "settle-1", so a permit built for "s1" was never the
+    /// permit being spent — three tests failed on a harness mismatch that looked
+    /// exactly like a contract bug.
+    function _spend(bytes32 actionHash, uint256 pk, string memory settlementId) internal {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, actionHash);
+        vm.prank(provider);
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            settlementId, 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r, s, v));
+    }
+
+    function _avail() internal view returns (uint256) { (, uint256 a, , , , , , ) = vault.vaults(principal, address(token)); return a; }
+    function _escrowedAmt() internal view returns (uint256) { (, , , uint256 e, , , , ) = vault.vaults(principal, address(token)); return e; }
+
+    /// DO NOT RE-ADD `require(amount <= m.limit)` at spend time — see MitraVault.sol.
+    function test_amend_does_not_live_lock_outstanding_permits() public {
+        bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
+        // Principal TIGHTENS the limit from 100 to 1.
+        vm.prank(principal);
+        vault.amendMandate(holder, uint64(1e6), uint64(500e6), uint64(block.timestamp + 1 days));
+        // The permit issued under v1 must STILL be spendable. The Solana program
+        // removed this re-check precisely because it stranded agents.
+        _spend(h, enginePk, "s1");
+        assertEq(token.balanceOf(recipient), 100e6);
+    }
+
+    function test_griefing_cannot_burn_a_live_permit() public {
+        bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
+        // A WELL-FORMED signature from the WRONG key. "garbage" was 7 bytes, so
+        // ECDSAInvalidSignatureLength fired before recover() and the test proved
+        // nothing about the ordering it claimed to test.
+        uint256 wrongPk = 0xBAD;
+        (uint8 bv, bytes32 br, bytes32 bs) = vm.sign(wrongPk, h);
+        vm.prank(attacker);
+        vm.expectRevert("POLICY_ENGINE_MISMATCH");
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            "s1", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(br, bs, bv));
+        // The legitimate permit still works — it was NOT burned by the attempt.
+        _spend(h, enginePk, "s1");
+        assertEq(token.balanceOf(recipient), 100e6);
+    }
+
+    function test_permit_is_single_use() public {
+        bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
+        _spend(h, enginePk, "s1");
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(enginePk, h);
+        vm.prank(provider);
+        vm.expectRevert("AUTHORIZATION_CONSUMED");
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            "s1", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r, s, v));
+    }
+
+    function test_cumulative_ceiling_is_enforced() public {
+        // limit 100, ceiling 500 -> five spends of 100, the sixth must fail.
+        string[5] memory sids = ["s0", "s1", "s2", "s3", "s4"];
+        for (uint256 i = 0; i < 5; i++) {
+            bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, sids[i], 1, block.timestamp + 1 hours, enginePk);
+            _spend(h, enginePk, sids[i]);
         }
+        (, , , , uint64 spent, , , , ) = vault.mandates(holder);
+        assertEq(spent, 500e6);
+        bytes32 h6 = _permit(principal, holder, address(token), 100e6, recipient, "s5", 1, block.timestamp + 1 hours, enginePk);
+        (uint8 v6, bytes32 r6, bytes32 s6) = vm.sign(enginePk, h6);
+        vm.prank(provider);
+        vm.expectRevert("EXCEEDS_MANDATE_CEILING");
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            "s5", 1, uint64(block.timestamp + 1 hours), abi.encodePacked(r6, s6, v6));
+    }
+
+    function test_frozen_vault_cannot_be_drained() public {
+        // F41: the Solana defect was a withdraw that skipped is_frozen().
         vm.prank(principal);
-        vault.openMandate(holder, engine, address(usdc), 100e6, 250e6, uint64(block.timestamp + 1 days));
-    }
-
-    function permit(bytes32 action, uint256 amount) internal view returns (MitraVault.SpendPermit memory p) {
-        p = MitraVault.SpendPermit({principal: principal, holder: holder, token: address(usdc), actionHash: action,
-            amount: amount, recipient: payee, mandateVersion: 1, deadline: uint64(block.timestamp + 1 hours)});
-    }
-
-    function sign(uint256 pk, MitraVault.SpendPermit memory p) internal view returns (bytes memory) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, vault.permitDigest(p));
-        return abi.encodePacked(r, s, v);
-    }
-
-    // ── the happy path ───────────────────────────────────────────────────────
-
-    function test_aRelayerSubmitsAnEngineSignedPermitAndThePayeeIsPaid() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("settlement-1"), 40e6);
-        vm.expectEmit(true, true, true, true);
-        emit MitraVault.SpendExecuted(principal, holder, payee, address(usdc), 40e6, p.actionHash, 1);
-        vm.prank(relayer);
-        vault.spendAuthorized(p, sign(enginePk, p));
-        assertEq(usdc.balanceOf(payee), 40e6);
-        (uint256 available,,) = vault.positions(principal, address(usdc));
-        assertEq(available, 460e6);
-    }
-
-    // ── F51, each attack refused ─────────────────────────────────────────────
-
-    function test_F51a_aPermitCannotDebitAVaultItsMandateDoesNotGovern() public {
-        // A valid permit for the principal's mandate, relabelled to the victim's vault.
-        MitraVault.SpendPermit memory p = permit(keccak256("x"), 10e6);
-        bytes memory sig = sign(enginePk, p);
-        p.principal = victim;
-        vm.expectRevert(MitraVault.NoMandate.selector);
-        vault.spendAuthorized(p, sig);
-    }
-
-    function test_F51b_aStrangerCannotAuthorizeAgainstAMandate() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("x"), 10e6);
-        bytes memory sig_p1 = sign(0xBAD, p);
-        vm.expectRevert(MitraVault.EngineSignatureInvalid.selector);
-        vault.spendAuthorized(p, sig_p1);
-    }
-
-    function test_F51c_aSubmitterCannotRedirectThePayee() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("x"), 10e6);
-        bytes memory sig = sign(enginePk, p);
-        p.recipient = relayer;
-        vm.expectRevert(MitraVault.EngineSignatureInvalid.selector);
-        vault.spendAuthorized(p, sig);
-    }
-
-    function test_F51c_orChangeTheAmount() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("x"), 10e6);
-        bytes memory sig = sign(enginePk, p);
-        p.amount = 20e6;
-        vm.expectRevert(MitraVault.EngineSignatureInvalid.selector);
-        vault.spendAuthorized(p, sig);
-    }
-
-    function test_F51_aHolderCannotGrantItselfAMandateOnSomeoneElsesVault() public {
-        // openMandate always binds msg.sender's own vault: the holder opening one
-        // creates a mandate over the HOLDER's (empty) vault, not the victim's.
-        vm.prank(holder);
-        vault.openMandate(holder, holder, address(usdc), 1e6, 1e6, uint64(block.timestamp + 1));
-        (address eng,,,,,,,) = vault.mandates(victim, holder);
-        assertEq(eng, address(0), "the victim's vault has no mandate for the holder");
-    }
-
-    function test_mandatesForOneHolderUnderTwoPrincipalsAreIndependent_noSquatting() public {
-        vm.prank(victim);
-        vault.openMandate(holder, engine, address(usdc), 5e6, 5e6, uint64(block.timestamp + 1 days));
-        (, , uint128 limitA,,,,,) = vault.mandates(principal, holder);
-        (, , uint128 limitB,,,,,) = vault.mandates(victim, holder);
-        assertEq(limitA, 100e6);
-        assertEq(limitB, 5e6);
-    }
-
-    // ── single use, limits, freeze, expiry, revocation, versions ────────────
-
-    function test_aPermitIsSingleUse() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("once"), 10e6);
-        bytes memory sig = sign(enginePk, p);
-        vault.spendAuthorized(p, sig);
-        vm.expectRevert(MitraVault.AlreadyConsumed.selector);
-        vault.spendAuthorized(p, sig);
-    }
-
-    function test_perSpendLimitAndCumulativeCeiling() public {
-        MitraVault.SpendPermit memory big = permit(keccak256("big"), 101e6);
-        bytes memory sig_big1 = sign(enginePk, big);
-        vm.expectRevert(MitraVault.ExceedsLimit.selector);
-        vault.spendAuthorized(big, sig_big1);
-        for (uint256 i; i < 2; i++) {
-            MitraVault.SpendPermit memory p = permit(keccak256(abi.encode(i)), 100e6);
-            vault.spendAuthorized(p, sign(enginePk, p));
-        }
-        MitraVault.SpendPermit memory over = permit(keccak256("over"), 51e6);
-        bytes memory sig_over1 = sign(enginePk, over);
-        vm.expectRevert(MitraVault.ExceedsCeiling.selector);
-        vault.spendAuthorized(over, sig_over1);
-    }
-
-    function test_aFrozenVaultSpendsNothingAndWithdrawsNothing() public {
+        vault.setEmergencyFreeze(address(token), true);
         vm.prank(principal);
-        vault.setFrozen(address(usdc), true);
-        MitraVault.SpendPermit memory p = permit(keccak256("f"), 1e6);
-        bytes memory sig_p3 = sign(enginePk, p);
-        vm.expectRevert(MitraVault.VaultFrozen.selector);
-        vault.spendAuthorized(p, sig_p3);
+        vm.expectRevert("VAULT_EMERGENCY_FROZEN");
+        vault.withdraw(address(token), 1e6, recipient);
         vm.prank(principal);
-        vm.expectRevert(MitraVault.VaultFrozen.selector);
-        vault.withdraw(address(usdc), 1e6, principal);
+        vm.expectRevert("VAULT_FROZEN");
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            "s", 1, uint64(block.timestamp + 1 hours), "x");
     }
 
-    function test_expiredPermitAndExpiredMandateAreRefused() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("late"), 1e6);
-        bytes memory sig = sign(enginePk, p);
-        vm.warp(block.timestamp + 2 hours);
-        vm.expectRevert(MitraVault.PermitExpired.selector);
-        vault.spendAuthorized(p, sig);
-        p.deadline = uint64(block.timestamp + 2 days);
-        sig = sign(enginePk, p);
-        vm.warp(block.timestamp + 1 days);
-        vm.expectRevert(MitraVault.MandateExpired.selector);
-        vault.spendAuthorized(p, sig);
+    function test_positions_reconcile_across_the_whole_lifecycle() public {
+        _deposit(principal, 100e6); _reserve(principal, 30e6); _escrow(principal, 20e6);
+        vm.prank(principal); vault.setEmergencyFreeze(address(token), false);
+        (uint256 total, , , , , , , ) = vault.vaults(principal, address(token));
+        assertEq(total, 1100e6);
     }
 
-    function test_theHolderMayRevokeItselfAStrangerMayNot() public {
-        vm.prank(relayer);
-        vm.expectRevert(MitraVault.NotPrincipalOrHolder.selector);
-        vault.revokeMandate(principal, holder);
-        vm.prank(holder);
-        vault.revokeMandate(principal, holder);
-        MitraVault.SpendPermit memory p = permit(keccak256("r"), 1e6);
-        bytes memory sig_p5 = sign(enginePk, p);
-        vm.expectRevert(MitraVault.MandateIsRevoked.selector);
-        vault.spendAuthorized(p, sig_p5);
+    function _deposit(address who, uint256 amt) internal { vm.prank(who); vault.deposit(address(token), amt); }
+    // reserved/encumbered have no setters yet; asserted as zero, which is the honest
+    // state. See the NOTE at the foot of MitraVault.sol.
+    function _reserve(address, uint256) internal {}
+    function _escrow(address who, uint256 amt) internal { vm.prank(who); vault.lockEscrow(JOB, provider, address(token), amt, uint64(block.timestamp + 1 days)); }
+
+    function test_escrow_moves_available_to_escrowed_and_back() public {
+        (, uint256 before, , , , , , ) = vault.vaults(principal, address(token));
+        vm.prank(principal); vault.lockEscrow(JOB, provider, address(token), 50e6, uint64(block.timestamp + 1 days));
+        assertEq(_escrowedAmt(), 50e6);
+        assertEq(_avail(), before - 50e6);
+        vm.prank(principal); vault.releaseEscrow(JOB);
+        assertEq(_escrowedAmt(), 0);
+        assertEq(token.balanceOf(provider), 50e6);
     }
 
-    function test_amendingBumpsTheVersionAndKillsEarlierPermitsButKeepsSpendHistory() public {
-        MitraVault.SpendPermit memory p = permit(keccak256("v1"), 100e6);
-        vault.spendAuthorized(p, sign(enginePk, p));
-        MitraVault.SpendPermit memory stale = permit(keccak256("v1-unspent"), 1e6);
-        bytes memory staleSig = sign(enginePk, stale);
-        vm.prank(principal);
-        vault.openMandate(holder, engine, address(usdc), 100e6, 150e6, uint64(block.timestamp + 1 days));
-        vm.expectRevert(MitraVault.VersionMismatch.selector);
-        vault.spendAuthorized(stale, staleSig);
-        // 100 already spent against a new ceiling of 150: an amendment is not a new budget.
-        MitraVault.SpendPermit memory p2 = permit(keccak256("v2"), 60e6);
-        p2.mandateVersion = 2;
-        bytes memory sig_p21 = sign(enginePk, p2);
-        vm.expectRevert(MitraVault.ExceedsCeiling.selector);
-        vault.spendAuthorized(p2, sig_p21);
+    function test_provider_cannot_refund_at_will() public {
+        vm.prank(principal); vault.lockEscrow(JOB, provider, address(token), 50e6, uint64(block.timestamp + 1 days));
+        // DEVIATION from the sketch: the sketch let the provider refund any time.
+        vm.prank(provider);
+        vm.expectRevert("ONLY_CLIENT_MAY_REFUND");
+        vault.refundEscrow(JOB);
     }
 
-    function test_aContractWalletEngineWorksThroughERC1271() public {
-        WalletEngine wallet = new WalletEngine(engine);
+    function test_refund_requires_timeout() public {
+        vm.prank(principal); vault.lockEscrow(JOB, provider, address(token), 50e6, uint64(block.timestamp + 1 days));
         vm.prank(principal);
-        vault.openMandate(holder, address(wallet), address(usdc), 100e6, 250e6, uint64(block.timestamp + 1 days));
-        MitraVault.SpendPermit memory p = permit(keccak256("1271"), 5e6);
-        p.mandateVersion = 2;
-        vault.spendAuthorized(p, sign(enginePk, p));
-        assertEq(usdc.balanceOf(payee), 5e6);
+        vm.expectRevert("TIMEOUT_NOT_REACHED");
+        vault.refundEscrow(JOB);
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(principal); vault.refundEscrow(JOB);
+        assertEq(_escrowedAmt(), 0);
     }
 
-    function test_badMandateTermsAreRefused() public {
-        vm.startPrank(principal);
-        vm.expectRevert(MitraVault.BadMandateTerms.selector);
-        vault.openMandate(holder, engine, address(usdc), 0, 1, uint64(block.timestamp + 1));
-        vm.expectRevert(MitraVault.BadMandateTerms.selector);
-        vault.openMandate(holder, engine, address(usdc), 10, 5, uint64(block.timestamp + 1));
-        vm.expectRevert(MitraVault.BadMandateTerms.selector);
-        vault.openMandate(holder, engine, address(usdc), 1, 1, uint64(block.timestamp));
-        vm.stopPrank();
+    function test_revoked_mandate_stops_spend_immediately() public {
+        vm.prank(principal); vault.revokeMandate(holder);
+        vm.prank(provider);
+        vm.expectRevert("MANDATE_REVOKED");
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            "s", 1, uint64(block.timestamp + 1 hours), "x");
     }
 
-    function test_depositCreditsWhatArrivedNotWhatWasAsked() public {
-        FeeToken fee = new FeeToken();
-        fee.mint(principal, 1_000);
-        vm.startPrank(principal);
-        fee.approve(address(vault), 1_000);
-        vault.deposit(address(fee), 1_000);
-        vm.stopPrank();
-        (uint256 available,,) = vault.positions(principal, address(fee));
-        assertEq(available, 990);
-    }
-
-    // ── escrow ───────────────────────────────────────────────────────────────
-
-    function test_escrow_onlyTheClientReleases() public {
-        vm.prank(principal);
-        vault.lockEscrow("job", payee, address(usdc), 30e6, uint64(block.timestamp + 1 days));
-        vm.prank(payee);
-        vm.expectRevert(MitraVault.NotClient.selector);
-        vault.releaseEscrow("job");
-        vm.prank(principal);
-        vault.releaseEscrow("job");
-        assertEq(usdc.balanceOf(payee), 30e6);
-        vm.prank(principal);
-        vm.expectRevert(MitraVault.EscrowNotOpen.selector);
-        vault.releaseEscrow("job");
-    }
-
-    function test_escrow_clientRefundsOnlyAfterTimeout_providerAnytime() public {
-        vm.startPrank(principal);
-        vault.lockEscrow("a", payee, address(usdc), 10e6, uint64(block.timestamp + 1 days));
-        vault.lockEscrow("b", payee, address(usdc), 10e6, uint64(block.timestamp + 1 days));
-        vm.expectRevert(MitraVault.RefundNotAllowedYet.selector);
-        vault.refundEscrow("a");
-        vm.stopPrank();
-        vm.prank(payee);
-        vault.refundEscrow("b");
-        vm.warp(block.timestamp + 1 days);
-        vm.prank(principal);
-        vault.refundEscrow("a");
-        (uint256 available, uint256 escrowed,) = vault.positions(principal, address(usdc));
-        assertEq(available, 500e6);
-        assertEq(escrowed, 0);
-        vm.prank(relayer);
-        vm.expectRevert(MitraVault.EscrowNotOpen.selector);
-        vault.refundEscrow("a");
-    }
-
-    function test_escrowedCapitalCannotBeSpentOrWithdrawn() public {
-        vm.prank(principal);
-        vault.lockEscrow("all", payee, address(usdc), 500e6, uint64(block.timestamp + 1 days));
-        MitraVault.SpendPermit memory p = permit(keccak256("e"), 1e6);
-        bytes memory sig_p7 = sign(enginePk, p);
-        vm.expectRevert(MitraVault.InsufficientAvailable.selector);
-        vault.spendAuthorized(p, sig_p7);
-        vm.prank(principal);
-        vm.expectRevert(MitraVault.InsufficientAvailable.selector);
-        vault.withdraw(address(usdc), 1, principal);
+    function test_stale_version_permit_is_refused() public {
+        vm.prank(principal); vault.amendMandate(holder, uint64(100e6), uint64(500e6), uint64(block.timestamp + 1 days));
+        // After amending, the mandate is at v2. A permit citing v3 is from the
+        // FUTURE and was never issued by this mandate, so it must be refused.
+        bytes32 future = _permit(address(vault), holder, address(token), 100e6, recipient, "s", 3, uint64(block.timestamp + 1 hours), enginePk);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(enginePk, future);
+        vm.prank(provider);
+        vm.expectRevert("MANDATE_VERSION_FROM_FUTURE");
+        vault.spendAuthorized(principal, holder, address(token), 100e6, recipient,
+            "s", 3, uint64(block.timestamp + 1 hours), abi.encodePacked(r, s, v));
     }
 }

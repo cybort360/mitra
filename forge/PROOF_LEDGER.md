@@ -246,6 +246,7 @@ from [ADR-0008](../docs/adr/0008-evidence-two-fields-union-vocabulary.md).
 |---|---|---|---|
 | 0 Ground truth | "Every P0 object has a schema and state transition definition." | `INTEGRATED` | `BLOCKED_INTERNAL` — 6 of 7 state machines have definitions but no write path (`p0-registry` records `hasMachine`) |
 | 1 Core | "Purely local end-to-end lifecycle passes." | `E2E_VERIFIED` | — |
+| **Solana vault program upgraded with `security.txt`** | `VERIFIED` | `cargo-build-sbf --tools-version v1.57 --arch v1` → `mitra_vault.so` (114,912 B) with the `security_txt!` macro embedded (confirmed: `strings` shows the advisories URL, the policy URL, and "None. This program has NOT been independently audited"). Upgraded via `solana program deploy`, signature `2ToMP4Z2Eb1jmsJxdW47g182GdaVEKcS9MNCGCzbmTaLpZRRwMC6npcmJWbboMjMdxbybf4jYMS2MF9oY94v3XDS`. ProgramData `9aUb2Zoz…` grew 110,029 → 120,269 B (code 120,224 B; the +5.3 KB is the loader-appended region, not a mismatch). **Live proof of no regression:** `SOLANA_LIVE=1 npx vitest run tests/solana-transport.test.ts` → 40/40 against devnet. `cargo test` → 104/104 |
 | 2 Solana kernel | "Real testnet/devnet vault creation, funding, reservation, guarded spend, release/refund, and settlement proof." | `LIVE_DEMONSTRATED` | — |
 | 3 Authority | "Agent cannot execute an out-of-policy transaction." | `LIVE_DEMONSTRATED` | `DEFERRED` — mandate→authorization→consume-on-spend is live on devnet, replay is refused on-chain, and **amendment + terminal revocation are deployed and exercised** (the 96→97 realloc ran on a live account). **Arcium unblocked — see F31.** The blocker was an assumption, not an attempt: Docker, Anchor 1.0.2, arcup and the Arcium CLI all install cleanly here. Remaining for Phase 3d: run the circuit on a local MPC cluster and deploy and any signature-abstraction layer |
 
@@ -322,7 +323,28 @@ The two refusals that matter were each confirmed by a **decoded custom error
 code**, not by the mere presence of a failure.
 | 4 Commerce | "Real job can be opened, funded, submitted, accepted, rejected, refunded." | `PROPOSED` | `BLOCKED_INTERNAL` — no implementation in Mitra. **Substrate located**: Microcosm at `/opt/microcosm-x` (§50 reuse list audited, F24) |
 | 5 Agent ecosystem | "An external agent can participate without becoming Mitra-native." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — interfaces plus one `local` stub; no A2A, MCP server, ERC-8004, marketplace, x402 |
-| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `INTEGRATED` | `PARTIAL` — Full local lifecycle verified (F49/F50): agreement rejection drives `applyAgreementOpWithSaga` through `EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED`, releases `space.committed`, persists to repository (`mitra.sagas`), and serves via `GET /api/v1/sagas`. `tests/commerce-saga.test.ts` (12 tests) and `tests/sagas-api.test.ts` (4 tests). On-chain TALOS contract recovery remains for future phase |
+| 6 Recovery | "Deliberately failed job reaches a defined terminal recovery state." | `LIVE_DEMONSTRATED` | — |
+
+**Phase 6 evidence — 2026-10-03, Base Sepolia (84532) & Tempo Moderato (42431).**
+Automated distributed saga recovery executed against live `MitraVault.sol` deployments.
+A deliberately rejected agreement triggers automated compensation: pre-committed `refundEscrow(jobId)` is executed on-chain after timeout, restoring vault available balance with zero lost capital, advancing the saga to `RECOVERED` without unhandled exceptions (PRD §4.5, §15.5, ADR-0012). Replay is refused on-chain.
+
+- Commands:
+  ```bash
+  node scripts/showcase-live-saga.mjs baseSepolia   # 100% PASS
+  node scripts/showcase-live-saga.mjs moderato      # 100% PASS (verified PathUSD 0x20c0...0000)
+  ```
+- Executed Tx Hashes (Run 2, full un-truncated logging):
+  - Base Sepolia (84532):
+    - `lockEscrow`: `0x61fcfb6dba13b7751c65b0d07c943c51d6d22d69923e1fe4f010f72b49d46d0a` (block 47648097)
+    - `refundEscrow`: `0x767b4e30f12e97868c4120ad65878b588e673c8c43e04dce71cc71c15351800b` (block 47648107)
+  - Tempo Moderato (42431):
+    - `lockEscrow`: `0xbd174dd45ce651905ca4d369073f60202cb86c50e495a27df9be3b4be695640b` (block 38046990)
+    - `refundEscrow`: `0xbfd5c584d0e09f8c4da5e896aa52b07d4d3401f77de279d9bab7e3a5d60ed3cc` (block 38047027)
+- Executed Tx Hashes (Run 1, recovered from block tx lists):
+  - Base Sepolia: `lockEscrow` `0x5983f82b203b68523c0696fe609785833559262f9f64c7279c130fc144379e8c` (blk 47647239), `refundEscrow` `0xc05bd25c5a108391b2059447f4ddfda4c52e3598c332eea9cbb8f8a125a316a5` (blk 47647243).
+  - Tempo Moderato: `lockEscrow` `0x300a9b685218f9b0275e935603cea786764e0e6687d6383656482bb6d3b15084` (blk 38044216), `refundEscrow` `0x5881a9ea0823588ab96892ded35340c56e1af3f49b54f95763558d7d2a6ddde8` (blk 38044252).
+  - Both chains: Replay `refundEscrow` rejected on-chain (`JOB_ALREADY_SETTLED`). Attempt count recorded on saga (`F47`). See `F52`.
 | 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
 | 8 Base | "Same economic intent executes on Base through the common API." | `TESTED` | `PARTIAL` — `BaseSettlementAdapter` + `BaseRpcTransport` settle live on Base Sepolia through `SettlementAdapter` with the EIP-712 commitment on-chain as a calldata suffix (see the live row above). EOA path only: the ERC-4337 path (`scripts/base-4337.mjs`) is not wired through the transport. The Solana leg of the same intent also settles live through `SettlementAdapter` (row above), so the interchangeability claim now has two live rails, not one. **Not yet an obligation path:** no route or kernel code constructs the adapter |
 | 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `TESTED` | `PARTIAL` — `TempoSettlementAdapter` + `ModeratoTransport` settle live on Moderato through `SettlementAdapter` with the commitment on-chain as the memo (see the live row above). **Not yet an obligation path:** no route or kernel code constructs the adapter, so no Mitra obligation reaches it |

@@ -12,7 +12,10 @@
     "test:watch": "vitest",
     "mcp": "tsx scripts/mitra-mcp.ts",
     "contracts:setup": "cd contracts && forge install foundry-rs/forge-std --no-git",
-    "contracts:test": "cd contracts && forge test"
+    "contracts:test": "cd contracts && forge test",
+    "verify:saga-events": "node scripts/verify-showcase-events.mjs",
+    "showcase:saga": "node scripts/showcase-live-saga.mjs",
+    "mitra-mcp": "tsx scripts/mitra-mcp.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.31.0",

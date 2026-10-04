@@ -2290,11 +2290,9 @@ never stepping it, the vacuous-pass trap — fails **6** of the 12 new tests.
 
 ## F51 — a stranger could move a principal's capital through `spend_authorized`
 
-**Status:** fixed and **redeployed**. Fix merged to `fix/integrity-f40-f45`; the lead
-redeployed `GkQQtmVX…` (deploy slot 506552169 → 507040856, and the bytecode now holds
-the F51-only string `mandate v1 granted by`). On devnet a non-engine `authorize` is
-refused with `Custom: 6015` and the granted path settles — see PROOF_LEDGER. The
-wrong-vault and wrong-payee refusals are verified in-process only.
+**Status:** `FAILED` on the deployed program (`GkQQtmVX…`, devnet). Fixed in code on
+`fix/vault-permit-binding` and `VERIFIED` in-process only — **not deployed**; the
+upgrade authority is `C4ZoTdNS…pSefD`.
 **Found:** 2026-10-03, while preparing to bind `SolanaSettlementAdapter` to the vault.
 
 Three gaps, each reproduced against the real `mitra_vault::dispatch` before any
@@ -2372,6 +2370,129 @@ mandate to *their own* vault — but seeding by `[principal, holder]` would remo
 **RULES ADDED:** (12) a fixture that builds an account no honest flow could produce is
 testing the attack, not the feature; (13) for every handler that moves value, ask
 whose money it is and who chose the payee — and find the line that answers each.
+
+## F58 — three wrong Tempo token addresses in one harness, and a "correction" that turned one error into another
+
+**Status:** `FAILED` — the tri-rail Tempo run was executed against the WRONG ASSET and labelled correctly.
+**Found:** 2026-10-03, verifying the peer's "PathUSD correction" before accepting it.
+
+### What happened
+
+`scripts/live-evm-vault.mjs` named the Moderato settlement asset. Three values lived
+in that one line across this session:
+
+```
+0x20c0...00000   41 hex chars — MALFORMED, my typo when writing the harness
+0x20c0...0001    a valid contract — but name() == "AlphaUSD"
+0x20c0...0000    name() == "PathUSD"   <- correct
+```
+
+A peer agent "corrected" the malformed address to `0x20c0...0001` and reported
+**"ALL CHECKS PASSED"** on Tempo, with the milestone table reading
+`Tempo | Moderato | PathUSD (TIP-20)`.
+
+Every mechanical check was true. The asset was wrong. Reading the mint:
+
+```
+0x20c0...0000  name=PathUSD    0x20c0...0001  name=AlphaUSD
+0x20c0...0002  name=BetaUSD    0x20c0...0003  name=ThetaUSD
+```
+
+This is F40 repeated inside a file written *after* F40 was recorded, in the same
+repository, about the same asset list — and `lib/adapters/tempo.ts`, the registry
+F40 corrected, held the right answer the whole time.
+
+### Why the tests could not catch it
+
+Nothing in the harness asserted *which token* it was using. It read
+`balanceOf`, approved, deposited, spent, and checked the recipient delta — all of
+which are equally true of AlphaUSD. A green harness proves the machinery works. It
+proves nothing about the asset until the asset is checked.
+
+### The fix, and why it is not another constant
+
+The harness now refuses to move a wei until the mint's own `name()` agrees:
+
+```
+PASS  token 0x20c0...0000 is PathUSD  name() = PathUSD
+```
+
+An assertion against the chain, not against another copy of the address. A third
+constant would have been the same defect a third time; `lib/adapters/tempo.ts`
+cannot be imported from a `.mjs` script, so the runtime check is what actually
+binds the harness to reality.
+
+Re-run against real PathUSD: **11/11**, deposit `0x99c47d46…` block 38042671,
+spend `0xbf3bb7ab…` block 38042689, replay refused on-chain.
+
+### Rules added
+
+16. **A harness must assert what it is exercising.** "Deposit, spend, replay refused"
+    is satisfied by any token. Only naming the asset tests the asset.
+17. **"Corrected" is not evidence.** A fix that makes a test pass while moving a
+    wrong value into a valid one has traded a loud failure for a silent one. Read
+    the name, not the exit status.
+
+### Addendum (prompt / chat provenance) — the same defect, one turn later
+
+During the reconciliation turn an **instruction prompt** cited the Base Sepolia
+deployment as
+
+```
+0x6a731a654A9bF96b0Fa8A99a4c86F37C2C4eea9c     <- given in chat
+0x6a731a654423d64afb9839742c3e48c6c54eea9c     <- in deployments.json, on chain
+```
+
+The first eight characters (`0x6a731a`) and the last four (`eea9c`) match; the
+middle differs. **That is the F58 signature exactly** — an accurate prefix and an
+accurate suffix wrapped around a fabricated middle — reproduced not by a script's
+`.slice(0, 18)` but by reconstructing a full address from an abbreviated chat
+summary (`0x6a731a65…4eea9c`).
+
+It was caught by checking `lib/evm/deployments.json` against the chain **before**
+writing the address into `contracts/MitraVault.sol`, where a wrong value would have
+become the provenance link an auditor consults when asking which source produced
+`0x6a731a65…`.
+
+**Rule 18 extension.** An address stated in a prompt, a chat summary, or a
+transcribed log is **non-normative**. Only a receipt, `deployments.json`, or direct
+chain inspection may establish a deployment address. Truncation discipline is not
+about `.slice()` — it is about which sources are allowed to become evidence at all.
+
+### F59 — Truncated transaction logging in harness led to hallucinated hash completion in evidence reporting
+
+**Found:** Peer audit of showcase transactions against live blocks. **Severity:** Critical (evidence integrity).
+
+`scripts/showcase-live-saga.mjs` logged transactions with `tx.slice(0, 18)...` for
+cosmetic brevity. When constructing documentation and explorer links, the agent expanded
+the 18-character prefix into a hallucinated 66-character hex string (e.g. `0x5983...b98e`
+instead of `0x5983...9e8c`).
+
+Every claimed block was real, and every transaction actually mined in that exact block
+from `0xaea8bc34...`:
+- Base blk 47647239: `0x5983f82b203b68523c0696fe609785833559262f9f64c7279c130fc144379e8c`
+- Base blk 47647243: `0xc05bd25c5a108391b2059447f4ddfda4c52e3598c332eea9cbb8f8a125a316a5`
+- Tempo blk 38044216: `0x300a9b685218f9b0275e935603cea786764e0e6687d6383656482bb6d3b15084`
+- Tempo blk 38044252: `0x5881a9ea0823588ab96892ded35340c56e1af3f49b54f95763558d7d2a6ddde8`
+
+However, because the reported 66-character strings in chat contained 48 hallucinated
+tail characters, querying those strings against the node returned "not found", making
+genuine on-chain proof indistinguishable from complete fabrication.
+
+### Fix
+
+1. Removed all `slice(0, 18)` truncation from `scripts/showcase-live-saga.mjs` and
+   `scripts/live-evm-vault.mjs`. Scripts now print complete 66-character hex hashes.
+2. Re-ran both showcases with full logging:
+   - Base Sepolia: `lockEscrow` `0x61fcfb6dba13b7751c65b0d07c943c51d6d22d69923e1fe4f010f72b49d46d0a` (blk 47648097), `refundEscrow` `0x767b4e30f12e97868c4120ad65878b588e673c8c43e04dce71cc71c15351800b` (blk 47648107).
+   - Tempo Moderato: `lockEscrow` `0xbd174dd45ce651905ca4d369073f60202cb86c50e495a27df9be3b4be695640b` (blk 38046990), `refundEscrow` `0xbfd5c584d0e09f8c4da5e896aa52b07d4d3401f77de279d9bab7e3a5d60ed3cc` (blk 38047027).
+3. Both sets of receipts verified on-chain via `eth_getTransactionReceipt`.
+
+### Rule added
+
+18. **Never truncate transaction hashes, addresses, or cryptographic digests in harness outputs.**
+    Cosmetic truncation creates an information vacuum that invites reconstruction or
+    hallucination. Test outputs must be directly copyable verbatim into evidence ledgers.
 
 ## F52 — on Postgres, every agreement write returned 2xx and persisted nothing
 
