@@ -277,6 +277,16 @@ export class InMemoryRepository implements EconomicRepository {
     return this.ledger.putReservation(reservation);
   }
 
+  async beginSettlement(reservationId: string): Promise<Reservation | null> {
+    const { consumeReservation } = await import("@/lib/kernel/vault");
+    return this.ledger.beginSettlement(reservationId, consumeReservation);
+  }
+
+  async completeSettlement(reservationId: string, paidAmount: number): Promise<boolean> {
+    const { settleCapital } = await import("@/lib/kernel/vault");
+    return this.ledger.completeSettlement(reservationId, paidAmount, settleCapital);
+  }
+
   async recordAuthorization(auth: Authorization): Promise<void> {
     this.ledger.recordAuthorization(auth);
   }

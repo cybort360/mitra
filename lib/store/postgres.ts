@@ -388,6 +388,67 @@ export class PostgresRepository implements EconomicRepository {
     }
   }
 
+  /**
+   * Settlement capital (backlog #2), each in one transaction on one connection with
+   * the reservation and vault rows locked. The reservation's status is the gate: a
+   * second `completeSettlement` finds it SETTLED and changes nothing. The vault's
+   * `CHECK (… >= 0)` constraints are the backstop if anything ever under-reserved.
+   */
+  async beginSettlement(reservationId: string): Promise<Reservation | null> {
+    return this.inTransaction(async (client) => {
+      const { rows } = await client.query("SELECT * FROM mitra.reservations WHERE reservation_id = $1 FOR UPDATE", [reservationId]);
+      if (!rows[0]) return null;
+      let r = rowToReservation(rows[0]);
+      if (r.status !== "RESERVED" && r.status !== "COMMITTED") return null;
+      if (r.status === "RESERVED") r = { ...transition("reservation", r, "COMMITTED"), version: r.version + 1 };
+      r = { ...transition("reservation", r, "SETTLING"), version: r.version + 1 };
+      const moved = await client.query(
+        `UPDATE mitra.vaults SET reserved = reserved - $1, settling = settling + $1, version = version + 1
+          WHERE vault_id = $2 AND reserved >= $1`,
+        [r.amount, r.vaultId],
+      );
+      if (moved.rowCount !== 1) throw new Error("RESERVATION_EXCEEDS_RESERVED_CAPITAL");
+      await client.query("UPDATE mitra.reservations SET status = $1, version = $2 WHERE reservation_id = $3", [r.status, r.version, reservationId]);
+      return r;
+    });
+  }
+
+  async completeSettlement(reservationId: string, paidAmount: number): Promise<boolean> {
+    if (!(paidAmount > 0)) throw new Error("INVALID_PAID_AMOUNT");
+    return this.inTransaction(async (client) => {
+      const { rows } = await client.query("SELECT * FROM mitra.reservations WHERE reservation_id = $1 FOR UPDATE", [reservationId]);
+      if (!rows[0]) return false;
+      const r = rowToReservation(rows[0]);
+      if (r.status !== "SETTLING") return false;
+      if (paidAmount > r.amount) throw new Error("PAID_EXCEEDS_RESERVATION");
+      const moved = await client.query(
+        `UPDATE mitra.vaults
+            SET settling = settling - $1, total = total - $2, available = available + ($1 - $2), version = version + 1
+          WHERE vault_id = $3 AND settling >= $1`,
+        [r.amount, paidAmount, r.vaultId],
+      );
+      if (moved.rowCount !== 1) throw new Error("SETTLEMENT_EXCEEDS_SETTLING_CAPITAL");
+      const next = { ...transition("reservation", r, "SETTLED"), version: r.version + 1 };
+      await client.query("UPDATE mitra.reservations SET status = $1, version = $2 WHERE reservation_id = $3", [next.status, next.version, reservationId]);
+      return true;
+    });
+  }
+
+  private async inTransaction<T>(f: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const out = await f(client);
+      await client.query("COMMIT");
+      return out;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async setReservationStatus(reservationId: string, status: Reservation["status"]): Promise<Reservation | null> {
     const current = await this.getReservation(reservationId);
     if (!current) return null;

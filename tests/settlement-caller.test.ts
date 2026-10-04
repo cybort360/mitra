@@ -22,6 +22,7 @@ import { SETTLEMENT_TYPES, settlementDigest, settlingDomain, verifyAuthorisation
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Agreement, Mandate, Reservation, Space } from "@/lib/domain/types";
 import { CapitalLedger } from "@/lib/store/ledger";
+import { reconcileVault, settleCapital } from "@/lib/kernel/vault";
 import { InMemoryRepository } from "@/lib/store/provider";
 import { vaults as seedVaults } from "@/lib/store/seed";
 import { BASE_ASSETS, BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
@@ -383,6 +384,56 @@ describe("settlement caller — refusals send nothing", () => {
   });
 });
 
+describe("settlement moves the vault's books (backlog #2)", () => {
+  const book = async () => {
+    const v = (await repo.getVault(VAULT_ID))!;
+    expect(reconcileVault(v).ok, "the vault reconciles at every step").toBe(true);
+    return { total: v.total, available: v.available, reserved: v.reserved, settling: v.settling };
+  };
+
+  it("reserved → settling → paid out: total falls by exactly the price, nothing stays reserved", async () => {
+    __setRailsForTests(baseRail(recorder().transport));
+    await repo.saveAgreement(accepted("ag_book"));
+    const before = await book();
+    const { body: r } = await reserveFor("ag_book");
+    const reserved = await book();
+    expect(reserved.reserved - before.reserved).toBeCloseTo(PRICE.amount, 6);
+    expect((await settle("ag_book", r.data.reservationId)).status).toBe(200);
+    const after = await book();
+    expect(after.reserved).toBeCloseTo(before.reserved, 6);
+    expect(after.settling).toBeCloseTo(before.settling, 6);
+    expect(before.total - after.total).toBeCloseTo(PRICE.amount, 6);
+    expect(after.available).toBeCloseTo(before.available - PRICE.amount, 6);
+  });
+
+  it("an unknown outcome keeps the money in settling — neither spent nor available", async () => {
+    __setRailsForTests(baseRail(recorder({ throwOnSend: new Error("socket hang up") }).transport));
+    await repo.saveAgreement(accepted("ag_book_unknown"));
+    const before = await book();
+    const { body: r } = await reserveFor("ag_book_unknown");
+    await settle("ag_book_unknown", r.data.reservationId);
+    const after = await book();
+    expect(after.settling - before.settling).toBeCloseTo(PRICE.amount, 6);
+    expect(after.total).toBeCloseTo(before.total, 6);
+  });
+
+  it("confirming twice applies the capital once", async () => {
+    const rec = recorder({ confirm: false });
+    __setRailsForTests(baseRail(rec.transport));
+    await repo.saveAgreement(accepted("ag_book_twice"));
+    const before = await book();
+    const { body: r } = await reserveFor("ag_book_twice");
+    await settle("ag_book_twice", r.data.reservationId);
+    rec.setConfirm(true);
+    const confirm = () => post(settlementsPOST, { op: "confirm", settlementId: settlementIdFor("ag_book_twice"), now: NOW });
+    await Promise.all([confirm(), confirm()]);
+    await confirm();
+    const after = await book();
+    expect(before.total - after.total).toBeCloseTo(PRICE.amount, 6);
+    expect(after.settling).toBeCloseTo(before.settling, 6);
+  });
+});
+
 describe("settlement caller — never pays twice", () => {
   it("a repeat settle of a paid agreement is refused and sends nothing more", async () => {
     const rec = recorder();
@@ -612,3 +663,18 @@ describe.skipIf(!(process.env.BASE_LIVE === "1" && existsSync(LIVE_KEY)))("live:
     expect(v1271).toEqual({ ok: true, mode: "contract" });
   }, 180_000);
 });
+
+describe("settleCapital (kernel)", () => {
+  const v = { ...seedVaults[0], total: 100, available: 50, reserved: 0, escrowed: 0, encumbered: 0, settling: 10, frozen: 40 };
+  it("pays out what was paid and returns the rest", () => {
+    const n = settleCapital(v, 10, 4);
+    expect([n.total, n.settling, n.available]).toEqual([96, 0, 56]);
+    expect(reconcileVault(n).ok).toBe(true);
+  });
+  it("refuses to pay more than was reserved, more than is settling, or nothing", () => {
+    expect(() => settleCapital(v, 10, 11)).toThrow("PAID_EXCEEDS_RESERVATION");
+    expect(() => settleCapital(v, 11, 4)).toThrow("SETTLEMENT_EXCEEDS_SETTLING_CAPITAL");
+    expect(() => settleCapital(v, 10, 0)).toThrow("INVALID_PAID_AMOUNT");
+  });
+});
+
