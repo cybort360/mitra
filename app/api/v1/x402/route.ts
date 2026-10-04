@@ -5,6 +5,7 @@ import { http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getStore } from "@/lib/store/provider";
 import { baseSepoliaObserver, payX402 } from "@/lib/payments/x402-gateway";
+import { recordEvent } from "@/lib/store/events";
 
 /**
  * The x402 gateway (PRD §12.1, sprint item 4): fetch a paid resource through Mitra,
@@ -48,8 +49,23 @@ export async function POST(req: Request) {
     signer, now: () => new Date(), observe: baseSepoliaObserver(http(rpc)),
   });
 
+  const reservation = await repo.getReservation(body.reservationId);
+  const runId = reservation?.runId ?? "run_unspecified";
   if (result.refusal) {
+    await recordEvent(repo, {
+      runId, kind: "PAYMENT", title: "x402 payment refused", status: "WARNING",
+      description: `${result.refusal}. Nothing was signed.`, objectRef: body.reservationId, metadata: { url: body.url },
+    });
     return NextResponse.json({ error: result.refusal, settlement: result.settlement, backend }, { status: 409 });
+  }
+  if (result.settlement) {
+    await recordEvent(repo, {
+      runId, kind: "PAYMENT", title: `x402 payment ${result.settlement.status}`,
+      status: result.settlement.status === "CONFIRMED" ? "SUCCESS" : "WARNING",
+      description: `${result.settlement.amount} ${result.settlement.asset} to ${result.settlement.to} for ${body.url}.${result.settlement.failureReason ? ` ${result.settlement.failureReason}` : ""}`,
+      objectRef: result.settlement.settlementId,
+      metadata: { ...(result.settlement.txHash ? { txHash: result.settlement.txHash } : {}), evidenceLevel: result.settlement.evidenceLevel },
+    });
   }
   const resource = result.response
     ? { status: result.response.status, contentType: result.response.headers.get("content-type"), body: await result.response.text() }

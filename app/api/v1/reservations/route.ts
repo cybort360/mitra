@@ -4,6 +4,7 @@ import { evaluateProposal } from "@/lib/kernel/authorization";
 import { getStore } from "@/lib/store/provider";
 import { actionDigestFor, newId } from "@/lib/store/ids";
 import { AGREEMENT_PAYMENT_CAPABILITY } from "@/lib/kernel/settlement";
+import { recordEvent } from "@/lib/store/events";
 import type { Reservation } from "@/lib/domain/types";
 
 /**
@@ -95,6 +96,11 @@ export async function POST(req: Request) {
   }, { recentSpend: await repo.recentSpend(vault.vaultId, mandate.mandateId, now, mandate.velocityLimit?.windowMinutes ?? 60) });
 
   if (policy.decision !== "ALLOW") {
+    await recordEvent(repo, {
+      runId: body.runId, kind: "AUTHORITY", title: "Reservation denied by policy", status: "WARNING",
+      description: `${policy.reasonCodes.join(", ")}. No capital was reserved.`, objectRef: mandate.mandateId,
+      metadata: { amount: body.amount, asset: body.asset, counterparty: body.counterparty, decision: policy.decision },
+    });
     return NextResponse.json(
       { error: "POLICY_DENIED", reasonCodes: policy.reasonCodes, note: "No capital was reserved." },
       { status: 403 },
@@ -124,6 +130,12 @@ export async function POST(req: Request) {
   if (!reserved.ok) {
     return NextResponse.json({ error: reserved.reason, backend }, { status: 409 });
   }
+  await recordEvent(repo, {
+    runId: body.runId, kind: "VAULT", title: "Capital reserved", status: "SUCCESS",
+    description: `${body.amount} ${body.asset} reserved on ${vault.vaultId} for ${body.counterparty}. Reserved, not moved.`,
+    objectRef: reserved.reservation.reservationId,
+    metadata: { amount: body.amount, asset: body.asset, vaultId: vault.vaultId, ...(body.agreementId ? { agreementId: body.agreementId } : {}) },
+  });
 
   return NextResponse.json(
     { data: reserved.reservation, vault: reserved.vault, backend, evidenceLevel: "LOCAL_PASS", note: "Capital is reserved, not moved. Execution requires the exact action digest." },

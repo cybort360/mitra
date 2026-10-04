@@ -7,6 +7,7 @@ import {
   type AgreementOp,
 } from "@/lib/kernel/commerce";
 import { applyAgreementOpWithSaga } from "@/lib/kernel/commerce-recovery";
+import { recordEvent } from "@/lib/store/events";
 import type { Agreement, Money, Space } from "@/lib/domain/types";
 
 /**
@@ -152,6 +153,11 @@ export async function POST(req: Request) {
     );
 
     if (!openResult.ok) {
+      await recordEvent(repo, {
+        runId: body.draft.runId, kind: "COMMERCE", title: "Agreement refused at open", status: "WARNING",
+        description: `The Space refused the agreement: ${openResult.reason}.`, objectRef: body.draft.agreementId,
+        metadata: { reason: openResult.reason, spaceId: body.spaceId },
+      });
       return NextResponse.json(
         { error: openResult.reason, backend },
         { status: 400 },
@@ -160,6 +166,12 @@ export async function POST(req: Request) {
 
     await repo.saveAgreement(openResult.value.agreement);
     await repo.updateSpace(openResult.value.space);
+    await recordEvent(repo, {
+      runId: openResult.value.agreement.runId, kind: "COMMERCE", title: "Agreement opened", status: "SUCCESS",
+      description: `${openResult.value.agreement.client} → ${openResult.value.agreement.provider}, ${openResult.value.agreement.price.amount} ${openResult.value.agreement.price.asset}.`,
+      objectRef: openResult.value.agreement.agreementId,
+      metadata: { spaceId: body.spaceId, amount: openResult.value.agreement.price.amount, asset: openResult.value.agreement.price.asset },
+    });
 
     return NextResponse.json(
       {
@@ -223,6 +235,11 @@ export async function POST(req: Request) {
   );
 
   if (!opResult.ok) {
+    await recordEvent(repo, {
+      runId: agreement.runId, kind: "COMMERCE", title: `Agreement ${body.op} refused`, status: "WARNING",
+      description: `${body.op} was refused: ${opResult.reason}.`, objectRef: agreement.agreementId,
+      metadata: { op: body.op, reason: opResult.reason, from: agreement.status },
+    });
     return NextResponse.json(
       { error: opResult.reason, backend },
       { status: 400 },
@@ -231,6 +248,12 @@ export async function POST(req: Request) {
 
   await repo.updateAgreement(opResult.value.agreement);
   await repo.updateSpace(opResult.value.space);
+  await recordEvent(repo, {
+    runId: agreement.runId, kind: "COMMERCE", title: `Agreement ${agreement.status} → ${opResult.value.agreement.status}`,
+    status: opResult.value.agreement.status === "REJECTED" ? "WARNING" : "SUCCESS",
+    description: `${body.op} applied.`, objectRef: agreement.agreementId,
+    metadata: { op: body.op, from: agreement.status, to: opResult.value.agreement.status },
+  });
 
   return NextResponse.json({
     data: {

@@ -21,7 +21,7 @@
  *   reject and fund stay off the surface until the API knows who is calling
  *   (decided 2026-10-04 by human:purple; flagged to the lead as a blocker).
  * - **unbacked** — no subsystem exists to serve it (no agent registry, no intent
- *   store, no event-read route). Serving a stub would be a fake success path.
+ *   store). Serving a stub would be a fake success path.
  *
  * `assertServedMatchesStatus` runs at module load: a served status without a
  * definition, or a definition for a tool not marked served, throws on import.
@@ -68,7 +68,7 @@ export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   mitra_find_agents: { status: "unbacked", reason: "No agent registry or discovery index." },
   mitra_create_intent: { status: "unbacked", reason: "No intent store: intents are ids carried by runs and reservations." },
   mitra_get_intent: { status: "unbacked", reason: "No intent store." },
-  mitra_get_timeline: { status: "unbacked", reason: "No event-read route; the in-memory store keeps no event log (sprint item 5)." },
+  mitra_get_timeline: { status: "served" },
 };
 
 interface ServedTool {
@@ -108,6 +108,11 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
     description: "A receipt by receiptId, or a run's whole hash-chained receipt list (with the chain's verdict) by runId.",
     inputSchema: { receiptId: z.string().min(1).optional(), runId: z.string().min(1).optional() },
     toRequest: (a) => ({ method: "GET", path: `/api/v1/receipts${qs({ receiptId: a.receiptId, runId: a.runId })}` }),
+  },
+  mitra_get_timeline: {
+    description: "A run's timeline from Mitra's append-only event log: what happened, in order, including refusals.",
+    inputSchema: { runId: z.string().min(1) },
+    toRequest: (a) => ({ method: "GET", path: `/api/v1/events${qs({ runId: a.runId })}` }),
   },
   mitra_get_exposure: {
     description: "Capital, obligations and settlements reconciled into one accounting report, as of a time.",

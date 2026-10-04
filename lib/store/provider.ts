@@ -313,13 +313,33 @@ export class InMemoryRepository implements EconomicRepository {
     return this.ledger.recentSpend(vaultId, mandateId, now, windowMinutes);
   }
 
-  /** The ledger has no event log; the adapter does not invent one. */
+  /**
+   * A real, append-only event log for this process (sprint item 5).
+   *
+   * It used to return a synthetic id and keep nothing, so `listEvents` was always
+   * empty under the in-memory backend and a Console reading it could only ever show
+   * fixtures. Process-local, like everything else in this store — `backend: "memory"`
+   * says so.
+   */
+  private readonly eventLog: RunEvent[] = [];
+
   async appendEvent(event: Omit<RunEvent, "eventId">): Promise<RunEvent> {
-    return { ...event, eventId: `evt_${Date.now()}` };
+    const stored: RunEvent = { ...event, eventId: `evt_${this.eventLog.length + 1}` };
+    this.eventLog.push(stored);
+    return { ...stored };
   }
 
-  async listEvents(_runId: string): Promise<RunEvent[]> {
-    return [];
+  async listEvents(runId: string): Promise<RunEvent[]> {
+    return this.eventLog.filter((e) => e.runId === runId).map((e) => ({ ...e }));
+  }
+
+  async listEventsSince(cursor: number, limit = 200): Promise<Array<{ seq: number; event: RunEvent }>> {
+    return this.eventLog.slice(Math.max(0, cursor), Math.max(0, cursor) + limit)
+      .map((event, i) => ({ seq: cursor + i + 1, event: { ...event } }));
+  }
+
+  async listMandates(): Promise<Mandate[]> {
+    return mandates.map((m) => ({ ...m }));
   }
 }
 

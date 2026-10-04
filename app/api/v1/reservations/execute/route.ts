@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateExecutionBinding } from "@/lib/kernel/authorization";
 import { getStore } from "@/lib/store/provider";
+import { recordEvent } from "@/lib/store/events";
 
 /**
  * The execution guard.
@@ -50,6 +51,11 @@ export async function POST(req: Request) {
   );
 
   if (!binding.ok) {
+    await recordEvent(repo, {
+      runId: reservation.runId, kind: "VAULT", title: "Execution refused by the guard", status: "WARNING",
+      description: `${binding.reason}: this instruction does not match what was authorized.`, objectRef: reservation.reservationId,
+      metadata: { reason: binding.reason },
+    });
     return NextResponse.json(
       { error: "EXECUTION_REJECTED", reason: binding.reason, reservationId: reservation.reservationId, backend },
       { status: 409 },
@@ -66,6 +72,11 @@ export async function POST(req: Request) {
   }
 
   const committed = await repo.setReservationStatus(reservation.reservationId, "COMMITTED");
+  await recordEvent(repo, {
+    runId: reservation.runId, kind: "VAULT", title: "Reservation committed", status: "INFO",
+    description: "The execution guard passed and the nonce was spent. Local simulation: no value moved.",
+    objectRef: reservation.reservationId, metadata: { amount: reservation.amount, asset: reservation.asset },
+  });
   return NextResponse.json(
     { data: committed, backend, evidenceLevel: "LOCAL_PASS", note: "Local simulation only. No chain transaction and no value movement occurred." },
     { status: 200 },

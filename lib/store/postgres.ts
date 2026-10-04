@@ -487,6 +487,18 @@ export class PostgresRepository implements EconomicRepository {
     const { rows } = await this.pool.query("SELECT * FROM mitra.event_log WHERE run_id = $1 ORDER BY seq ASC", [runId]);
     return rows.map(rowToEvent);
   }
+
+  async listEventsSince(cursor: number, limit = 200): Promise<Array<{ seq: number; event: RunEvent }>> {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM mitra.event_log WHERE seq > $1 ORDER BY seq ASC LIMIT $2", [cursor, limit],
+    );
+    return rows.map((r) => ({ seq: num(r.seq), event: rowToEvent(r) }));
+  }
+
+  async listMandates(): Promise<Mandate[]> {
+    const { rows } = await this.pool.query("SELECT * FROM mitra.mandates ORDER BY mandate_id");
+    return rows.map(rowToMandate);
+  }
   // ── Sagas (F49) ─────────────────────────────────────────────────────────────
 
   /**

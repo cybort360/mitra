@@ -2510,6 +2510,19 @@ verify EOA, ERC-1271 and ERC-6492 signatures on chain), and role checks in the k
 only the client or evaluator may accept or reject, only the provider may submit, only the
 client may fund. Then the three MCP tools can move from `withheld` to `served`.
 
+## F56 — the in-memory event log accepted every event and kept none
+
+**Status:** fixed on `feat/settlement-caller` (sprint item 5).
+**Found:** 2026-10-04, wiring the live event stream.
+
+`InMemoryRepository.appendEvent` returned `{ ...event, eventId: "evt_<now>" }` and stored
+nothing; `listEvents` always returned `[]`. Its comment said "the adapter does not invent
+one" — but returning an id for an event that was not recorded is exactly an invented
+record, and under the default backend every timeline was empty while appends "succeeded".
+That is also why the Console could only show fixtures. Same class as F52: a write path
+that reports success and persists nothing. Now an append-only log with positions
+(`listEventsSince`), shared by the SSE stream.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |

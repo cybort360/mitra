@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type ActionProposal } from "@/lib/kernel/authorization";
 import { createPolicyEvaluator, evaluateWithFallback, EnclaveUnavailableError } from "@/lib/kernel/policy-engine";
 import { getStore } from "@/lib/store/provider";
+import { recordEvent } from "@/lib/store/events";
 import { actionDigestFor, newId } from "@/lib/store/ids";
 import type { Authorization } from "@/lib/domain/types";
 
@@ -122,6 +123,12 @@ export async function POST(req: Request) {
     version: 1,
   };
   await repo.recordAuthorization(auth);
+  await recordEvent(repo, {
+    runId: body.runId, kind: "AUTHORITY", title: `Authorization ${auth.decision}`,
+    status: auth.decision === "ALLOW" ? "SUCCESS" : "WARNING",
+    description: `${body.amount} ${body.asset} to ${body.counterparty}: ${auth.reasonCodes.join(", ")}. An ALLOW is not permission to move value.`,
+    objectRef: auth.authorizationId, metadata: { mandateId: mandate.mandateId, evaluator: decision.evaluator },
+  });
 
   return NextResponse.json(
     {

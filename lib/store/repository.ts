@@ -226,4 +226,12 @@ export interface EconomicRepository {
   /** Append to the durable, replayable event log. */
   appendEvent(event: Omit<RunEvent, "eventId">): Promise<RunEvent>;
   listEvents(runId: string): Promise<RunEvent[]>;
+  /**
+   * Every event after `cursor`, oldest first, with its log position (sprint item 5).
+   * The cursor is the log's own sequence, so a stream can resume exactly where it
+   * stopped (`Last-Event-ID`) without timestamps, which can tie.
+   */
+  listEventsSince(cursor: number, limit?: number): Promise<Array<{ seq: number; event: RunEvent }>>;
+  /** Every mandate. Read-only here; mandates are written by the authority path. */
+  listMandates(): Promise<Mandate[]>;
 }

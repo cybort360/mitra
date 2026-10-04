@@ -22,12 +22,13 @@ import * as evidence from "@/app/api/v1/settlements/evidence/route";
 import * as receipts from "@/app/api/v1/receipts/route";
 import * as accounting from "@/app/api/v1/accounting/route";
 import * as clearing from "@/app/api/v1/clearing/route";
+import * as events from "@/app/api/v1/events/route";
 
 type Handler = { GET?: (r: Request) => Promise<Response>; POST?: (r: Request) => Promise<Response> };
 const ROUTES: Record<string, Handler> = {
   "/api/v1/agreements": agreements, "/api/v1/authorizations": authorizations, "/api/v1/obligations": obligations as Handler,
   "/api/v1/sagas": sagas, "/api/v1/settlements": settlements, "/api/v1/settlements/evidence": evidence,
-  "/api/v1/receipts": receipts, "/api/v1/accounting": accounting, "/api/v1/clearing": clearing,
+  "/api/v1/receipts": receipts, "/api/v1/accounting": accounting, "/api/v1/clearing": clearing, "/api/v1/events": events,
 };
 
 /** Every request the server made, so tests can assert what reached the API. */
@@ -161,6 +162,7 @@ describe("served tools go through the real routes", () => {
       ["mitra_get_settlement", { settlementId: "set_x" }, "/api/v1/settlements/evidence?settlementId=set_x"],
       ["mitra_get_receipt", { runId: "run_501" }, "/api/v1/receipts?runId=run_501"],
       ["mitra_get_exposure", {}, "/api/v1/accounting"],
+      ["mitra_get_timeline", { runId: "run_501" }, "/api/v1/events?runId=run_501"],
     ] as const) {
       seen = [];
       await client.callTool({ name, arguments: args });
