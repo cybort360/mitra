@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 72,
+  "highSeq": 74,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1465,6 +1465,50 @@
         "8d97984f93604d8a9131fe761d731316b9d8bee642e1330965ff36a7fa76fc65"
       ],
       "hash": "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
+    },
+    {
+      "entryId": "ctx_061531dc6f1e856e",
+      "seq": 73,
+      "kind": "handoff",
+      "title": "Backlog after the sprint: all six unblocked items done (vault rail live, capital books, all rails through the route, signed receipts, stores, F54); F58 found and fixed",
+      "body": "feat/settlement-caller @ 8c14e8f, pushed. The reseed branch is merged up to date at abb31e9, with no history rewrite.\n\n1. B.4: Base and Tempo settle THROUGH MitraVault.sol (MITRA_*_SETTLEMENT_ACCOUNT=vault). The engine-signed permit's actionHash is the settlement commitment. Live: Base 0x0d875915…, Tempo 0x902c4743…, both CONFIRMED with evidence TESTNET_PASS. Mutation 10/10.\n2. Capital: settlement now moves vault books. reserved -> settling at begin; at confirm, settling and total fall, once (gated SETTLING->SETTLED, atomic on Postgres); x402 returns the unpaid remainder. /reservations/execute still only commits. Mutation 7/7.\n3. Solana through the agreement route, live: tx 3tR25Ybm…. Every rail has now settled an agreement through POST /api/v1/settlements live.\n4. Receipts are EIP-191 signed when MITRA_RECEIPT_SIGNER_KEY_FILE is set. The signature is over receiptHash, which excludes it, so the chain is unchanged. verifyReceipts checks them, and the receipts and evidence routes report per-receipt verdicts. Closes F53's open item.\n5. Stores:\n- Authorizations are listed; Postgres had been dropping recipientConstraint.\n- Agents: get_agent and find_agents are served over MCP; register_agent is withheld (F55).\n- Clearing epochs are stored.\n- F58: finalize_epoch used to finalize the client's own epoch object, forged transfers included, with no single-epoch rule. It now seals only a stored calculation, via finalizeEpochOnce. Request shape unchanged; your clearing tests pass.\n- Console: only the evidence and integrations pages remain fixtures.\n6. F54 fixed: userOperationHash equals the deployed EntryPoint v0.7's getUserOpHash (eth_call) and viem's. scripts/base-4337.mjs now refuses to run (exit 2) and points to the working transport; repair or delete is your call.\n\nSuites: TS 778 in memory; 825 on Postgres twice. Rust 106/106 on the reseed branch. dev-scripts flaked once on an RPC timeout and passed on rerun.\n\nSTILL YOURS: F55 caller identity (it decides whether accept/reject/fund/register_agent get served); the item 7 redeploy and the security contact.\n\nRemaining unbacked MCP tools: create_intent and get_intent. They need an Intent store and a decision on who an intent belongs to without caller identity.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F58",
+        "backlog",
+        "handoff",
+        "needs-lead",
+        "summary"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T09:56:55.361Z",
+      "parents": [
+        "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
+      ],
+      "hash": "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+    },
+    {
+      "entryId": "ctx_fd090da8eefc5a5d",
+      "seq": 74,
+      "kind": "handoff",
+      "title": "PRs #28 (sprint + backlog) and #29 (draft, reseed) are open into fix; both conflict with your overnight work and need your call on which MitraVault.sol is canonical",
+      "body": "#28: feat/settlement-caller -> fix/integrity-f40-f45. It contains #27, so merging it supersedes #27. #29 (DRAFT): feat/vault-reseed-security-txt -> fix. It must not merge before the program upgrade.\n\nBoth conflict with fix, which picked up 13 commits since we branched. DECISIONS FOR YOU:\n1. Two MitraVault.sol deployments.\n- fix: contracts/MitraVault.sol, Base 0x6a731a65…, Tempo 0x19b3c58d….\n- ours: contracts/src/MitraVault.sol, Base 0x78b82802…, Tempo 0xfadc63a6….\n- The deployments.json formats differ, and each side's code reads its own.\n- Yours keys mandates by holder alone (require mandates[holder].holder == 0). A stranger can squat an agent's only slot, and a revoked holder can never be re-granted. It does check the principal at spend, so there is no cross-principal drain.\n2. Failure numbering: fix has its own F52, and F45 twice. Ours run F52–F58 and need renumbering after yours.\n3. #29: you already embedded security.txt and upgraded devnet. #29's remaining value is the (principal, holder) reseed plus F57, which binds permits to their mandate; without F57 the reseed is unsafe.\n\nI did not resolve these conflicts, because the choices are yours. The details are in each PR body.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "conflict",
+        "handoff",
+        "mitravault",
+        "needs-lead",
+        "pr"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T10:38:56.986Z",
+      "parents": [
+        "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+      ],
+      "hash": "e928d6340cb08bb36ea9db73a31e2b7f0ffae8d26c18f5120b02a0363d3894e8"
     }
   ],
   "actors": [
@@ -1502,5 +1546,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
+  "tipHash": "e928d6340cb08bb36ea9db73a31e2b7f0ffae8d26c18f5120b02a0363d3894e8"
 }
