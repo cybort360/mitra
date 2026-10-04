@@ -94,6 +94,38 @@ export class CapitalLedger {
   }
 
   /** Capital that is actually spendable, with a reservation applied if required. */
+  /**
+   * Settlement capital (backlog #2), each one synchronous so it cannot interleave:
+   * begin moves the reservation to SETTLING (through COMMITTED, as the machine
+   * requires) and its capital `reserved → settling`; complete moves it to SETTLED
+   * and closes the capital. Complete returns false if the reservation is not
+   * SETTLING — the once-only gate a racing second confirmation hits.
+   */
+  beginSettlement(reservationId: string, consume: (v: Vault, r: Reservation) => Vault): Reservation | null {
+    const r = this.reservations.get(reservationId);
+    if (!r || (r.status !== "RESERVED" && r.status !== "COMMITTED")) return null;
+    const v = this.vaults.get(r.vaultId);
+    if (!v) return null;
+    const nextVault = consume(v, r);
+    let next = r;
+    if (next.status === "RESERVED") next = { ...transition("reservation", next, "COMMITTED"), version: next.version + 1 };
+    next = { ...transition("reservation", next, "SETTLING"), version: next.version + 1 };
+    this.vaults.set(r.vaultId, nextVault);
+    this.reservations.set(reservationId, next);
+    return { ...next };
+  }
+
+  completeSettlement(reservationId: string, paid: number, settle: (v: Vault, reserved: number, paid: number) => Vault): boolean {
+    const r = this.reservations.get(reservationId);
+    if (!r || r.status !== "SETTLING") return false;
+    const v = this.vaults.get(r.vaultId);
+    if (!v) return false;
+    const nextVault = settle(v, r.amount, paid);
+    this.vaults.set(r.vaultId, nextVault);
+    this.reservations.set(reservationId, { ...transition("reservation", r, "SETTLED"), version: r.version + 1 });
+    return true;
+  }
+
   reserveCapital(vaultId: string, amount: number, reserve: (v: Vault, a: number) => Vault): Vault {
     const current = this.vaults.get(vaultId);
     if (!current) throw new Error(`VAULT_NOT_FOUND: ${vaultId}`);

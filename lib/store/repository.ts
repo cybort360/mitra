@@ -25,16 +25,18 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
-import type { ReceiptDraft } from "@/lib/kernel/receipts";
+import type { ReceiptDraft, ReceiptSigner } from "@/lib/kernel/receipts";
 
 /** Counts reported by seeding. Widened when spaces and agreements were added. */
 export interface SeedCounts {
   vaults: number; mandates: number; reservations: number;
   spaces: number; agreements: number;
   obligations: number; settlements: number; runs: number; deliverables: number;
+  agents: number;
+  epochs: number;
 }
 
 export interface ReservationInput {
@@ -153,7 +155,7 @@ export interface EconomicRepository {
    * A receipt id that already exists is returned unchanged rather than re-linked,
    * so a retried confirmation does not mint a second receipt for one settlement.
    */
-  appendReceipt(draft: ReceiptDraft): Promise<Receipt>;
+  appendReceipt(draft: ReceiptDraft, signer?: ReceiptSigner): Promise<Receipt>;
   getReceipt(receiptId: string): Promise<Receipt | null>;
   /** One run's receipts, oldest first: the order `verifyReceiptChain` walks. */
   listReceipts(runId: string): Promise<Receipt[]>;
@@ -194,6 +196,18 @@ export interface EconomicRepository {
   setReservationStatus(reservationId: string, status: Reservation["status"]): Promise<Reservation | null>;
 
   /**
+   * Settlement capital (backlog #2). Atomic in each store.
+   *
+   * `beginSettlement`: a RESERVED or COMMITTED reservation becomes SETTLING and its
+   * capital moves `reserved → settling`; null if it is in any other state.
+   * `completeSettlement`: SETTLING → SETTLED and `settleCapital` (settling drops by
+   * the reservation, total by what was paid, the remainder returns to available);
+   * false if it was not SETTLING, so a second confirmation cannot apply it twice.
+   */
+  beginSettlement(reservationId: string): Promise<Reservation | null>;
+  completeSettlement(reservationId: string, paidAmount: number): Promise<boolean>;
+
+  /**
    * Insert or replace a whole reservation row.
    *
    * Exists because a reservation is created from two sources at once: the store
@@ -204,6 +218,8 @@ export interface EconomicRepository {
   putReservation(reservation: Reservation): Promise<Reservation>;
 
   recordAuthorization(auth: Authorization): Promise<void>;
+  /** Every authorization decision recorded, newest first; optionally one run's (backlog #5). */
+  listAuthorizations(runId?: string): Promise<Authorization[]>;
 
   // ── Sagas (F49) ───────────────────────────────────────────────────────────
   // The recovery kernel had complete unit coverage and no write path at all:
@@ -234,4 +250,22 @@ export interface EconomicRepository {
   listEventsSince(cursor: number, limit?: number): Promise<Array<{ seq: number; event: RunEvent }>>;
   /** Every mandate. Read-only here; mandates are written by the authority path. */
   listMandates(): Promise<Mandate[]>;
+
+  /**
+   * Agents (backlog #5). Read-only: registration has no write path yet, because the
+   * API cannot tell who is registering (F55) — anyone could register an agent under
+   * any name or wallet.
+   */
+  listAgents(): Promise<Agent[]>;
+
+  /**
+   * Clearing epochs (backlog #5). `saveEpoch` upserts; `insertEpoch` refuses an id
+   * that exists (an epoch is opened once). The clearing route works on the STORED
+   * epoch, never a client-supplied copy, wherever the server opened it (F58).
+   */
+  getEpoch(epochId: string): Promise<ClearingEpoch | null>;
+  listEpochs(): Promise<ClearingEpoch[]>;
+  insertEpoch(epoch: ClearingEpoch): Promise<boolean>;
+  saveEpoch(epoch: ClearingEpoch): Promise<void>;
+  getAgent(agentId: string): Promise<Agent | null>;
 }

@@ -43,10 +43,10 @@
 // already enforced by the fact that only app/api routes import this module.
 import type { Pool } from "pg";
 import type {
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
-import { linkReceipt, type ReceiptDraft } from "@/lib/kernel/receipts";
+import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type {
   CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts,
 } from "@/lib/store/repository";
@@ -54,7 +54,7 @@ import { createPool } from "@/lib/store/db";
 import { PostgresRepository } from "@/lib/store/postgres";
 import { CapitalLedger, getLedger } from "@/lib/store/ledger";
 import {
-  agreements, deliverables, mandates, obligations, runs, settlements, spaces,
+  agents as seedAgents, agreements, clearingEpochs as seedEpochs, deliverables, mandates, obligations, runs, settlements, spaces,
 } from "@/lib/store/seed";
 
 /** Which store served a request. Surfaced in API responses; never inferred. */
@@ -106,6 +106,8 @@ export class InMemoryRepository implements EconomicRepository {
       settlements: this.settlementsMap.size,
       runs: runs.length,
       deliverables: deliverables.length,
+      agents: seedAgents.length,
+      epochs: this.epochsMap.size,
     };
   }
 
@@ -185,12 +187,15 @@ export class InMemoryRepository implements EconomicRepository {
     return true;
   }
 
-  async appendReceipt(draft: ReceiptDraft): Promise<Receipt> {
+  async appendReceipt(draft: ReceiptDraft, signer?: ReceiptSigner): Promise<Receipt> {
     const existing = await this.getReceipt(draft.receiptId);
     if (existing) return existing;
     const run = draft.runId ?? "";
     const chain = this.receiptsByRun.get(run) ?? [];
-    const receipt = linkReceipt(draft, chain.at(-1) ?? null);
+    const receipt = await linkAndSign(draft, chain.at(-1) ?? null, signer);
+    // Signing awaited: re-check nothing was appended for this run or id meanwhile.
+    const now = this.receiptsByRun.get(run) ?? [];
+    if (now.length !== chain.length) return this.appendReceipt(draft, signer);
     this.receiptsByRun.set(run, [...chain, receipt]);
     return { ...receipt };
   }
@@ -277,8 +282,22 @@ export class InMemoryRepository implements EconomicRepository {
     return this.ledger.putReservation(reservation);
   }
 
+  async beginSettlement(reservationId: string): Promise<Reservation | null> {
+    const { consumeReservation } = await import("@/lib/kernel/vault");
+    return this.ledger.beginSettlement(reservationId, consumeReservation);
+  }
+
+  async completeSettlement(reservationId: string, paidAmount: number): Promise<boolean> {
+    const { settleCapital } = await import("@/lib/kernel/vault");
+    return this.ledger.completeSettlement(reservationId, paidAmount, settleCapital);
+  }
+
   async recordAuthorization(auth: Authorization): Promise<void> {
     this.ledger.recordAuthorization(auth);
+  }
+
+  async listAuthorizations(runId?: string): Promise<Authorization[]> {
+    return this.ledger.listAuthorizations().filter((a) => !runId || a.runId === runId).reverse();
   }
 
   // ── Sagas (F49) ─────────────────────────────────────────────────────────────
@@ -340,6 +359,36 @@ export class InMemoryRepository implements EconomicRepository {
 
   async listMandates(): Promise<Mandate[]> {
     return mandates.map((m) => ({ ...m }));
+  }
+
+  private readonly epochsMap = new Map<string, ClearingEpoch>(seedEpochs.map((e) => [e.epochId, { ...e }]));
+
+  async getEpoch(epochId: string): Promise<ClearingEpoch | null> {
+    const e = this.epochsMap.get(epochId);
+    return e ? { ...e } : null;
+  }
+
+  async listEpochs(): Promise<ClearingEpoch[]> {
+    return [...this.epochsMap.values()].map((e) => ({ ...e }));
+  }
+
+  async insertEpoch(epoch: ClearingEpoch): Promise<boolean> {
+    if (this.epochsMap.has(epoch.epochId)) return false;
+    this.epochsMap.set(epoch.epochId, { ...epoch });
+    return true;
+  }
+
+  async saveEpoch(epoch: ClearingEpoch): Promise<void> {
+    this.epochsMap.set(epoch.epochId, { ...epoch });
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    return seedAgents.map((a) => ({ ...a }));
+  }
+
+  async getAgent(agentId: string): Promise<Agent | null> {
+    const a = seedAgents.find((x) => x.agentId === agentId);
+    return a ? { ...a } : null;
   }
 }
 

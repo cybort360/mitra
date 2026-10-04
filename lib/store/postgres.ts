@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type {
+  Agent, ClearingEpoch,
   Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
-import { linkReceipt, type ReceiptDraft } from "@/lib/kernel/receipts";
+import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
 const num = (v: unknown): number => Number(v);
@@ -137,7 +138,7 @@ export class PostgresRepository implements EconomicRepository {
    * UNIQUE (run_id, seq) constraint would then refuse one, but as an error rather
    * than a queue.
    */
-  async appendReceipt(draft: ReceiptDraft): Promise<Receipt> {
+  async appendReceipt(draft: ReceiptDraft, signer?: ReceiptSigner): Promise<Receipt> {
     const run = draft.runId ?? "";
     const client = await this.pool.connect();
     try {
@@ -149,7 +150,9 @@ export class PostgresRepository implements EconomicRepository {
         "SELECT seq, document FROM mitra.receipts WHERE run_id = $1 ORDER BY seq DESC LIMIT 1", [run],
       );
       const previous = last.rows[0] ? (last.rows[0].document as Receipt) : null;
-      const receipt = linkReceipt(draft, previous);
+      // Signed inside the transaction, under the run's advisory lock, so the signed
+      // hash is the one that is stored and linked.
+      const receipt = await linkAndSign(draft, previous, signer);
       await client.query(
         "INSERT INTO mitra.receipts (receipt_id, run_id, seq, document) VALUES ($1,$2,$3,$4::jsonb)",
         [receipt.receiptId, run, last.rows[0] ? num(last.rows[0].seq) + 1 : 1, JSON.stringify(receipt)],
@@ -388,6 +391,67 @@ export class PostgresRepository implements EconomicRepository {
     }
   }
 
+  /**
+   * Settlement capital (backlog #2), each in one transaction on one connection with
+   * the reservation and vault rows locked. The reservation's status is the gate: a
+   * second `completeSettlement` finds it SETTLED and changes nothing. The vault's
+   * `CHECK (… >= 0)` constraints are the backstop if anything ever under-reserved.
+   */
+  async beginSettlement(reservationId: string): Promise<Reservation | null> {
+    return this.inTransaction(async (client) => {
+      const { rows } = await client.query("SELECT * FROM mitra.reservations WHERE reservation_id = $1 FOR UPDATE", [reservationId]);
+      if (!rows[0]) return null;
+      let r = rowToReservation(rows[0]);
+      if (r.status !== "RESERVED" && r.status !== "COMMITTED") return null;
+      if (r.status === "RESERVED") r = { ...transition("reservation", r, "COMMITTED"), version: r.version + 1 };
+      r = { ...transition("reservation", r, "SETTLING"), version: r.version + 1 };
+      const moved = await client.query(
+        `UPDATE mitra.vaults SET reserved = reserved - $1, settling = settling + $1, version = version + 1
+          WHERE vault_id = $2 AND reserved >= $1`,
+        [r.amount, r.vaultId],
+      );
+      if (moved.rowCount !== 1) throw new Error("RESERVATION_EXCEEDS_RESERVED_CAPITAL");
+      await client.query("UPDATE mitra.reservations SET status = $1, version = $2 WHERE reservation_id = $3", [r.status, r.version, reservationId]);
+      return r;
+    });
+  }
+
+  async completeSettlement(reservationId: string, paidAmount: number): Promise<boolean> {
+    if (!(paidAmount > 0)) throw new Error("INVALID_PAID_AMOUNT");
+    return this.inTransaction(async (client) => {
+      const { rows } = await client.query("SELECT * FROM mitra.reservations WHERE reservation_id = $1 FOR UPDATE", [reservationId]);
+      if (!rows[0]) return false;
+      const r = rowToReservation(rows[0]);
+      if (r.status !== "SETTLING") return false;
+      if (paidAmount > r.amount) throw new Error("PAID_EXCEEDS_RESERVATION");
+      const moved = await client.query(
+        `UPDATE mitra.vaults
+            SET settling = settling - $1, total = total - $2, available = available + ($1 - $2), version = version + 1
+          WHERE vault_id = $3 AND settling >= $1`,
+        [r.amount, paidAmount, r.vaultId],
+      );
+      if (moved.rowCount !== 1) throw new Error("SETTLEMENT_EXCEEDS_SETTLING_CAPITAL");
+      const next = { ...transition("reservation", r, "SETTLED"), version: r.version + 1 };
+      await client.query("UPDATE mitra.reservations SET status = $1, version = $2 WHERE reservation_id = $3", [next.status, next.version, reservationId]);
+      return true;
+    });
+  }
+
+  private async inTransaction<T>(f: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const out = await f(client);
+      await client.query("COMMIT");
+      return out;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async setReservationStatus(reservationId: string, status: Reservation["status"]): Promise<Reservation | null> {
     const current = await this.getReservation(reservationId);
     if (!current) return null;
@@ -442,12 +506,28 @@ export class PostgresRepository implements EconomicRepository {
       `INSERT INTO mitra.authorizations
          (authorization_id, run_id, intent_id, mandate_id, mandate_version, vault_id,
           decision, action_digest, asset, amount_ceiling, chain, expires_at, nonce,
-          reason_codes, signer, version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+          reason_codes, signer, version, recipient_constraint)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [auth.authorizationId, auth.runId, auth.intentId, auth.mandateId, auth.mandateVersion,
         auth.vaultId, auth.decision, auth.actionDigest, auth.asset, auth.amountCeiling,
-        auth.chain, auth.expiresAt, auth.nonce, auth.reasonCodes, auth.signer, auth.version],
+        auth.chain, auth.expiresAt, auth.nonce, auth.reasonCodes, auth.signer, auth.version,
+        auth.recipientConstraint ?? null],
     );
+  }
+
+  async listAuthorizations(runId?: string): Promise<Authorization[]> {
+    const { rows } = runId
+      ? await this.pool.query("SELECT * FROM mitra.authorizations WHERE run_id = $1 ORDER BY created_at DESC", [runId])
+      : await this.pool.query("SELECT * FROM mitra.authorizations ORDER BY created_at DESC");
+    return rows.map((r): Authorization => ({
+      authorizationId: String(r.authorization_id), runId: String(r.run_id ?? ""), intentId: String(r.intent_id ?? ""),
+      mandateId: String(r.mandate_id), mandateVersion: num(r.mandate_version), vaultId: String(r.vault_id),
+      decision: String(r.decision) as Authorization["decision"], actionDigest: String(r.action_digest),
+      asset: String(r.asset) as Authorization["asset"], amountCeiling: num(r.amount_ceiling),
+      ...(r.recipient_constraint != null ? { recipientConstraint: String(r.recipient_constraint) } : {}),
+      chain: String(r.chain) as Authorization["chain"], expiresAt: new Date(String(r.expires_at)).toISOString(),
+      nonce: num(r.nonce), reasonCodes: (r.reason_codes as string[]) ?? [], signer: String(r.signer), version: num(r.version),
+    }));
   }
 
   /**
@@ -493,6 +573,42 @@ export class PostgresRepository implements EconomicRepository {
       "SELECT * FROM mitra.event_log WHERE seq > $1 ORDER BY seq ASC LIMIT $2", [cursor, limit],
     );
     return rows.map((r) => ({ seq: num(r.seq), event: rowToEvent(r) }));
+  }
+
+  async getEpoch(epochId: string): Promise<ClearingEpoch | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.clearing_epochs WHERE epoch_id = $1", [epochId]);
+    return rows[0] ? (rows[0].document as ClearingEpoch) : null;
+  }
+
+  async listEpochs(): Promise<ClearingEpoch[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.clearing_epochs ORDER BY created_at DESC");
+    return rows.map((r) => r.document as ClearingEpoch);
+  }
+
+  async insertEpoch(epoch: ClearingEpoch): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      "INSERT INTO mitra.clearing_epochs (epoch_id, status, document) VALUES ($1,$2,$3::jsonb) ON CONFLICT (epoch_id) DO NOTHING",
+      [epoch.epochId, epoch.status, JSON.stringify(epoch)],
+    );
+    return rowCount === 1;
+  }
+
+  async saveEpoch(epoch: ClearingEpoch): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.clearing_epochs (epoch_id, status, document) VALUES ($1,$2,$3::jsonb)
+       ON CONFLICT (epoch_id) DO UPDATE SET status = EXCLUDED.status, document = EXCLUDED.document`,
+      [epoch.epochId, epoch.status, JSON.stringify(epoch)],
+    );
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.agents ORDER BY agent_id");
+    return rows.map((r) => r.document as Agent);
+  }
+
+  async getAgent(agentId: string): Promise<Agent | null> {
+    const { rows } = await this.pool.query("SELECT document FROM mitra.agents WHERE agent_id = $1", [agentId]);
+    return rows[0] ? (rows[0].document as Agent) : null;
   }
 
   async listMandates(): Promise<Mandate[]> {

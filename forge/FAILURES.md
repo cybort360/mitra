@@ -2447,19 +2447,24 @@ testnet settlement as public-network evidence. Bundles now take their `chain` fr
 `networkName(chain, chainId)` (`"base-sepolia"`), and a mutation reverting to the raw
 chain is killed.
 
-**Still open — receipts are unsigned.** §17.4 lists `signer`; these receipts carry
-`signer: "unsigned:mitra-settlement-service"` so the field cannot be read as a
-signature that does not exist. Signing them is open work.
+**~~Still open — receipts are unsigned.~~ CLOSED 2026-10-04 (backlog #4).** With
+`MITRA_RECEIPT_SIGNER_KEY_FILE` set, each receipt carries an EIP-191 signature over its
+`receiptHash` and `signer: "eip191:<address>"`; `verifyReceipts` recovers it, and the
+receipts and evidence routes report a per-receipt verdict. Without a key, `signer` stays
+`"unsigned:mitra-settlement-service"`.
 
 **RULE ADDED:** (15) a field reused across vocabularies (`"base"` the rail, `"base"`
 the network) is a grading bug waiting for a caller; convert at the boundary, by name.
 
 ## F54 — the repository's ERC-4337 code could not have reached any EntryPoint
 
-**Status:** worked around, not fixed — the live 4337 path (sprint item 3) does not use
-either artifact below; it uses viem's `toCoinbaseSmartAccount` and EntryPoint v0.6, and
-settled live on Base Sepolia (PROOF_LEDGER). Both artifacts are left as they are and
-marked here, because nothing in production imports them.
+**Status:** FIXED 2026-10-04 (backlog #6). `userOperationHash(op, { entryPoint, chainId })`
+now computes EntryPoint v0.7's `getUserOpHash` (packed gas fields, signature excluded,
+EntryPoint and chain id bound); it equals viem's `getUserOperationHash` and — live, by
+`eth_call` — the deployed EntryPoint v0.7's own `getUserOpHash` on Base Sepolia
+(`BASE_LIVE=1 npx vitest run tests/evm-standards-suite.test.ts -t ERC-4337`). The script
+now refuses to run (exit 2, spends nothing) and points at the working transport; repairing
+or deleting it is left to the lead. Original finding below.
 **Found:** 2026-10-03, while wiring `sendUserOp` through the Base transport.
 
 1. **`lib/evm/erc4337.ts` `userOperationHash` is not the hash an EntryPoint checks.**
@@ -2553,6 +2558,30 @@ the devnet scripts move to the new seeds together.
 
 **RULE ADDED:** (17) when a key that used to be unique stops being unique, find every
 check that used it as an identity.
+
+## F58 — the clearing route finalized whatever epoch the client sent
+
+**Status:** fixed on `feat/settlement-caller` (backlog #5). Reproduced as a test first
+(`tests/stores-backlog5.test.ts`, "THE ATTACK").
+**Found:** 2026-10-04, while giving clearing epochs a store.
+
+`POST /api/v1/clearing` with `action: "finalize_epoch"` took `epoch: z.any()` from the
+request and transitioned it to `FINALIZED` after checking only `epoch.status ===
+"CHALLENGE"`. Net positions, residual transfers and obligation ids were all the client's
+— a forged settlement vector came back "finalized". It also called neither
+`finalizeEpoch` (no `resultHash`) nor `finalizeEpochOnce`, so SECURITY.md's "an obligation
+enters at most one finalized epoch" was unenforced on the route even though the kernel
+implements it. Harmless only while nothing persisted epochs.
+
+**Fix:** epochs are stored (`mitra.clearing_epochs`; in-memory map; same seed on both).
+`open_epoch` inserts once (`EPOCH_EXISTS`); `calculate_epoch` and `challenge` work on the
+stored epoch when the server opened it (`persisted: true`); `finalize_epoch` requires a
+stored epoch (`EPOCH_NOT_FOUND`), seals its STORED calculation through
+`finalizeEpochOnce` against the stored finalized epochs, and saves it. Request shape
+unchanged; the lead's clearing tests pass. Mutation 4/4.
+
+**Also found in backlog #5:** Postgres dropped `Authorization.recipientConstraint` on write
+(no column) — added.
 
 ## Open risks
 

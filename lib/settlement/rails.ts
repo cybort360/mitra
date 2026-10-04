@@ -23,21 +23,28 @@
  *
  * | Rail   | Variables |
  * |--------|-----------|
- * | base   | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `BASE_RPC_URL`; optional `MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337` |
- * | tempo  | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `TEMPO_RPC_URL` |
+ * | base   | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `BASE_RPC_URL`; optional `MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337\|vault` |
+ * | tempo  | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `TEMPO_RPC_URL`; optional `MITRA_TEMPO_SETTLEMENT_ACCOUNT=vault` |
+ *
+ * `vault` (package B.4) pays THROUGH the deployed `MitraVault.sol`
+ * (`lib/evm/deployments.json`): the key is principal, mandate engine and relayer on
+ * testnet; `MITRA_EVM_VAULT_HOLDER` names the agent holding the mandate. The payer is
+ * the principal whose vault position pays.
  * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_PRINCIPAL`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
  */
 
-import { readFileSync } from "node:fs";
-import { http } from "viem";
+import { existsSync, readFileSync } from "node:fs";
+import { defineChain, http, type Chain as ViemChain } from "viem";
+import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import type { Chain, EvidenceLevel, Money } from "@/lib/domain/types";
 import type { SettlementAdapter } from "@/lib/adapters/types";
-import { BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
+import { BASE_ASSETS, BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
 import { BaseRpcTransport } from "@/lib/adapters/base-transport";
 import { Erc4337Transport } from "@/lib/adapters/base-4337-transport";
-import { TEMPO_CHAIN_IDS, TempoSettlementAdapter, tempoCommitment } from "@/lib/adapters/tempo";
+import { TEMPO_CHAIN_IDS, TEMPO_TOKENS, TempoSettlementAdapter, tempoCommitment } from "@/lib/adapters/tempo";
+import { MitraVaultTransport } from "@/lib/adapters/evm-vault-transport";
 import { networkName } from "@/lib/evm/evidence";
 import { ModeratoTransport, createTempoRpc } from "@/lib/adapters/tempo-transport";
 import { SolanaSettlementAdapter, solanaCommitment } from "@/lib/adapters/solana";
@@ -82,10 +89,14 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
   if (env.MITRA_EVM_SETTLEMENT_KEY_FILE && env.BASE_RPC_URL) {
     const account = readEvmKey(env.MITRA_EVM_SETTLEMENT_KEY_FILE);
     const mode = env.MITRA_BASE_SETTLEMENT_ACCOUNT ?? "eoa";
-    if (mode !== "eoa" && mode !== "erc4337") throw new Error(`MITRA_BASE_SETTLEMENT_ACCOUNT must be eoa or erc4337, not ${mode}`);
+    if (mode !== "eoa" && mode !== "erc4337" && mode !== "vault") throw new Error(`MITRA_BASE_SETTLEMENT_ACCOUNT must be eoa, erc4337 or vault, not ${mode}`);
     let transport: BaseTransport;
     let payer: string;
-    if (mode === "erc4337") {
+    if (mode === "vault") {
+      const v = vaultTransport(env, account, baseSepolia, http(env.BASE_RPC_URL), Object.values(BASE_ASSETS[BASE_SEPOLIA]).map((a) => a.address), 1n);
+      transport = v.asBaseTransport(BASE_SEPOLIA);
+      payer = account.address;
+    } else if (mode === "erc4337") {
       const t = new Erc4337Transport({ owner: account, relayer: account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) });
       transport = t;
       payer = (await t.account()).address;
@@ -108,12 +119,15 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
 
   if (env.MITRA_EVM_SETTLEMENT_KEY_FILE && env.TEMPO_RPC_URL) {
     const account = readEvmKey(env.MITRA_EVM_SETTLEMENT_KEY_FILE);
+    const mode = env.MITRA_TEMPO_SETTLEMENT_ACCOUNT ?? "eoa";
+    if (mode !== "eoa" && mode !== "vault") throw new Error(`MITRA_TEMPO_SETTLEMENT_ACCOUNT must be eoa or vault, not ${mode}`);
+    const transport = mode === "vault"
+      // Tempo's eth_gasPrice lags the effective price; 2x as scripts/tempo-pay.mjs does.
+      ? vaultTransport(env, account, tempoModerato(env.TEMPO_RPC_URL), http(env.TEMPO_RPC_URL), Object.values(TEMPO_TOKENS).map((t) => t.mint), 2n).asTempoTransport()
+      : new ModeratoTransport({ rpc: createTempoRpc({ url: env.TEMPO_RPC_URL }), account });
     rails.tempo = {
       chain: "tempo",
-      adapter: new TempoSettlementAdapter(
-        { network: "moderato", transport: new ModeratoTransport({ rpc: createTempoRpc({ url: env.TEMPO_RPC_URL }), account }) },
-        tempoCommitment,
-      ),
+      adapter: new TempoSettlementAdapter({ network: "moderato", transport }, tempoCommitment),
       payer: account.address,
       commitment: (i) => tempoCommitment({ ...i, network: "moderato" }),
       confirmedEvidence: "TESTNET_PASS",
@@ -144,6 +158,31 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
 
   return rails;
 }
+
+/** The deployed MitraVault for a chain, from lib/evm/deployments.json — or a refusal. */
+function deployedVault(chainId: number): `0x${string}` {
+  const file = "lib/evm/deployments.json";
+  const all = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, { address?: string }>) : {};
+  const address = all[String(chainId)]?.address;
+  if (!address) throw new Error(`NO_MITRA_VAULT_DEPLOYED_ON_${chainId}: run scripts/deploy-evm-vault.mjs`);
+  return address as `0x${string}`;
+}
+
+function vaultTransport(
+  env: Record<string, string | undefined>, account: ReturnType<typeof readEvmKey>, chain: ViemChain,
+  transport: ReturnType<typeof http>, tokens: string[], gasPriceMultiplier: bigint,
+): MitraVaultTransport {
+  if (!env.MITRA_EVM_VAULT_HOLDER) throw new Error("MITRA_EVM_VAULT_HOLDER is required for a vault rail");
+  return new MitraVaultTransport({
+    chain, vault: deployedVault(chain.id), principal: account.address, holder: env.MITRA_EVM_VAULT_HOLDER as `0x${string}`,
+    engine: account, relayer: account, tokens: new Set(tokens.map((t) => t.toLowerCase())), transport, gasPriceMultiplier,
+  });
+}
+
+const tempoModerato = (rpc: string) => defineChain({
+  id: TEMPO_CHAIN_IDS.moderato, name: "Tempo Moderato",
+  nativeCurrency: { name: "USD", symbol: "USD", decimals: 18 }, rpcUrls: { default: { http: [rpc] } },
+});
 
 declare global {
   // eslint-disable-next-line no-var

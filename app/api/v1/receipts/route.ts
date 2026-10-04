@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStore } from "@/lib/store/provider";
-import { verifyReceiptChain } from "@/lib/kernel/receipts";
+import { verifyReceiptChain, verifyReceipts } from "@/lib/kernel/receipts";
 
 /**
  * Receipts (PRD §17), read-only. By `receiptId`, or a run's whole chain by `runId`
@@ -16,11 +16,12 @@ export async function GET(req: Request) {
   if (receiptId) {
     const receipt = await repo.getReceipt(receiptId);
     if (!receipt) return NextResponse.json({ error: "RECEIPT_NOT_FOUND", receiptId, backend }, { status: 404 });
-    return NextResponse.json({ data: receipt, backend });
+    const [check] = await verifyReceipts([receipt]);
+    return NextResponse.json({ data: receipt, signature: check, backend });
   }
   if (runId) {
     const receipts = await repo.listReceipts(runId);
-    return NextResponse.json({ data: receipts, count: receipts.length, chain: verifyReceiptChain(receipts), backend });
+    return NextResponse.json({ data: receipts, count: receipts.length, chain: verifyReceiptChain(receipts), signatures: await verifyReceipts(receipts), backend });
   }
   return NextResponse.json({ error: "RECEIPT_ID_OR_RUN_ID_REQUIRED" }, { status: 400 });
 }

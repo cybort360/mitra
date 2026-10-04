@@ -25,17 +25,16 @@
  *
  * ## Not done here (recorded, not hidden)
  *
- * Vault capital positions are not moved: the reservation goes
- * `RESERVED → COMMITTED → SETTLING → SETTLED`, but `vault.reserved` is not drawn
- * down, exactly as `/reservations/execute` does not draw it down today. A
- * SettlementReceipt is written on confirmation (`lib/kernel/receipts.ts`); it is
+ * Vault capital moves with the reservation (backlog #2): `reserved → settling` when
+ * settlement begins, and on confirmation the reserved amount leaves `settling` and
+ * the paid amount leaves `total` (`settleCapital`). A SettlementReceipt is written on confirmation (`lib/kernel/receipts.ts`); it is
  * hash-chained per run but not yet signed.
  */
 
 import type { Agreement, Settlement } from "@/lib/domain/types";
 import type { EconomicRepository } from "@/lib/store/repository";
 import { planAgreementSettlement } from "@/lib/kernel/settlement";
-import { settlementReceipt } from "@/lib/kernel/receipts";
+import { settlementReceipt, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type { Rails, SettlementRail } from "@/lib/settlement/rails";
 
 export type SettleOutcome =
@@ -57,7 +56,7 @@ function canPersist(repo: EconomicRepository): repo is SettlementStore {
 export async function settleAgreement(
   repo: EconomicRepository,
   rails: Rails,
-  input: { agreementId: string; reservationId: string; now: Date },
+  input: { agreementId: string; reservationId: string; now: Date; receiptSigner?: ReceiptSigner },
 ): Promise<SettleOutcome> {
   // A store that cannot write the agreement back would pay and then forget it
   // paid. Refuse up front rather than discover it after the transfer.
@@ -122,14 +121,16 @@ export async function settleAgreement(
   if (!await repo.consumeNonce(vault.vaultId, reservation.nonce, reservation.reservationId)) {
     return stopBeforeBroadcast("NONCE_ALREADY_CONSUMED");
   }
+  // The reservation becomes SETTLING and its capital moves reserved → settling, in
+  // one store operation. Null means another path moved it first; nothing has been
+  // broadcast, so this is a clean stop rather than an unknown outcome.
+  let began: Awaited<ReturnType<typeof repo.beginSettlement>>;
   try {
-    await repo.setReservationStatus(reservation.reservationId, "COMMITTED");
-    await repo.setReservationStatus(reservation.reservationId, "SETTLING");
+    began = await repo.beginSettlement(reservation.reservationId);
   } catch (e) {
-    // The reservation machine refused (another path moved it first). Nothing has
-    // been broadcast, so this is a clean stop rather than an unknown outcome.
     return stopBeforeBroadcast(`RESERVATION_NOT_EXECUTABLE: ${message(e)}`);
   }
+  if (!began) return stopBeforeBroadcast("RESERVATION_NOT_EXECUTABLE");
 
   // ── 4. broadcast ───────────────────────────────────────────────────────────
   let txHash: string;
@@ -148,7 +149,7 @@ export async function settleAgreement(
   await repo.updateSettlement(settlement);
 
   // ── 5. verify ──────────────────────────────────────────────────────────────
-  return finish(repo, rail, agreement, settlement, input.now);
+  return finish(repo, rail, agreement, settlement, input.now, input.receiptSigner);
 }
 
 /**
@@ -158,7 +159,7 @@ export async function settleAgreement(
 export async function confirmSettlement(
   repo: EconomicRepository,
   rails: Rails,
-  input: { settlementId: string; now: Date },
+  input: { settlementId: string; now: Date; receiptSigner?: ReceiptSigner },
 ): Promise<SettleOutcome> {
   if (!canPersist(repo)) return refuse(501, "STORE_CANNOT_PERSIST_SETTLEMENT");
   const settlement = await repo.getSettlement(input.settlementId);
@@ -170,7 +171,7 @@ export async function confirmSettlement(
   if (settlement.status !== "SUBMITTED" || !settlement.txHash) return refuse(409, `SETTLEMENT_${settlement.status}`, settlement);
   const rail = rails[settlement.chain];
   if (!rail) return refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED");
-  return finish(repo, rail, agreement, settlement, input.now);
+  return finish(repo, rail, agreement, settlement, input.now, input.receiptSigner);
 }
 
 async function finish(
@@ -179,6 +180,7 @@ async function finish(
   agreement: Agreement,
   submitted: Settlement,
   now: Date,
+  receiptSigner?: ReceiptSigner,
 ): Promise<SettleOutcome> {
   let confirmed = false;
   try {
@@ -192,6 +194,12 @@ async function finish(
     return { ok: true, httpStatus: 202, settlement: submitted, agreement };
   }
 
+  // Capital first, and exactly once: SETTLING → SETTLED is the gate, so a second,
+  // racing confirmation finds nothing to apply. The record updates below are
+  // idempotent and run either way, so a crash between the two is repaired by the
+  // next confirm rather than leaving a settled vault with a SUBMITTED record.
+  if (submitted.reservationId) await repo.completeSettlement(submitted.reservationId, submitted.amount);
+
   const confirmedRecord: Settlement = {
     ...submitted,
     status: "CONFIRMED",
@@ -202,10 +210,9 @@ async function finish(
   // points at a receipt that does not exist. A crash in between leaves a receipt
   // for a transfer the chain confirmed — true, and re-used on the next confirm,
   // because appendReceipt returns an existing receipt id unchanged.
-  const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now));
+  const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now), receiptSigner);
   const settlement: Settlement = { ...confirmedRecord, receiptId: receipt.receiptId };
   await repo.updateSettlement(settlement);
-  if (settlement.reservationId) await repo.setReservationStatus(settlement.reservationId, "SETTLED");
   const settled: Agreement = { ...agreement, settledRef: settlement.settlementId, version: agreement.version + 1 };
   await repo.updateAgreement(settled);
   await event(repo, now, settled, settlement, "SUCCESS", "Agreement settled",

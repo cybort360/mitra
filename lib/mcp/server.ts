@@ -20,8 +20,8 @@
  *   and since sprint item 1 an ACCEPTED agreement is one Mitra will pay. Accept,
  *   reject and fund stay off the surface until the API knows who is calling
  *   (decided 2026-10-04 by human:purple; flagged to the lead as a blocker).
- * - **unbacked** — no subsystem exists to serve it (no agent registry, no intent
- *   store). Serving a stub would be a fake success path.
+ * - **unbacked** — no subsystem exists to serve it (no intent store). Serving a
+ *   stub would be a fake success path.
  *
  * `assertServedMatchesStatus` runs at module load: a served status without a
  * definition, or a definition for a tool not marked served, throws on import.
@@ -63,9 +63,11 @@ export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   mitra_fund_agreement: { status: "withheld", reason: NO_CALLER_IDENTITY },
   mitra_accept_deliverable: { status: "withheld", reason: NO_CALLER_IDENTITY },
   mitra_reject_deliverable: { status: "withheld", reason: NO_CALLER_IDENTITY },
-  mitra_register_agent: { status: "unbacked", reason: "No agent registry: agents exist only as reference fixtures." },
-  mitra_get_agent: { status: "unbacked", reason: "No agent registry: agents exist only as reference fixtures." },
-  mitra_find_agents: { status: "unbacked", reason: "No agent registry or discovery index." },
+  // Agents have a read store (backlog #5); registering one needs to know who is
+  // registering, which the API cannot tell yet (F55).
+  mitra_register_agent: { status: "withheld", reason: NO_CALLER_IDENTITY },
+  mitra_get_agent: { status: "served" },
+  mitra_find_agents: { status: "served" },
   mitra_create_intent: { status: "unbacked", reason: "No intent store: intents are ids carried by runs and reservations." },
   mitra_get_intent: { status: "unbacked", reason: "No intent store." },
   mitra_get_timeline: { status: "served" },
@@ -108,6 +110,16 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
     description: "A receipt by receiptId, or a run's whole hash-chained receipt list (with the chain's verdict) by runId.",
     inputSchema: { receiptId: z.string().min(1).optional(), runId: z.string().min(1).optional() },
     toRequest: (a) => ({ method: "GET", path: `/api/v1/receipts${qs({ receiptId: a.receiptId, runId: a.runId })}` }),
+  },
+  mitra_get_agent: {
+    description: "One agent: its owner, status, capabilities, wallets and the mandates it holds.",
+    inputSchema: { agentId: z.string().min(1) },
+    toRequest: (a) => ({ method: "GET", path: `/api/v1/agents${qs({ agentId: a.agentId })}` }),
+  },
+  mitra_find_agents: {
+    description: "Find agents by capability and/or the chain they hold a wallet on. Reputation is not a filter: it is a claim, not a credential.",
+    inputSchema: { capability: z.string().min(1).optional(), chain: z.enum(["solana", "base", "tempo"]).optional() },
+    toRequest: (a) => ({ method: "GET", path: `/api/v1/agents${qs({ capability: a.capability, chain: a.chain })}` }),
   },
   mitra_get_timeline: {
     description: "A run's timeline from Mitra's append-only event log: what happened, in order, including refusals.",

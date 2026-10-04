@@ -12,7 +12,9 @@
  * to have sent NOTHING, which is the half of the property a happy-path test cannot
  * see.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createPublicClient, createWalletClient, erc20Abi, http, type PublicClient } from "viem";
 import { baseSepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
@@ -22,6 +24,7 @@ import { SETTLEMENT_TYPES, settlementDigest, settlingDomain, verifyAuthorisation
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Agreement, Mandate, Reservation, Space } from "@/lib/domain/types";
 import { CapitalLedger } from "@/lib/store/ledger";
+import { reconcileVault, settleCapital } from "@/lib/kernel/vault";
 import { InMemoryRepository } from "@/lib/store/provider";
 import { vaults as seedVaults } from "@/lib/store/seed";
 import { BASE_ASSETS, BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
@@ -228,6 +231,25 @@ describe("settlement evidence through the route (sprint item 2)", () => {
     expect(verifyEvidenceBundle(bundleFromJson(body.data.bundle))).toEqual({ ok: true, evidenceLevel: "TESTNET_PASS" });
   });
 
+  it("with MITRA_RECEIPT_SIGNER_KEY_FILE set, the settlement's receipt is signed and verifies (backlog #4)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mitra-rcpt-"));
+    const keyFile = join(dir, "receipt.key");
+    writeFileSync(keyFile, "aa".repeat(32), { mode: 0o600 });
+    const saved = process.env.MITRA_RECEIPT_SIGNER_KEY_FILE;
+    process.env.MITRA_RECEIPT_SIGNER_KEY_FILE = keyFile;
+    try {
+      __setRailsForTests(baseRail(recorder().transport));
+      await repo.saveAgreement(accepted("ag_signed"));
+      const { body: r } = await reserveFor("ag_signed");
+      expect((await settle("ag_signed", r.data.reservationId)).status).toBe(200);
+      const body = await (await getEvidence(settlementIdFor("ag_signed"))).json();
+      expect(body.data.receipt.signer).toBe(`eip191:${privateKeyToAccount(`0x${"aa".repeat(32)}`).address}`);
+      expect(body.data.receiptChain.signatures).toEqual([{ receiptId: `rcpt_${settlementIdFor("ag_signed")}`, signed: true, valid: true }]);
+    } finally {
+      if (saved === undefined) delete process.env.MITRA_RECEIPT_SIGNER_KEY_FILE; else process.env.MITRA_RECEIPT_SIGNER_KEY_FILE = saved;
+    }
+  });
+
   it("a submitted-but-unconfirmed settlement has no evidence yet (404), and no receipt", async () => {
     const rec = recorder({ confirm: false });
     __setRailsForTests(baseRail(rec.transport));
@@ -380,6 +402,56 @@ describe("settlement caller — refusals send nothing", () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("SETTLEMENT_CHAIN_NOT_ALLOWED_IN_SPACE");
+  });
+});
+
+describe("settlement moves the vault's books (backlog #2)", () => {
+  const book = async () => {
+    const v = (await repo.getVault(VAULT_ID))!;
+    expect(reconcileVault(v).ok, "the vault reconciles at every step").toBe(true);
+    return { total: v.total, available: v.available, reserved: v.reserved, settling: v.settling };
+  };
+
+  it("reserved → settling → paid out: total falls by exactly the price, nothing stays reserved", async () => {
+    __setRailsForTests(baseRail(recorder().transport));
+    await repo.saveAgreement(accepted("ag_book"));
+    const before = await book();
+    const { body: r } = await reserveFor("ag_book");
+    const reserved = await book();
+    expect(reserved.reserved - before.reserved).toBeCloseTo(PRICE.amount, 6);
+    expect((await settle("ag_book", r.data.reservationId)).status).toBe(200);
+    const after = await book();
+    expect(after.reserved).toBeCloseTo(before.reserved, 6);
+    expect(after.settling).toBeCloseTo(before.settling, 6);
+    expect(before.total - after.total).toBeCloseTo(PRICE.amount, 6);
+    expect(after.available).toBeCloseTo(before.available - PRICE.amount, 6);
+  });
+
+  it("an unknown outcome keeps the money in settling — neither spent nor available", async () => {
+    __setRailsForTests(baseRail(recorder({ throwOnSend: new Error("socket hang up") }).transport));
+    await repo.saveAgreement(accepted("ag_book_unknown"));
+    const before = await book();
+    const { body: r } = await reserveFor("ag_book_unknown");
+    await settle("ag_book_unknown", r.data.reservationId);
+    const after = await book();
+    expect(after.settling - before.settling).toBeCloseTo(PRICE.amount, 6);
+    expect(after.total).toBeCloseTo(before.total, 6);
+  });
+
+  it("confirming twice applies the capital once", async () => {
+    const rec = recorder({ confirm: false });
+    __setRailsForTests(baseRail(rec.transport));
+    await repo.saveAgreement(accepted("ag_book_twice"));
+    const before = await book();
+    const { body: r } = await reserveFor("ag_book_twice");
+    await settle("ag_book_twice", r.data.reservationId);
+    rec.setConfirm(true);
+    const confirm = () => post(settlementsPOST, { op: "confirm", settlementId: settlementIdFor("ag_book_twice"), now: NOW });
+    await Promise.all([confirm(), confirm()]);
+    await confirm();
+    const after = await book();
+    expect(before.total - after.total).toBeCloseTo(PRICE.amount, 6);
+    expect(after.settling).toBeCloseTo(before.settling, 6);
   });
 });
 
@@ -612,3 +684,18 @@ describe.skipIf(!(process.env.BASE_LIVE === "1" && existsSync(LIVE_KEY)))("live:
     expect(v1271).toEqual({ ok: true, mode: "contract" });
   }, 180_000);
 });
+
+describe("settleCapital (kernel)", () => {
+  const v = { ...seedVaults[0], total: 100, available: 50, reserved: 0, escrowed: 0, encumbered: 0, settling: 10, frozen: 40 };
+  it("pays out what was paid and returns the rest", () => {
+    const n = settleCapital(v, 10, 4);
+    expect([n.total, n.settling, n.available]).toEqual([96, 0, 56]);
+    expect(reconcileVault(n).ok).toBe(true);
+  });
+  it("refuses to pay more than was reserved, more than is settling, or nothing", () => {
+    expect(() => settleCapital(v, 10, 11)).toThrow("PAID_EXCEEDS_RESERVATION");
+    expect(() => settleCapital(v, 11, 4)).toThrow("SETTLEMENT_EXCEEDS_SETTLING_CAPITAL");
+    expect(() => settleCapital(v, 10, 0)).toThrow("INVALID_PAID_AMOUNT");
+  });
+});
+
