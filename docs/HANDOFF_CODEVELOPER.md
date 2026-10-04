@@ -116,7 +116,7 @@ Scope is assembled from four sources, each checked against the code on
 | 4 | ✅ **Live MCP server** (Phase 5) over the 18 tools in `lib/mcp/surface.ts`, plus an HTTP x402 gateway | **Done.** MCP: 9 served (stdio, thin client of the API), 3 withheld until the API identifies callers (F55, decided by human:purple), 6 unbacked. x402: live via the public facilitator (PROOF_LEDGER). — Original note: | No transport serves the tools. `lib/evm/payment.ts` models the challenge; a 402 still requires a reservation and never authorises a spend |
 | 5 | ✅ **Console** (Phase 10) on real data, live stream from `mitra.event_log` | **Done.** Nine pages read the store and label their backend; the live feed streams the event log over SSE; checked in a real browser. Pages with no store behind them (agents, policies, clearing epochs, integrations, evidence) are labelled as fixtures. Found F56. — Original note: | All 15 data pages import `lib/store/seed`; no SSE/WebSocket route exists |
 | 6 | ✅ **`MitraVault.sol`** (lead's package B) | **Done; deployed, source-verified and spending live on Base Sepolia and Tempo Moderato** (PROOF_LEDGER, `lib/evm/deployments.json`). Mandates keyed by (principal, holder), recipient bound into the permit (the sketch's F51 repeat avoided). Open: Mitra's rails do not yet settle *through* the contract (package B.4). — Original note: | Not started. Foundry is installed. See correction below |
-| 7 | **`security.txt` + mandate PDA reseed in one redeploy** (lead's package A + seq 55) | Code is ours; the SBF build and `program upgrade` are the lead's (see correction below) |
+| 7 | ✅ (code) **`security.txt` + mandate PDA reseed in one redeploy** (lead's package A + seq 55) | **Code done on `feat/vault-reseed-security-txt` — NOT on `feat/settlement-caller`**, because the new addresses do not match the program deployed today. Found and fixed F57 (the reseed alone re-opened a cross-principal drain). Rust 106/106; `security.txt` embedded. **Needs the lead:** confirm the security contact/URL exist, `cargo-build-sbf`, `solana program upgrade` (key `C4ZoTdNS…`), then the steps under "Redeploy runbook" below. — Original note: | Code is ours; the SBF build and `program upgrade` are the lead's (see correction below) |
 
 **For the lead:** Arcium / `FR-VAULT-008/009` (Phase 3) — not assigned in seq 60, and no
 Arcium source exists on any branch (F44 names `arcium-probe/`, which is not in the
@@ -167,3 +167,27 @@ TEMPO_LIVE=1 npx vitest run tests/tempo-adapter.test.ts
 # 5. Commit and audit
 node shared-context-mcp/dist/cli.js audit
 ```
+
+---
+
+## Redeploy runbook — sprint item 7 (for the lead)
+
+Branch `feat/vault-reseed-security-txt`. One upgrade carries three changes: `security.txt`,
+the mandate reseed `[b"mandate", principal, holder]`, and the permit reseed
+`[b"authorization", mandate, action]` (F57 — the reseed is unsafe without it).
+
+1. **Confirm** `security@mitra.network` receives mail and `https://mitra.network` exists
+   (both from package A). A published security contact nobody reads is worse than none.
+2. Build and check: `cd programs/mitra-vault && cargo +1.98.1 test` (106/106), then
+   `cargo-build-sbf` and `readelf -p .security.txt target/deploy/mitra_vault.so`.
+3. Upgrade: `solana program upgrade target/deploy/mitra_vault.so GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY --keypair <C4ZoTdNS… key> --url devnet`.
+4. Merge `feat/vault-reseed-security-txt` (the TS client, `VaultTransport`, golden layout
+   and devnet scripts move with the program). Before this, the branch's clients address
+   accounts the old program never created.
+5. Re-prove live: `SOLANA_LIVE=1 npx vitest run tests/solana-transport.test.ts` (it opens a
+   mandate at the new address) and `node scripts/authority-devnet.mjs`.
+
+**Migration cost, stated:** mandates and permits created under the old seeds stay on chain
+at their old addresses and are not reachable by the new program's derivations. Account
+layouts are unchanged; principals re-open mandates.
+

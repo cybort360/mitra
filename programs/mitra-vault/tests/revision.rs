@@ -98,8 +98,9 @@ fn the_version_saturates_and_never_wraps() {
 
     let program_id = mitra_vault::program_id();
     let m = Mandate { version: u64::MAX, ..base() };
+    let principal = m.binding.as_ref().expect("fixture mandates are bound").principal;
     let (mandate_key, _) = Pubkey::find_program_address(
-        &[b"mandate", m.holder.as_ref()], &program_id,
+        &[b"mandate", principal.as_ref(), m.holder.as_ref()], &program_id,
     );
 
     let mut data = ix::AMEND_MANDATE.to_vec();

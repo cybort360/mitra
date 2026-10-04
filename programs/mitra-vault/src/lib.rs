@@ -30,6 +30,21 @@ use solana_program::system_instruction;
 
 solana_program::entrypoint!(process);
 
+// security.txt (sprint item 7; values from the lead's package A,
+// docs/HANDOFF_SOLANA_VERIFICATION_AND_EVM_VAULTS.md). Unconditional, like the
+// entrypoint above: this crate is a program, not a library other programs link.
+// The contact address and project URL must be confirmed live by the lead before
+// the redeploy — a published security contact nobody reads sends reports nowhere.
+solana_security_txt::security_txt! {
+    name: "mitra-vault",
+    project_url: "https://mitra.network",
+    contacts: "email:security@mitra.network",
+    policy: "https://github.com/cybort360/mitra/blob/main/docs/SECURITY.md",
+    preferred_languages: "en",
+    source_code: "https://github.com/cybort360/mitra",
+    auditors: "Pending Independent Audit"
+}
+
 /// Dispatches on Anchor's instruction discriminator.
 ///
 /// The `data.len() < 8` guard is Anchor's own behaviour: it computes
@@ -580,7 +595,7 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
     }
 
     let (expected, derived_bump) = Pubkey::try_find_program_address(
-        &anchor_parity::mandate_seeds(holder.key),
+        &anchor_parity::mandate_seeds(principal.key, holder.key),
         program_id,
     )
     .ok_or(ProgramError::InvalidSeeds)?;
@@ -604,6 +619,7 @@ fn open_mandate(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> P
         let bump_seed = [bump];
         let seed_sets: &[&[&[u8]]] = &[&[
             anchor_parity::MANDATE_SEED,
+            principal.key.as_ref(),
             holder.key.as_ref(),
             &bump_seed,
         ]];
@@ -684,6 +700,7 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
     if binding.policy_engine != *policy_engine.key {
         return Err(err::custom(err::POLICY_ENGINE_MISMATCH));
     }
+    assert_canonical_mandate(mandate_account, &mandate, program_id)?;
     // The `Mandate` docs always said a revoked mandate cannot issue new permits;
     // this handler never checked. A permit issued after revocation could not be
     // spent (spend re-checks), but it would still be minted, paid for, and
@@ -702,7 +719,7 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
     }
 
     let (expected, derived_bump) = Pubkey::try_find_program_address(
-        &anchor_parity::authorization_seeds(holder.key, &action_hash),
+        &anchor_parity::authorization_seeds(mandate_account.key, &action_hash),
         program_id,
     )
     .ok_or(ProgramError::InvalidSeeds)?;
@@ -732,7 +749,7 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
         let bump_seed = [bump];
         let seed_sets: &[&[&[u8]]] = &[&[
             anchor_parity::AUTHORIZATION_SEED,
-            holder.key.as_ref(),
+            mandate_account.key.as_ref(),
             action_hash.as_ref(),
             &bump_seed,
         ]];
@@ -807,6 +824,30 @@ fn authorize(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u6
 /// as in `withdraw`, for the same reason: the program owns the vault, so the
 /// runtime permits it, and the system program's `transfer` would reject a
 /// data-carrying source.
+/// A mandate account must be the canonical PDA for the principal and holder it
+/// records (sprint item 7). Program ownership alone says only that this program
+/// wrote it, not that it is the mandate the seeds name.
+fn assert_canonical_mandate(
+    mandate_account: &AccountInfo,
+    mandate: &state::Mandate,
+    program_id: &Pubkey,
+) -> ProgramResult {
+    let principal = mandate
+        .binding
+        .as_ref()
+        .map(|b| b.principal)
+        .ok_or(err::custom(err::MANDATE_UNBOUND))?;
+    let (expected, _) = Pubkey::try_find_program_address(
+        &anchor_parity::mandate_seeds(&principal, &mandate.holder),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if expected != *mandate_account.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    Ok(())
+}
+
 fn spend_authorized(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -856,6 +897,26 @@ fn spend_authorized(
     // leave to its caller (F51). Neither is a signer here, so both must be
     // re-derived from what the principal and the engine recorded.
     let binding = mandate.binding.ok_or(err::custom(err::MANDATE_UNBOUND))?;
+    // Which mandate issued this permit (sprint item 7). `holder` alone stopped
+    // identifying it once mandates were seeded by (principal, holder): the same
+    // holder may hold a mandate from several principals. The mandate must sit at
+    // its canonical address, and the permit at the address THAT mandate would have
+    // created it at — so one principal's permit cannot be spent under another's.
+    assert_canonical_mandate(mandate_account, &mandate, program_id)?;
+    let (expected_permit, _) = Pubkey::try_find_program_address(
+        &anchor_parity::authorization_seeds(mandate_account.key, &action_hash),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if *authorization_account.key != expected_permit {
+        // Name the real cause. If the instruction names a different action than the
+        // permit holds, that is the action mismatch (a different instruction, not a
+        // different issuer); otherwise the permit was issued under another mandate.
+        if authorization.action_hash != action_hash {
+            return Err(err::custom(err::ACTION_HASH_MISMATCH));
+        }
+        return Err(err::custom(err::UNAUTHORIZED));
+    }
     let (principal_vault, _) = find_vault_pda(&vault_seeds(&binding.principal), program_id)?;
     if *vault_account.key != principal_vault {
         return Err(err::custom(err::VAULT_MISMATCH));
@@ -997,9 +1058,16 @@ fn amend_mandate(
 
     // Re-derive rather than trusting the stored bump: the amendment is written to
     // a policy object, and writing to the wrong account is unrecoverable. Derived
-    // from the holder the mandate RECORDS, since the signer may be the principal.
+    // from the principal and holder the mandate RECORDS, since the signer may be
+    // either. A mandate with no recorded binding has no principal to derive from
+    // under the (principal, holder) seed, so it is refused rather than guessed.
+    let recorded_principal = mandate
+        .binding
+        .as_ref()
+        .map(|b| b.principal)
+        .ok_or(err::custom(err::MANDATE_UNBOUND))?;
     let (expected, _) = Pubkey::try_find_program_address(
-        &anchor_parity::mandate_seeds(&mandate.holder),
+        &anchor_parity::mandate_seeds(&recorded_principal, &mandate.holder),
         program_id,
     )
     .ok_or(ProgramError::InvalidSeeds)?;

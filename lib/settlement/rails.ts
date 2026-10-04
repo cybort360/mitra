@@ -25,7 +25,7 @@
  * |--------|-----------|
  * | base   | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `BASE_RPC_URL`; optional `MITRA_BASE_SETTLEMENT_ACCOUNT=erc4337` |
  * | tempo  | `MITRA_EVM_SETTLEMENT_KEY_FILE`, `TEMPO_RPC_URL` |
- * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
+ * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_PRINCIPAL`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
  */
 
 import { readFileSync } from "node:fs";
@@ -121,7 +121,7 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
     };
   }
 
-  if (env.SOLANA_RPC_URL && env.MITRA_SOLANA_ENGINE_KEY_FILE && env.MITRA_SOLANA_HOLDER && env.MITRA_SOLANA_VAULT) {
+  if (env.SOLANA_RPC_URL && env.MITRA_SOLANA_ENGINE_KEY_FILE && env.MITRA_SOLANA_PRINCIPAL && env.MITRA_SOLANA_HOLDER && env.MITRA_SOLANA_VAULT) {
     const engine = Keypair.fromSecretKey(
       Uint8Array.from(JSON.parse(readFileSync(env.MITRA_SOLANA_ENGINE_KEY_FILE, "utf8")) as number[]),
     );
@@ -131,6 +131,7 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
         transport: new VaultTransport({
           rpc: connectionRpc(new Connection(env.SOLANA_RPC_URL, "confirmed")),
           engine,
+          principal: new PublicKey(env.MITRA_SOLANA_PRINCIPAL),
           holder: new PublicKey(env.MITRA_SOLANA_HOLDER),
         }),
       }),

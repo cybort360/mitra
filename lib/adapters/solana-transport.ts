@@ -66,6 +66,11 @@ export interface VaultTransportOptions {
   engine: Keypair;
   /** The agent the mandate authorizes. Its key never signs here. */
   holder: PublicKey;
+  /**
+   * The principal whose vault pays (sprint item 7). Mandates are now seeded by
+   * (principal, holder), so the holder alone no longer finds the mandate.
+   */
+  principal: PublicKey;
   programId?: PublicKey;
 }
 
@@ -90,7 +95,7 @@ export class VaultTransport implements SolanaTransport {
     try { recipient = new PublicKey(input.to); } catch { throw new Error("INVALID_RECIPIENT_ADDRESS"); }
 
     // ── the mandate as the chain holds it ──────────────────────────────────
-    const [mandateKey] = mandatePda(this.opts.holder, this.programId);
+    const [mandateKey] = mandatePda(this.opts.principal, this.opts.holder, this.programId);
     const acct = await this.opts.rpc.getAccountInfo(mandateKey);
     if (!acct || !acct.owner.equals(this.programId)) throw new Error("MANDATE_NOT_FOUND");
     const mandate = decodeMandate(acct.data);
@@ -105,7 +110,8 @@ export class VaultTransport implements SolanaTransport {
     const [vault] = vaultPda(mandate.binding.principal, this.programId);
     if (input.from !== vault.toBase58()) throw new Error("VAULT_MISMATCH");
 
-    const [permitKey] = authorizationPda(this.opts.holder, action, this.programId);
+    if (!mandate.binding.principal.equals(this.opts.principal)) throw new Error("MANDATE_PRINCIPAL_MISMATCH");
+    const [permitKey] = authorizationPda(mandateKey, action, this.programId);
     if (await this.opts.rpc.getAccountInfo(permitKey)) throw new Error("SETTLEMENT_ALREADY_AUTHORIZED");
 
     // ── one transaction: issue the permit, then spend it ───────────────────
@@ -113,7 +119,7 @@ export class VaultTransport implements SolanaTransport {
     tx.feePayer = this.opts.engine.publicKey;
     tx.recentBlockhash = (await this.opts.rpc.getLatestBlockhash()).blockhash;
     tx.add(
-      authorizeIx({ engine: this.opts.engine.publicKey, holder: this.opts.holder, action, amount, recipient }, this.programId),
+      authorizeIx({ engine: this.opts.engine.publicKey, principal: this.opts.principal, holder: this.opts.holder, action, amount, recipient }, this.programId),
       spendAuthorizedIx({ principal: mandate.binding.principal, holder: this.opts.holder, action, recipient }, this.programId),
     );
     tx.sign(this.opts.engine);
@@ -148,16 +154,17 @@ export class VaultTransport implements SolanaTransport {
     if (!spend.data.subarray(8, 40).equals(action)) return null;
 
     const key = (ix: { accounts: number[] }, n: number) => tx.accountKeys[ix.accounts[n]];
-    // The permit address is a PDA of (holder, action), and the program refuses an
-    // authorization account that is not the PDA of the holder it was handed. So the
-    // permit matching OUR holder's PDA is what proves the holder; a separate check
-    // of the holder account would be redundant and is not repeated here.
-    const [permitKey] = authorizationPda(this.opts.holder, action, this.programId);
+    // The permit address is a PDA of (mandate, action), and the mandate a PDA of
+    // (principal, holder) — the program refuses either at any other address (sprint
+    // item 7). So the permit matching OUR mandate's PDA proves both the holder and
+    // the principal; separate checks of those accounts would be redundant.
+    const [mandateKey] = mandatePda(this.opts.principal, this.opts.holder, this.programId);
+    const [permitKey] = authorizationPda(mandateKey, action, this.programId);
     if (key(auth, 3) !== permitKey.toBase58() || key(spend, 2) !== permitKey.toBase58()) return null;
     if (key(spend, 0) !== permitRecipient) return null;
 
     // The vault debited must be the vault of the principal that granted the mandate.
-    const mAcct = await this.opts.rpc.getAccountInfo(mandatePda(this.opts.holder, this.programId)[0]);
+    const mAcct = await this.opts.rpc.getAccountInfo(mandateKey);
     if (!mAcct) return null;
     const binding = decodeMandate(mAcct.data).binding;
     if (!binding) return null;

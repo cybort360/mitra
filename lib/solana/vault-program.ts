@@ -74,12 +74,18 @@ export const VAULT_ERRORS = {
 export const vaultPda = (principal: PublicKey, programId = VAULT_PROGRAM_ID) =>
   PublicKey.findProgramAddressSync([Buffer.from("vault"), principal.toBuffer()], programId);
 
-export const mandatePda = (holder: PublicKey, programId = VAULT_PROGRAM_ID) =>
-  PublicKey.findProgramAddressSync([Buffer.from("mandate"), holder.toBuffer()], programId);
+/**
+ * `[b"mandate", principal, holder]` — reseeded in sprint item 7 (was `[b"mandate", holder]`).
+ * Matches the program on `feat/vault-reseed-security-txt`; the program deployed
+ * before that redeploy still uses the old seed.
+ */
+export const mandatePda = (principal: PublicKey, holder: PublicKey, programId = VAULT_PROGRAM_ID) =>
+  PublicKey.findProgramAddressSync([Buffer.from("mandate"), principal.toBuffer(), holder.toBuffer()], programId);
 
-export const authorizationPda = (holder: PublicKey, action: Uint8Array, programId = VAULT_PROGRAM_ID) => {
+/** `[b"authorization", mandate, action]` — keyed by the issuing MANDATE (sprint item 7), not the holder. */
+export const authorizationPda = (mandate: PublicKey, action: Uint8Array, programId = VAULT_PROGRAM_ID) => {
   if (action.length !== 32) throw new Error("ACTION_HASH_NOT_32_BYTES");
-  return PublicKey.findProgramAddressSync([Buffer.from("authorization"), holder.toBuffer(), Buffer.from(action)], programId);
+  return PublicKey.findProgramAddressSync([Buffer.from("authorization"), mandate.toBuffer(), Buffer.from(action)], programId);
 };
 
 // ── encoding helpers ────────────────────────────────────────────────────────
@@ -124,7 +130,7 @@ export function openMandateIx(
   input: { principal: PublicKey; holder: PublicKey; limit: bigint; ceiling: bigint; expiresAt: bigint; policyEngine: PublicKey },
   programId = VAULT_PROGRAM_ID,
 ): TransactionInstruction {
-  const [mandate, bump] = mandatePda(input.holder, programId);
+  const [mandate, bump] = mandatePda(input.principal, input.holder, programId);
   const [vault] = vaultPda(input.principal, programId);
   return new TransactionInstruction({
     programId,
@@ -148,11 +154,11 @@ export function openMandateIx(
  * args `[32 action_hash][u64 amount][32 recipient][u8 bump]`.
  */
 export function authorizeIx(
-  input: { engine: PublicKey; holder: PublicKey; action: Uint8Array; amount: bigint; recipient: PublicKey },
+  input: { engine: PublicKey; principal: PublicKey; holder: PublicKey; action: Uint8Array; amount: bigint; recipient: PublicKey },
   programId = VAULT_PROGRAM_ID,
 ): TransactionInstruction {
-  const [mandate] = mandatePda(input.holder, programId);
-  const [authorization, bump] = authorizationPda(input.holder, input.action, programId);
+  const [mandate] = mandatePda(input.principal, input.holder, programId);
+  const [authorization, bump] = authorizationPda(mandate, input.action, programId);
   return new TransactionInstruction({
     programId,
     keys: [
@@ -179,8 +185,8 @@ export function spendAuthorizedIx(
   programId = VAULT_PROGRAM_ID,
 ): TransactionInstruction {
   const [vault] = vaultPda(input.principal, programId);
-  const [mandate] = mandatePda(input.holder, programId);
-  const [authorization] = authorizationPda(input.holder, input.action, programId);
+  const [mandate] = mandatePda(input.principal, input.holder, programId);
+  const [authorization] = authorizationPda(mandate, input.action, programId);
   return new TransactionInstruction({
     programId,
     keys: [
@@ -195,10 +201,10 @@ export function spendAuthorizedIx(
 
 /** `[signer, mandate]`, args `[u64 limit][u64 ceiling][u64 expires_at][u8 revoke]`. */
 export function amendMandateIx(
-  input: { signer: PublicKey; holder: PublicKey; limit: bigint; ceiling: bigint; expiresAt: bigint; revoke: boolean },
+  input: { signer: PublicKey; principal: PublicKey; holder: PublicKey; limit: bigint; ceiling: bigint; expiresAt: bigint; revoke: boolean },
   programId = VAULT_PROGRAM_ID,
 ): TransactionInstruction {
-  const [mandate] = mandatePda(input.holder, programId);
+  const [mandate] = mandatePda(input.principal, input.holder, programId);
   return new TransactionInstruction({
     programId,
     keys: [meta(input.signer, true, true), meta(mandate, false, true)],

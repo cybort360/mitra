@@ -13,6 +13,9 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 solana-program = { version = "2.3", features = ["borsh"] }
+# Embeds the program's security contact and source in the ELF (`.security.txt`
+# section), which explorers display (sprint item 7; the lead's package A).
+solana-security-txt = "1.1"
 
 # NOTE: `solana-program-test` is deliberately NOT a dependency.
 #

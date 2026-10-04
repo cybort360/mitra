@@ -57,8 +57,8 @@ struct Golden {
 fn build() -> Golden {
     let pid = mitra_vault::program_id();
     let (vault_key, vault_bump) = find_vault_pda(&vault_seeds(&PRINCIPAL), &pid).unwrap();
-    let (mandate_key, mandate_bump) = pda(&[b"mandate", HOLDER.as_ref()], &pid);
-    let (authz_key, authz_bump) = pda(&[b"authorization", HOLDER.as_ref(), ACTION.as_ref()], &pid);
+    let (mandate_key, mandate_bump) = pda(&[b"mandate", PRINCIPAL.as_ref(), HOLDER.as_ref()], &pid);
+    let (authz_key, authz_bump) = pda(&[b"authorization", mandate_key.as_ref(), ACTION.as_ref()], &pid);
 
     // ── instruction data ────────────────────────────────────────────────────
     let mut init = ix::INITIALIZE_VAULT.to_vec();

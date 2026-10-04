@@ -2523,6 +2523,37 @@ That is also why the Console could only show fixtures. Same class as F52: a writ
 that reports success and persists nothing. Now an append-only log with positions
 (`listEventsSince`), shared by the SSE stream.
 
+## F57 — the approved mandate reseed, shipped alone, would have re-opened F51 across principals
+
+**Status:** fixed before deployment, on `feat/vault-reseed-security-txt` (sprint item 7). Not
+deployed: the SBF build and program upgrade are the lead's (upgrade authority `C4ZoTdNS…`).
+**Found:** 2026-10-04, while implementing the reseed the lead approved in seq 55.
+
+The reseed changes mandate PDAs from `[b"mandate", holder]` to `[b"mandate", principal,
+holder]`, so one holder can now hold a mandate from several principals — which is the
+point (no squatting). But a permit (`Authorization`) records `holder`, `action_hash`,
+`amount`, `mandate_version` and `recipient` — **not the mandate that issued it** — and lived
+at `[b"authorization", holder, action]`. `spend_authorized` checked only
+`permit.holder == mandate.holder`, the version, and account ownership. With one mandate
+per holder that identified the issuer; with several it did not.
+
+**Reproduced first**, against the reseed-only program
+(`tests/permit_binding.rs::a_permit_from_one_principals_mandate_cannot_spend_another_principals_vault_through_a_shared_holder`):
+principals A and B both grant holder H; A's engine issues a permit to A's payee; the
+attacker submits it with **B's** mandate and **B's** vault → `Ok`, B's vault paid A's payee.
+
+**Fix (no account-layout change):** permits are seeded `[b"authorization", mandate, action]`;
+`authorize` derives the permit address from the mandate it issues under, and
+`spend_authorized` re-derives it from the mandate it was handed and refuses any other
+address (`UNAUTHORIZED`, or `ACTION_HASH_MISMATCH` when the instruction names a different
+action). Both handlers also require the mandate to sit at its canonical
+`(principal, holder)` address (defence in depth; its own test). Rust 106/106 (104 + 2),
+mutation 5/5 on the new guards. The TS client, `VaultTransport`, the golden layout and
+the devnet scripts move to the new seeds together.
+
+**RULE ADDED:** (17) when a key that used to be unique stops being unique, find every
+check that used it as an identity.
+
 ## Open risks
 
 | Risk | Why it matters | Mitigation |
