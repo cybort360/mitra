@@ -282,13 +282,58 @@ describe("ERC-4337 — envelope only, and it says so", () => {
       .toEqual({ ok: false, reason: "ZERO_CALL_GAS_LIMIT" });
   });
 
+  const D = { entryPoint: ENTRY_POINT_V07, chainId: 84532 } as const;
+
   it("the hash changes with every field a bundler would act on", () => {
     const a = packUserOperation(op);
-    const base = userOperationHash(a);
-    expect(userOperationHash({ ...a, nonce: 2n })).not.toBe(base);
-    expect(userOperationHash({ ...a, callData: "0xfeed" })).not.toBe(base);
-    expect(userOperationHash({ ...a, sender: "0x6666666666666666666666666666666666666666" })).not.toBe(base);
-    expect(userOperationHash(a)).toBe(base);
+    const base = userOperationHash(a, D);
+    expect(userOperationHash({ ...a, nonce: 2n }, D)).not.toBe(base);
+    expect(userOperationHash({ ...a, callData: "0xfeed" }, D)).not.toBe(base);
+    expect(userOperationHash({ ...a, sender: "0x6666666666666666666666666666666666666666" }, D)).not.toBe(base);
+    expect(userOperationHash(a, D)).toBe(base);
+  });
+
+  // F54: the hash must be the one an EntryPoint computes, not merely a stable one.
+  it("binds the chain id and the EntryPoint, and excludes the signature", () => {
+    const a = packUserOperation(op);
+    const base = userOperationHash(a, D);
+    expect(userOperationHash(a, { ...D, chainId: 8453 })).not.toBe(base);
+    expect(userOperationHash(a, { ...D, entryPoint: "0x1111111111111111111111111111111111111111" })).not.toBe(base);
+    expect(userOperationHash({ ...a, signature: "0xabcdef" }, D)).toBe(base);
+  });
+
+  it("equals viem's EntryPoint v0.7 getUserOperationHash", async () => {
+    const { getUserOperationHash } = await import("viem/account-abstraction");
+    const a = { ...packUserOperation(op), preVerificationGas: 21_000n, maxFeePerGas: 7n, maxPriorityFeePerGas: 3n };
+    const viemHash = getUserOperationHash({
+      userOperation: {
+        sender: a.sender, nonce: a.nonce, callData: a.callData, callGasLimit: a.callGasLimit,
+        verificationGasLimit: a.verificationGasLimit, preVerificationGas: a.preVerificationGas,
+        maxFeePerGas: a.maxFeePerGas, maxPriorityFeePerGas: a.maxPriorityFeePerGas, signature: "0x",
+      },
+      entryPointAddress: ENTRY_POINT_V07, entryPointVersion: "0.7", chainId: 84532,
+    });
+    expect(userOperationHash(a, D)).toBe(viemHash);
+  });
+
+  it.skipIf(process.env.BASE_LIVE !== "1")("equals the deployed EntryPoint v0.7's own getUserOpHash on Base Sepolia (BASE_LIVE=1)", async () => {
+    const { createPublicClient, http, toHex } = await import("viem");
+    const { baseSepolia } = await import("viem/chains");
+    const { entryPoint07Abi } = await import("viem/account-abstraction");
+    const client = createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org") });
+    const a = { ...packUserOperation(op), preVerificationGas: 21_000n, maxFeePerGas: 7n, maxPriorityFeePerGas: 3n };
+    const onChain = await client.readContract({
+      address: ENTRY_POINT_V07, abi: entryPoint07Abi, functionName: "getUserOpHash",
+      args: [{
+        sender: a.sender, nonce: a.nonce, initCode: a.initCode, callData: a.callData,
+        accountGasLimits: toHex((a.verificationGasLimit << 128n) | a.callGasLimit, { size: 32 }),
+        preVerificationGas: a.preVerificationGas,
+        gasFees: toHex((a.maxPriorityFeePerGas << 128n) | a.maxFeePerGas, { size: 32 }),
+        paymasterAndData: a.paymasterAndData, signature: "0x",
+      }],
+    });
+    console.log(`EntryPoint v0.7 getUserOpHash ${onChain}`);
+    expect(userOperationHash(a, D)).toBe(onChain);
   });
 
   it("batches are grouped BY SENDER, which is what a bundler requires", () => {

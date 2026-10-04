@@ -8,9 +8,9 @@
  * hashed, sponsored or paid for, and handed to a bundler — and the bundler, EntryPoint
  * and paymaster are *external* contracts this repository does not deploy.
  *
- * What that means for evidence: everything here is `TESTED` and none of it is
- * `LIVE_DEMONSTRATED`. There is no claim anywhere that a UserOperation has been
- * submitted on Base.
+ * What that means for evidence: this module is the v0.7 envelope and its hash.
+ * The live smart-account path is `lib/adapters/base-4337-transport.ts` (Coinbase
+ * Smart Wallet on EntryPoint v0.6), which settled on Base Sepolia (PROOF_LEDGER).
  *
  * ## Why it still matters to Mitra
  *
@@ -28,7 +28,7 @@
  * same shape as a settlement commitment for the wrong settlement.
  */
 
-import { keccak256, encodeAbiParameters, isAddress } from "viem";
+import { keccak256, encodeAbiParameters, isAddress, toHex } from "viem";
 
 export const ENTRY_POINT_V07 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032" as const;
 
@@ -78,22 +78,37 @@ export const USEROP_TYPEHASH =
   "PackedUserOperation(address sender,uint256 nonce,bytes initCode,bytes callData,uint256 callGasLimit,uint256 verificationGasLimit,uint256 preVerificationGas,uint256 maxFeePerGas,uint256 maxPriorityFeePerGas,bytes paymasterAndData,bytes signature)";
 
 /**
- * keccak256 of the ABI-encoded operation.
+ * The UserOperation hash an EntryPoint v0.7 signs and checks — `getUserOpHash` (F54).
  *
- * **NOT the hash an EntryPoint signs or checks (F54):** it includes the signature
- * and binds neither the EntryPoint nor the chain id. Do not sign it. The live 4337
- * path (`lib/adapters/base-4337-transport.ts`) uses viem's UserOperation signing.
+ * It was `keccak256(abi.encode(op))` over every field INCLUDING the signature, binding
+ * neither the EntryPoint nor the chain id: no EntryPoint computes that, so an account
+ * signing it would be refused everywhere, and a hash without chain id or EntryPoint is
+ * the cross-domain replay shape `assertExpectedDomain` exists to stop. Its tests only
+ * checked that it was stable.
+ *
+ * Now `UserOperationLib.hash` for v0.7: the gas fields are packed into
+ * `accountGasLimits = verificationGasLimit << 128 | callGasLimit` and
+ * `gasFees = maxPriorityFeePerGas << 128 | maxFeePerGas`; the dynamic fields are
+ * hashed; the signature is excluded; then `keccak256(abi.encode(hash, entryPoint,
+ * chainId))`. Checked against viem's `getUserOperationHash` and, live, against the
+ * deployed EntryPoint v0.7's own `getUserOpHash`.
  */
-export function userOperationHash(op: PackedUserOperation): `0x${string}` {
-  return keccak256(
-    encodeAbiParameters(
-      [{ type: "address" }, { type: "uint256" }, { type: "bytes" }, { type: "bytes" },
-       { type: "uint256" }, { type: "uint256" }, { type: "uint256" },
-       { type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bytes" }],
-      [op.sender, op.nonce, op.initCode, op.callData, op.callGasLimit, op.verificationGasLimit,
-       op.preVerificationGas, op.maxFeePerGas, op.maxPriorityFeePerGas, op.paymasterAndData, op.signature],
-    ),
-  );
+export function userOperationHash(
+  op: PackedUserOperation,
+  domain: { entryPoint: `0x${string}`; chainId: number },
+): `0x${string}` {
+  const accountGasLimits = (op.verificationGasLimit << 128n) | op.callGasLimit;
+  const gasFees = (op.maxPriorityFeePerGas << 128n) | op.maxFeePerGas;
+  const inner = keccak256(encodeAbiParameters(
+    [{ type: "address" }, { type: "uint256" }, { type: "bytes32" }, { type: "bytes32" },
+     { type: "bytes32" }, { type: "uint256" }, { type: "bytes32" }, { type: "bytes32" }],
+    [op.sender, op.nonce, keccak256(op.initCode), keccak256(op.callData),
+     toHex(accountGasLimits, { size: 32 }), op.preVerificationGas, toHex(gasFees, { size: 32 }), keccak256(op.paymasterAndData)],
+  ));
+  return keccak256(encodeAbiParameters(
+    [{ type: "bytes32" }, { type: "address" }, { type: "uint256" }],
+    [inner, domain.entryPoint, BigInt(domain.chainId)],
+  ));
 }
 
 export type UserOpVerdict = { ok: true; mode: "eoa" | "contract" } | { ok: false; reason: string };
