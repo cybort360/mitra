@@ -7,16 +7,22 @@
 
 > [!NOTE]
 > **Baseline Status:**
-> - Multi-rail EVM Canonical Vault v2 (`[principal][holder]` + `actionHash` permit, ADR-0009 invariants preserved) deployed and verified on **Base Sepolia** (`84532`, `0x9c2c2d42a1a282b665bc67f407017b7605e51e8f`) and **Tempo Moderato** (`42431`, `0xaa46c23adefed6687cb2180d8a14cf88c6688ee6`).
+> - Multi-rail EVM Canonical Vault v2 with F61 token-scoped mandates (`[principal][holder][token]`) deployed and verified on:
+>   - **Base Sepolia** (`84532`): `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b` (tx `0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445`, block `47687892`)
+>   - **Tempo Moderato** (`42431`): `0x81798c6f4ff1257b53b0be512c979f2656269329` (tx `0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77`, block `38179538`)
 > - `PERMIT_TYPEHASH` verified on-chain via `eth_call 0x30adf81f`: `0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`.
+> - Phase 7 `contracts/MitraClearing.sol` deployed and verified on:
+>   - **Base Sepolia** (`84532`): `0x2179bf055c62c57eeb4045957d57f7e460df76d9` (tx `0x09087cfebb6d786d8e6c5321e33fc5669f9ed3580d7e5476b3c56cea5f381a8e`, block `47688141`)
+>   - **Tempo Moderato** (`42431`): `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b` (tx `0x557a4674b442f9955693f098ddc815904419b7d7d643781d838c484519d957ed`, block `38180738`)
+>   - Both verified `operator()`: `0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D`.
+> - Solana Devnet program (`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY`) upgraded on devnet with `(principal, holder)` mandate reseed (PR #31 merged, slot 507483795+). Live tests pass (41/41 on transport, 1/1 on agreement).
 > - Phase 6 Distributed Sagas (`ADR-0012`) re-evidenced on-chain with automated compensation (`lockEscrow` → `refundEscrow`). Runnable via `npm run verify:saga-events`. Full un-truncated 66-character hashes verified live (`F52`).
-> - All 5 Verification Gates: **PASS** (Gate 1 Typecheck: 0 errors; Gate 2 Vitest: 737 passed, 0 failed; Gate 3 Foundry: 30/30 passed; Gate 4 Sagas: 100% verified; Gate 5 Shared Context: 76 entries audited, `ok=true`, tip `d4ddcbb1fa62f26a004095ee61f0c0962425b2757076f1b4d703fabf8b3be8af`).
-> - Active branch: `feat/mitra-vault-v2-reseed` (tip `e9b710f`).
+> - Verification Gates: **PASS** (Typecheck: 0 errors; Vitest: 804 passed, 0 failed; Foundry: 36/36 passed; Saga events: 100% verified).
+> - Active branch: `feat/mitra-vault-v2-reseed`.
 
-This handoff specifies the implementation and live verification of **Phase 5** and **Phase 7** per `docs/product/MITRA_PRD.md` (§14, §19–§25, §52):
-
-1. **Phase 5: Agent Ecosystem & Dual-Transport MCP Server** (`bin/mitra-mcp.ts`, `lib/mcp/server.ts`)
-2. **Phase 7: On-Chain Clearing & Multilateral Netting** (`contracts/MitraClearing.sol`, `scripts/run-live-clearing-epoch.mjs`)
+This handoff details the completed Lead deployments and specifies the next collaborative tasks:
+1. **F55: Caller Identity & Tool Un-withholding** (`X-Mitra-Actor-Id` header across HTTP & MCP to un-withhold `fund` / `accept` / `reject` / `register_agent`).
+2. **Phase 7: Live Clearing Epoch Runner** (`scripts/run-live-clearing-epoch.mjs`) driving the live deployed `MitraClearing` contracts.
 
 ---
 

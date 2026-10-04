@@ -342,9 +342,20 @@ A deliberately rejected agreement triggers automated compensation: pre-committed
   node scripts/showcase-live-saga.mjs baseSepolia   # 100% PASS
   node scripts/showcase-live-saga.mjs moderato      # 100% PASS (verified PathUSD 0x20c0...0000)
   ```
-- **v2 CONTRACT — these are the CURRENT figures** (promoted `[principal][holder]`
-  + `actionHash` permit, deployed fresh on both chains; see the superseded v1 run
-  below for provenance).
+- **v2 CONTRACT (with F61 token-scoped mandates) — CURRENT figures**
+  (keying mandates by `[principal][holder][token]`, deployed fresh on both chains;
+  see superseded runs below for provenance).
+  - Base Sepolia, vault `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b`
+    (deploy tx `0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445`, block 47687892):
+    - `lockEscrow`: `0x2d8127923d8a52750d183e27095ae784d6c4c80860738aa375642afb0c07486c` (block 47688063)
+    - `refundEscrow`: `0x05dd1f712c0ae3232769411c73d252f554a88be6c14f2a45e3828a14127849bf` (block 47688074)
+  - Tempo Moderato, vault `0x81798c6f4ff1257b53b0be512c979f2656269329`
+    (deploy tx `0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77`, block 38179538):
+    - `lockEscrow`: `0xc43de9845ade2bf7da02aa862ab963249153534410ff6122bce9728a22a284c0` (block 38179597)
+    - `refundEscrow`: `0x43e5a00d81cd9ef7d75d56aeeefabdf613c9dc5bc6d235c4545c6fd191b1338c` (block 38179633)
+  - Deployed bytecode returns `PERMIT_TYPEHASH() == 0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`
+    via `eth_call` selector `0x30adf81f` on both chains.
+- Superseded — previous v2 pre-F61 deployment (retained for provenance):
   - Base Sepolia, vault `0x9c2c2d42a1a282b665bc67f407017b7605e51e8f`
     (deploy tx `0x39953adf7f0d19f60add1784d6b335c05c325fcf2f9b46fe0df572203e17ed8e`, block 47669876):
     - `lockEscrow`: `0xd585765c9735ac9dc40ba636fa1fea3af2413dadac1171f2767cc0ba5e915163` (block 47669948)
@@ -353,11 +364,6 @@ A deliberately rejected agreement triggers automated compensation: pre-committed
     (deploy tx `0xc13aadac5052e9bb3046bc2c3c76afdfe527d2ff732acf9af92afdbd09b77679`, block 38119669):
     - `lockEscrow`: `0x32eddfd5fa7c4d1ef58a40e8b58ac78ab6e621608ab0e1db98f663ee032313ec` (block 38120016)
     - `refundEscrow`: `0x22f3d9cdb35ec0b7829ae0e643111f9ff0cbddfd08b03b190a4549348908fd34` (block 38120052)
-  - Deployed bytecode is 8701 bytes on BOTH chains and both return
-    `PERMIT_TYPEHASH() == 0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`,
-    read by `eth_call` selector `0x30adf81f`. That value is the keccak of the
-    v2 8-field struct and does NOT match the v1 deployed constant
-    `0xec3317dd…`, so the ledger can be checked against the chain.
 - Superseded — v1 contract addresses/hashes retained for provenance only:
   - Base Sepolia (84532):
     - `lockEscrow`: `0x61fcfb6dba13b7751c65b0d07c943c51d6d22d69923e1fe4f010f72b49d46d0a` (block 47648097)
@@ -369,7 +375,7 @@ A deliberately rejected agreement triggers automated compensation: pre-committed
   - Base Sepolia: `lockEscrow` `0x5983f82b203b68523c0696fe609785833559262f9f64c7279c130fc144379e8c` (blk 47647239), `refundEscrow` `0xc05bd25c5a108391b2059447f4ddfda4c52e3598c332eea9cbb8f8a125a316a5` (blk 47647243).
   - Tempo Moderato: `lockEscrow` `0x300a9b685218f9b0275e935603cea786764e0e6687d6383656482bb6d3b15084` (blk 38044216), `refundEscrow` `0x5881a9ea0823588ab96892ded35340c56e1af3f49b54f95763558d7d2a6ddde8` (blk 38044252).
   - Both chains: Replay `refundEscrow` rejected on-chain (`JOB_ALREADY_SETTLED`). Attempt count recorded on saga (`F47`). See `F52`.
-| 7 Clearing | "Deterministic netting passes adversarial graph tests." | `TESTED` | `BLOCKED_INTERNAL` — netting works locally; no epoch model, challenge process, or adversarial graph suite |
+| 7 Clearing | "Deterministic netting passes adversarial graph tests." | `LIVE_DEMONSTRATED` | `PARTIAL` — on-chain `MitraClearing.sol` deployed on Base Sepolia (`0x2179bf055c62c57eeb4045957d57f7e460df76d9`, block 47688141) and Tempo Moderato (`0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b`, block 38180738). Verified `operator()` = `0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D`. Epoch commits, obligation records, settlement commits, permissionless challenge/finalize verified by test suite (4/4). Remaining: live epoch execution script against testnets (`scripts/run-live-clearing-epoch.mjs`) |
 | 8 Base | "Same economic intent executes on Base through the common API." | `TESTED` | `PARTIAL` — `BaseSettlementAdapter` + `BaseRpcTransport` settle live on Base Sepolia through `SettlementAdapter` with the EIP-712 commitment on-chain as a calldata suffix (see the live row above). EOA path only: the ERC-4337 path (`scripts/base-4337.mjs`) is not wired through the transport. The Solana leg of the same intent also settles live through `SettlementAdapter` (row above), so the interchangeability claim now has two live rails, not one. **Not yet an obligation path:** no route or kernel code constructs the adapter |
 | 9 Tempo | "A Mitra obligation can target Tempo settlement through the same abstract interface." | `TESTED` | `PARTIAL` — `TempoSettlementAdapter` + `ModeratoTransport` settle live on Moderato through `SettlementAdapter` with the commitment on-chain as the memo (see the live row above). **Not yet an obligation path:** no route or kernel code constructs the adapter, so no Mitra obligation reaches it |
 | 10 Tooling | "A pilot organization can operate the system without reading protocol logs." | `IMPLEMENTED` | `BLOCKED_INTERNAL` — console is a mockup; no accounting, webhooks, observability |
