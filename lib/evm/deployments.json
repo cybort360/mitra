@@ -1,17 +1,33 @@
 {
   "baseSepolia": {
     "chainId": 84532,
-    "address": "0x9c2c2d42a1a282b665bc67f407017b7605e51e8f",
-    "deployTx": "0x39953adf7f0d19f60add1784d6b335c05c325fcf2f9b46fe0df572203e17ed8e",
-    "deployBlock": 47669876,
-    "deployedAt": "2026-10-04T10:00:39.082Z"
+    "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+    "deployTx": "0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445",
+    "deployBlock": 47687892,
+    "deployedAt": "2026-10-04T20:01:10.395Z"
   },
   "moderato": {
     "chainId": 42431,
-    "address": "0xaa46c23adefed6687cb2180d8a14cf88c6688ee6",
-    "deployTx": "0xc13aadac5052e9bb3046bc2c3c76afdfe527d2ff732acf9af92afdbd09b77679",
-    "deployBlock": 38119669,
-    "deployedAt": "2026-10-04T10:00:51.156Z"
+    "address": "0x81798c6f4ff1257b53b0be512c979f2656269329",
+    "deployTx": "0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77",
+    "deployBlock": 38179538,
+    "deployedAt": "2026-10-04T20:01:30.023Z"
+  },
+  "clearing": {
+    "baseSepolia": {
+      "address": "0x2179bf055c62c57eeb4045957d57f7e460df76d9",
+      "chainId": 84532,
+      "operator": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
+      "deployTx": "0x09087cfebb6d786d8e6c5321e33fc5669f9ed3580d7e5476b3c56cea5f381a8e",
+      "deployBlock": 47688141
+    },
+    "moderato": {
+      "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+      "chainId": 42431,
+      "operator": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
+      "deployTx": "0x557a4674b442f9955693f098ddc815904419b7d7d643781d838c484519d957ed",
+      "deployBlock": 38180738
+    }
   },
   "moderato__callerVariant": {
     "network": "tempo-moderato",

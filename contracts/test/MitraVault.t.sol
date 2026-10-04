@@ -34,7 +34,7 @@ contract MitraVaultTest is Test {
         vault.deposit(address(token), 1_000e6);
         vm.stopPrank();
         vm.prank(principal);
-        vault.openMandate(holder, uint64(100e6), uint64(500e6), uint64(block.timestamp + 1 days), engine);
+        vault.openMandate(holder, address(token), uint64(100e6), uint64(500e6), uint64(block.timestamp + 1 days), engine);
     }
 
     function _permit(
@@ -108,7 +108,7 @@ contract MitraVaultTest is Test {
         bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, "s1", 1, block.timestamp + 1 hours, enginePk);
         // Principal TIGHTENS the limit from 100 to 1.
         vm.prank(principal);
-        vault.amendMandate(holder, uint64(1e6), uint64(500e6), uint64(block.timestamp + 1 days));
+        vault.amendMandate(holder, address(token), uint64(1e6), uint64(500e6), uint64(block.timestamp + 1 days));
         // The permit issued under v1 must STILL be spendable. The Solana program
         // removed this re-check precisely because it stranded agents.
         _spend(h, enginePk, "s1");
@@ -146,7 +146,7 @@ contract MitraVaultTest is Test {
             bytes32 h = _permit(principal, holder, address(token), 100e6, recipient, sids[i], 1, block.timestamp + 1 hours, enginePk);
             _spend(h, enginePk, sids[i]);
         }
-        (, , , , uint64 spent, , , , ) = vault.mandates(principal, holder);
+        (, , , , uint64 spent, , , , ) = vault.mandates(principal, holder, address(token));
         assertEq(spent, 500e6);
         bytes32 h6 = _permit(principal, holder, address(token), 100e6, recipient, "s5", 1, block.timestamp + 1 hours, enginePk);
         (uint8 v6, bytes32 r6, bytes32 s6) = vm.sign(enginePk, h6);
@@ -209,14 +209,14 @@ contract MitraVaultTest is Test {
     }
 
     function test_revoked_mandate_stops_spend_immediately() public {
-        vm.prank(principal); vault.revokeMandate(holder);
+        vm.prank(principal); vault.revokeMandate(principal, holder, address(token));
         vm.prank(provider);
         vm.expectRevert("MANDATE_REVOKED");
         _submit(_permitOf(keccak256(bytes("s")), 100e6, recipient, 1, block.timestamp + 1 hours), "x");
     }
 
     function test_stale_version_permit_is_refused() public {
-        vm.prank(principal); vault.amendMandate(holder, uint64(100e6), uint64(500e6), uint64(block.timestamp + 1 days));
+        vm.prank(principal); vault.amendMandate(holder, address(token), uint64(100e6), uint64(500e6), uint64(block.timestamp + 1 days));
         // After amending, the mandate is at v2. A permit citing v3 is from the
         // FUTURE and was never issued by this mandate, so it must be refused.
         bytes32 future = _permit(address(vault), holder, address(token), 100e6, recipient, "s", 3, uint64(block.timestamp + 1 hours), enginePk);

@@ -103,7 +103,11 @@ contract MitraVault is EIP712, ReentrancyGuard {
     // Keyed by [principal][holder], ported from the v2 variant. Keyed by holder
     // alone, Principal A could open a mandate on an agent address Principal B
     // wants, squatting it so B's own openMandate reverts MANDATE_ALREADY_EXISTS.
-    mapping(address => mapping(address => Mandate)) public mandates;
+    // Keyed by [principal][holder][token] (F61). Keyed by holder alone, `limit` and
+    // `ceiling` are raw atomic units, so a ceiling meant as "500 USD" (500e6 units)
+    // also authorised 500e6 raw units of every other token in the vault — with an
+    // 8-decimal token that is 5 BTC. The on-chain bound then fails to bound value.
+    mapping(address => mapping(address => mapping(address => Mandate))) public mandates;
     mapping(bytes32 => bool) public consumedPermits;
     mapping(bytes32 => EscrowJob) public escrows;
 
@@ -183,12 +187,12 @@ contract MitraVault is EIP712, ReentrancyGuard {
 
     // ── 2. mandate lifecycle (ADR-0009) ───────────────────────────────────────
 
-    function openMandate(address holder, uint64 limit, uint64 ceiling, uint64 expiresAt, address policyEngine) external {
-        require(mandates[msg.sender][holder].holder == address(0), "MANDATE_ALREADY_EXISTS");
+    function openMandate(address holder, address token, uint64 limit, uint64 ceiling, uint64 expiresAt, address policyEngine) external {
+        require(mandates[msg.sender][holder][token].holder == address(0), "MANDATE_ALREADY_EXISTS");
         require(limit > 0 && ceiling >= limit, "EXCEEDS_MANDATE_CEILING");
         require(expiresAt > block.timestamp, "INVALID_EXPIRY");
         require(policyEngine != address(0), "INVALID_POLICY_ENGINE");
-        mandates[msg.sender][holder] = Mandate({
+        mandates[msg.sender][holder][token] = Mandate({
             principal: msg.sender, holder: holder, limit: limit, ceiling: ceiling,
             spent: 0, expiresAt: expiresAt, version: 1, policyEngine: policyEngine, revoked: false
         });
@@ -196,8 +200,8 @@ contract MitraVault is EIP712, ReentrancyGuard {
     }
 
     /// Amending governs FUTURE permits. A permit already issued stands.
-    function amendMandate(address holder, uint64 newLimit, uint64 newCeiling, uint64 newExpiresAt) external {
-        Mandate storage m = mandates[msg.sender][holder];
+    function amendMandate(address holder, address token, uint64 newLimit, uint64 newCeiling, uint64 newExpiresAt) external {
+        Mandate storage m = mandates[msg.sender][holder][token];
         require(m.principal == msg.sender, "UNAUTHORIZED_PRINCIPAL");
         require(!m.revoked, "MANDATE_REVOKED");
         require(m.expiresAt > block.timestamp, "MANDATE_EXPIRED");
@@ -212,8 +216,8 @@ contract MitraVault is EIP712, ReentrancyGuard {
     /// Revoking is asymmetric with amending ON PURPOSE: revoke means "this agent is
     /// compromised" and must stop value NOW, so it reaches back and kills outstanding
     /// permits. The holder may also revoke itself, which cannot move value.
-    function revokeMandate(address holder) external {
-        Mandate storage m = mandates[msg.sender][holder];
+    function revokeMandate(address principal, address holder, address token) external {
+        Mandate storage m = mandates[principal][holder][token];
         require(msg.sender == m.principal || msg.sender == m.holder, "UNAUTHORIZED");
         require(!m.revoked, "ALREADY_REVOKED");
         m.revoked = true;
@@ -231,7 +235,7 @@ contract MitraVault is EIP712, ReentrancyGuard {
         address token      = permit.token;
         uint256 amount     = permit.amount;
 
-        Mandate storage m = mandates[principal][holder];
+        Mandate storage m = mandates[principal][holder][token];
         Positions storage p = vaults[principal][token];
 
         require(m.principal == principal, "PRINCIPAL_MISMATCH");

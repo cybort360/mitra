@@ -159,7 +159,10 @@ async function runShowcase(networkKey) {
       address: net.token,
       abi: erc20Abi,
       functionName: "approve",
-      args: [dep.address, eoaBal],
+      // Approve the deposit amount, not the balance: approving eoaBal silently fails
+      // once the balance falls below 2x escrowAmount, and the failure surfaces as
+      // "transfer amount exceeds allowance" with no link to the approval.
+      args: [dep.address, net.escrowAmount * 2n],
       chain,
     });
     await pub.waitForTransactionReceipt({ hash: appTx });
