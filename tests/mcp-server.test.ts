@@ -235,4 +235,274 @@ describe.skipIf(!process.env.MITRA_API_URL)("over HTTP against a running Mitra (
       await client.close();
     }
   }, 90_000);
+
+  it("over the network: bound to 0.0.0.0 with a token, remote clients on both wire formats open agreements the API holds", async () => {
+    const { spawn: spawnChild } = await import("node:child_process");
+    const { SSEClientTransport: Sse } = await import("@modelcontextprotocol/sdk/client/sse.js");
+    const { StreamableHTTPClientTransport: Streamable } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+    const token = `tok_${"z".repeat(40)}`;
+    const child = spawnChild("npx", ["tsx", "scripts/mitra-mcp.ts", "--transport", "sse", "--port", "0", "--host", "0.0.0.0"],
+      { detached: true, env: { ...process.env, MITRA_MCP_TOKEN: token } });
+    try {
+      const port = await new Promise<string>((ok, fail) => {
+        let err = "";
+        child.stderr.on("data", (c) => { err += c; const m = /tools at http:\/\/0\.0\.0\.0:(\d+)\/sse/.exec(err); if (m) ok(m[1]); });
+        child.on("exit", (code) => fail(new Error(`exited ${code}: ${err}`)));
+      });
+      const url = `http://127.0.0.1:${port}`;
+      const headers = { authorization: `Bearer ${token}` };
+      const unauth = await fetch(`${url}/healthz`);
+      expect(unauth.status, "no token, no entry").toBe(401);
+      const wires = {
+        sse: () => new Sse(new URL(`${url}/sse`), { requestInit: { headers }, eventSourceInit: { fetch: (u, init) => fetch(u, { ...init, headers: { ...(init?.headers as Record<string, string>), ...headers } }) } }),
+        streamable: () => new Streamable(new URL(`${url}/mcp`), { requestInit: { headers } }),
+      };
+      for (const [wire, make] of Object.entries(wires)) {
+        const client = new Client({ name: `remote-${wire}`, version: "0" });
+        await client.connect(make());
+        try {
+          const id = `ag_mcp_${wire}_${Date.now()}`;
+          const opened = await client.callTool({ name: "mitra_create_agreement", arguments: {
+            spaceId: "space_research_1",
+            draft: { agreementId: id, runId: `run_${id}`, intentId: `intent_${id}`, client: "agent_buyer_07", provider: "mech-research-backup-04",
+              evaluator: "agent_eval_02", price: { asset: "USDC", amount: 1 }, deadline: "2027-01-01T00:00:00Z" },
+            proposal: { capability: "research", amount: { asset: "USDC", amount: 1 } },
+          } });
+          expect(opened.isError, JSON.stringify(opened.content)).toBe(false);
+          const back = await (await fetch(`${process.env.MITRA_API_URL}/api/v1/agreements?agreementId=${id}`)).json();
+          console.log(`mcp over ${wire} (0.0.0.0:${port}, bearer): opened ${id}, API reads back ${back.data?.status} (backend ${back.backend})`);
+          expect(back.data.status).toBe("OPEN");
+          const accept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: id } });
+          expect(accept.isError, "accept is withheld over the network too").toBe(true);
+        } finally {
+          await client.close();
+        }
+      }
+    } finally {
+      try { process.kill(-child.pid!, "SIGTERM"); } catch { /* already gone */ }
+    }
+  }, 120_000);
+});
+
+// ── The network transport (Phase 5): legacy SSE and Streamable HTTP ──────────
+
+import { request as httpRequest } from "node:http";
+import { spawn } from "node:child_process";
+import { afterEach as afterEachHttp } from "vitest";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { startMcpHttpServer, type McpHttpOptions, type McpHttpServer } from "@/lib/mcp/http";
+
+const TOKEN = "t".repeat(40);
+let running: McpHttpServer[] = [];
+afterEachHttp(async () => { await Promise.all(running.map((s) => s.close())); running = []; });
+
+async function serve(over: Partial<McpHttpOptions> = {}) {
+  const s = await startMcpHttpServer({ api: inProcessApi, port: 0, ...over });
+  running.push(s);
+  return s;
+}
+
+const WIRES = {
+  sse: (url: string, headers?: Record<string, string>) => new SSEClientTransport(new URL(`${url}/sse`), { requestInit: { headers }, eventSourceInit: { fetch: (u, init) => fetch(u, { ...init, headers: { ...(init?.headers as Record<string, string>), ...headers } }) } }),
+  streamable: (url: string, headers?: Record<string, string>) => new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers } }),
+} as const;
+
+async function connectOver(wire: keyof typeof WIRES, url: string, headers?: Record<string, string>) {
+  const client = new Client({ name: `remote-agent-${wire}`, version: "0" });
+  await client.connect(WIRES[wire](url, headers));
+  return client;
+}
+
+/** A raw request, so Host and Origin can be set to whatever an attacker would send. */
+function raw(url: string, path: string, opts: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
+  const u = new URL(url);
+  return new Promise<{ status: number; body: string }>((ok, fail) => {
+    const r = httpRequest({ host: u.hostname, port: u.port, path, method: opts.method ?? "GET", headers: opts.headers }, (res) => {
+      let body = "";
+      res.on("data", (c) => { body += c; if (res.headers["content-type"]?.includes("event-stream")) res.destroy(); });
+      res.on("end", () => ok({ status: res.statusCode!, body }));
+      res.on("close", () => ok({ status: res.statusCode!, body }));
+    });
+    r.on("error", fail);
+    r.end(opts.body);
+  });
+}
+
+for (const wire of ["sse", "streamable"] as const) {
+  describe(`over the network (${wire})`, () => {
+    it("lists exactly the served tools, opens an agreement the store holds, and refuses a withheld tool without reaching the API", async () => {
+      const s = await serve();
+      const client = await connectOver(wire, s.url);
+      try {
+        expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual([...servedToolNames()].sort());
+        const id = `ag_mcp_${wire}`;
+        const opened = await client.callTool({ name: "mitra_create_agreement", arguments: {
+          spaceId: "space_research_1",
+          draft: { agreementId: id, runId: `run_${id}`, intentId: `intent_${id}`, client: "agent_buyer_07", provider: "mech-research-backup-04",
+            evaluator: "agent_eval_02", price: { asset: "USDC", amount: 1 }, deadline: "2027-01-01T00:00:00Z" },
+          proposal: { capability: "research", amount: { asset: "USDC", amount: 1 } },
+        } });
+        expect(opened.isError, JSON.stringify(opened.content)).toBe(false);
+        const back = await (agreements.GET as (r: Request) => Promise<Response>)(new Request(`http://localhost/api/v1/agreements?agreementId=${id}`));
+        expect((await back.json()).data.status).toBe("OPEN");
+
+        const before = seen.length;
+        const accept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: id } }).catch((e: Error) => ({ isError: true, content: e.message }));
+        expect(accept.isError, "accept is withheld").toBe(true);
+        expect(seen.length, "a withheld tool reaches no route").toBe(before);
+      } finally {
+        await client.close();
+      }
+    }, 30_000);
+
+    it("with a token: no token and a wrong token are refused; the right one connects", async () => {
+      const s = await serve({ token: TOKEN });
+      await expect(connectOver(wire, s.url)).rejects.toThrow();
+      await expect(connectOver(wire, s.url, { authorization: `Bearer ${"x".repeat(40)}` })).rejects.toThrow();
+      const client = await connectOver(wire, s.url, { authorization: `Bearer ${TOKEN}` });
+      try {
+        expect((await client.listTools()).tools.length).toBe(servedToolNames().length);
+      } finally {
+        await client.close();
+      }
+    }, 30_000);
+  });
+}
+
+describe("network transport — who can connect", () => {
+  it("refuses to bind off loopback without a token, and refuses a short token", async () => {
+    await expect(startMcpHttpServer({ api: inProcessApi, port: 0, host: "0.0.0.0" })).rejects.toThrow("MCP_TOKEN_REQUIRED_OFF_LOOPBACK");
+    await expect(startMcpHttpServer({ api: inProcessApi, port: 0, token: "short" })).rejects.toThrow("MCP_TOKEN_TOO_SHORT");
+    const s = await serve({ host: "0.0.0.0", token: TOKEN });
+    expect((await raw(s.url.replace("0.0.0.0", "127.0.0.1"), "/healthz")).status).toBe(401);
+  });
+
+  it("every endpoint demands the token when one is set", async () => {
+    const s = await serve({ token: TOKEN });
+    for (const [method, path] of [["GET", "/healthz"], ["GET", "/sse"], ["POST", "/messages?sessionId=x"], ["POST", "/mcp"], ["GET", "/mcp"]]) {
+      expect((await raw(s.url, path, { method, body: method === "POST" ? "{}" : undefined })).status, `${method} ${path}`).toBe(401);
+    }
+    expect((await raw(s.url, "/healthz", { headers: { authorization: `Bearer ${TOKEN}` } })).status).toBe(200);
+  });
+
+  it("DNS rebinding: on loopback, a Host header naming another site is refused", async () => {
+    const s = await serve();
+    const port = new URL(s.url).port;
+    expect((await raw(s.url, "/healthz", { headers: { host: `attacker.example:${port}` } })).status).toBe(403);
+    expect((await raw(s.url, "/sse", { headers: { host: `attacker.example:${port}` } })).status).toBe(403);
+    expect((await raw(s.url, "/healthz", { headers: { host: `localhost:${port}` } })).status).toBe(200);
+  });
+
+  it("a browser origin is refused unless allowed", async () => {
+    const s = await serve({ allowedOrigins: ["https://console.mitra.test"] });
+    expect((await raw(s.url, "/healthz", { headers: { origin: "https://evil.example" } })).status).toBe(403);
+    expect((await raw(s.url, "/sse", { headers: { origin: "https://evil.example" } })).status).toBe(403);
+    expect((await raw(s.url, "/healthz", { headers: { origin: "https://console.mitra.test" } })).status).toBe(200);
+  });
+});
+
+describe("network transport — sessions and malformed input", () => {
+  it("sessions are separate, counted, capped, and released on close", async () => {
+    const s = await serve({ maxSessions: 2 });
+    const a = await connectOver("sse", s.url);
+    const b = await connectOver("streamable", s.url);
+    expect(s.sessionCount()).toBe(2);
+    expect((await raw(s.url, "/sse")).status, "over the cap").toBe(503);
+    await expect(connectOver("streamable", s.url)).rejects.toThrow();
+    await a.close();
+    // A well-behaved Streamable HTTP client ends its session with DELETE.
+    await (b.transport as StreamableHTTPClientTransport).terminateSession();
+    await b.close();
+    for (let i = 0; i < 50 && s.sessionCount() > 0; i++) await new Promise((ok) => setTimeout(ok, 20));
+    expect(s.sessionCount()).toBe(0);
+    const c = await connectOver("sse", s.url);
+    expect((await c.listTools()).tools.length).toBe(servedToolNames().length);
+    await c.close();
+  }, 30_000);
+
+  it("a Streamable HTTP client that walks away without DELETE does not hold its slot forever", async () => {
+    const s = await serve({ maxSessions: 1, idleMs: 200 });
+    const gone = await connectOver("streamable", s.url);
+    await gone.close(); // no terminateSession(): the server is never told
+    expect(s.sessionCount()).toBe(1);
+    for (let i = 0; i < 50 && s.sessionCount() > 0; i++) await new Promise((ok) => setTimeout(ok, 50));
+    expect(s.sessionCount(), "the idle session was reaped").toBe(0);
+    const next = await connectOver("streamable", s.url);
+    expect((await next.listTools()).tools.length).toBe(servedToolNames().length);
+    await next.close();
+  }, 30_000);
+
+  it("a session in use is not reaped", async () => {
+    const s = await serve({ idleMs: 300 });
+    const busy = await connectOver("streamable", s.url);
+    for (let i = 0; i < 8; i++) {
+      await new Promise((ok) => setTimeout(ok, 120));
+      expect((await busy.listTools()).tools.length).toBe(servedToolNames().length);
+    }
+    expect(s.sessionCount()).toBe(1);
+    await busy.close();
+  }, 30_000);
+
+  it("a session id from one wire format is unknown on the other", async () => {
+    const s = await serve();
+    const st = await connectOver("streamable", s.url);
+    const sid = (st.transport as StreamableHTTPClientTransport).sessionId!;
+    const json = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+    expect((await raw(s.url, `/messages?sessionId=${sid}`, { method: "POST", headers: json, body: "{}" })).status).toBe(404);
+    await st.close();
+  }, 30_000);
+
+  it("unknown sessions, missing sessions, oversized and malformed bodies are refused", async () => {
+    const s = await serve({ maxBodyBytes: 1024 });
+    const json = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+    expect((await raw(s.url, "/messages?sessionId=nope", { method: "POST", headers: json, body: "{}" })).status).toBe(404);
+    expect((await raw(s.url, "/mcp", { method: "POST", headers: { ...json, "mcp-session-id": "nope" }, body: "{}" })).status).toBe(404);
+    expect((await raw(s.url, "/mcp", { method: "GET" })).status, "no session and not initialize").toBe(400);
+    // Refused by us, before any server is built for it — not by the SDK after.
+    const notInit = await raw(s.url, "/mcp", { method: "POST", headers: json, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+    expect(notInit.status).toBe(400);
+    expect(JSON.parse(notInit.body).error).toBe("SESSION_REQUIRED");
+    expect((await raw(s.url, "/mcp", { method: "POST", headers: json, body: "x".repeat(2048) })).status).toBe(413);
+    expect((await raw(s.url, "/mcp", { method: "POST", headers: json, body: "{not json" })).status).toBe(400);
+    expect((await raw(s.url, "/nowhere")).status).toBe(404);
+    expect(s.sessionCount()).toBe(0);
+  });
+});
+
+/**
+ * npx → sh → tsx → node: a signal to the npx process does not reach the server, which
+ * then outlives the test still listening. Each spawn gets its own process group, and
+ * the whole group is stopped.
+ */
+const killGroup = (pid: number | undefined) => { try { if (pid) process.kill(-pid, "SIGTERM"); } catch { /* already gone */ } };
+
+describe("the network entry point", () => {
+  const spawnMcp = (args: string[], env: Record<string, string> = {}) =>
+    spawn("npx", ["tsx", "scripts/mitra-mcp.ts", ...args], { detached: true, env: { ...process.env, MITRA_API_URL: "http://127.0.0.1:9", ...env } });
+
+  it("--transport sse --port 0 starts, prints its URL, and serves the tools over SSE", async () => {
+    const child = spawnMcp(["--transport", "sse", "--port", "0"]);
+    try {
+      const url = await new Promise<string>((ok, fail) => {
+        let err = "";
+        child.stderr.on("data", (c) => { err += c; const m = /tools at (http:\/\/127\.0\.0\.1:\d+)\/sse/.exec(err); if (m) ok(m[1]); });
+        child.on("exit", (code) => fail(new Error(`exited ${code}: ${err}`)));
+      });
+      const client = await connectOver("sse", url);
+      expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual([...servedToolNames()].sort());
+      await client.close();
+    } finally {
+      killGroup(child.pid);
+    }
+  }, 60_000);
+
+  it("refuses to start off loopback without a token", async () => {
+    const child = spawnMcp(["--transport", "sse", "--port", "0", "--host", "0.0.0.0"], { MITRA_MCP_TOKEN: "" });
+    let err = "";
+    child.stderr.on("data", (c) => { err += c; });
+    const code = await new Promise<number | null>((ok) => child.on("exit", ok));
+    expect(code).not.toBe(0);
+    expect(err).toContain("MCP_TOKEN_REQUIRED_OFF_LOOPBACK");
+  }, 60_000);
 });
