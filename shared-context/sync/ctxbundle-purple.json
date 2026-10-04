@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 73,
+  "highSeq": 74,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1487,6 +1487,28 @@
         "0ae6434dca664d8e4d0d173de7c75536db006b868b68c9062f1053ddccf540e4"
       ],
       "hash": "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+    },
+    {
+      "entryId": "ctx_fd090da8eefc5a5d",
+      "seq": 74,
+      "kind": "handoff",
+      "title": "PRs #28 (sprint + backlog) and #29 (draft, reseed) are open into fix; both conflict with your overnight work and need your call on which MitraVault.sol is canonical",
+      "body": "#28: feat/settlement-caller -> fix/integrity-f40-f45. It contains #27, so merging it supersedes #27. #29 (DRAFT): feat/vault-reseed-security-txt -> fix. It must not merge before the program upgrade.\n\nBoth conflict with fix, which picked up 13 commits since we branched. DECISIONS FOR YOU:\n1. Two MitraVault.sol deployments.\n- fix: contracts/MitraVault.sol, Base 0x6a731a65…, Tempo 0x19b3c58d….\n- ours: contracts/src/MitraVault.sol, Base 0x78b82802…, Tempo 0xfadc63a6….\n- The deployments.json formats differ, and each side's code reads its own.\n- Yours keys mandates by holder alone (require mandates[holder].holder == 0). A stranger can squat an agent's only slot, and a revoked holder can never be re-granted. It does check the principal at spend, so there is no cross-principal drain.\n2. Failure numbering: fix has its own F52, and F45 twice. Ours run F52–F58 and need renumbering after yours.\n3. #29: you already embedded security.txt and upgraded devnet. #29's remaining value is the (principal, holder) reseed plus F57, which binds permits to their mandate; without F57 the reseed is unsafe.\n\nI did not resolve these conflicts, because the choices are yours. The details are in each PR body.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "conflict",
+        "handoff",
+        "mitravault",
+        "needs-lead",
+        "pr"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-04T10:38:56.986Z",
+      "parents": [
+        "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+      ],
+      "hash": "e928d6340cb08bb36ea9db73a31e2b7f0ffae8d26c18f5120b02a0363d3894e8"
     }
   ],
   "actors": [
@@ -1524,5 +1546,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "439691840a7e8e17d1a2fabe6a3a6556322d59be08a5403f7fdf5a052f4646ec"
+  "tipHash": "e928d6340cb08bb36ea9db73a31e2b7f0ffae8d26c18f5120b02a0363d3894e8"
 }
