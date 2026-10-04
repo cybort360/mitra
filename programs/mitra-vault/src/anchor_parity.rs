@@ -173,9 +173,22 @@ pub fn vault_seeds(authority: &Pubkey) -> [&[u8]; 2] {
 /// ADR-0002 refuses. Keeping the seeds apart makes the separation structural.
 pub const MANDATE_SEED: &[u8] = b"mandate";
 
-/// The seed slice Anchor would build for `seeds = [b"mandate", holder.key()]`.
-pub fn mandate_seeds(holder: &Pubkey) -> [&[u8]; 2] {
-    [MANDATE_SEED, holder.as_ref()]
+/// The seed slice Anchor would build for
+/// `seeds = [b"mandate", principal.key(), holder.key()]`.
+///
+/// **Reseeded (sprint item 7; approved by the lead, seq 55).** It was
+/// `[b"mandate", holder]`: one mandate address per holder across ALL principals,
+/// so the first principal to grant a holder occupied the only slot that holder
+/// would ever have, and every other principal's `open_mandate` for it failed with
+/// `ALREADY_INITIALIZED` — a squatter denial of service, and an address that did
+/// not even name whose capital it governed. With the principal in the seed, each
+/// (principal, holder) pair has its own mandate.
+///
+/// Changing the seed changes every mandate's address: mandates opened under the old
+/// seed are not found at the new one. That is the redeploy's migration cost, and it
+/// is why this ships as one upgrade together with `security.txt`.
+pub fn mandate_seeds<'a>(principal: &'a Pubkey, holder: &'a Pubkey) -> [&'a [u8]; 3] {
+    [MANDATE_SEED, principal.as_ref(), holder.as_ref()]
 }
 
 /// Anchor derives an account discriminator from the *struct* name.
@@ -272,14 +285,20 @@ pub fn authorization_discriminator() -> [u8; 8] {
 /// permits can never alias, and a replay is a second signature on an address
 /// that already exists rather than a value inside some other account.
 ///
-/// Seeds are `[b"authorization", holder, action_hash]`.
+/// Seeds are `[b"authorization", mandate, action_hash]` — the MANDATE's address,
+/// not the holder (sprint item 7). With mandates seeded by (principal, holder) one
+/// holder can hold several mandates, and a permit keyed only by holder could be
+/// presented with any of them: principal A's engine would issue it and principal
+/// B's vault would pay it. Keyed by the issuing mandate, a permit has exactly one
+/// mandate it can be spent under, and `spend_authorized` re-derives this address
+/// from the mandate it was handed.
 pub const AUTHORIZATION_SEED: &[u8] = b"authorization";
 
 /// One lifetime for both inputs, not two. The returned array mixes a borrow of
-/// `holder` with a borrow of `action_hash`, so their lifetimes must unify; with
+/// `mandate` with a borrow of `action_hash`, so their lifetimes must unify; with
 /// independent lifetimes there is no `&'x` the array could take. One shared
 /// `'a` is both sufficient and the strictest correct constraint, which keeps
 /// the signature honest about what it holds on to.
-pub fn authorization_seeds<'a>(holder: &'a Pubkey, action_hash: &'a [u8; 32]) -> [&'a [u8]; 3] {
-    [AUTHORIZATION_SEED, holder.as_ref(), action_hash.as_ref()]
+pub fn authorization_seeds<'a>(mandate: &'a Pubkey, action_hash: &'a [u8; 32]) -> [&'a [u8]; 3] {
+    [AUTHORIZATION_SEED, mandate.as_ref(), action_hash.as_ref()]
 }

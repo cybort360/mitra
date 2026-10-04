@@ -61,12 +61,21 @@ fn vault_of(program_id: &Pubkey, principal: Pubkey) -> VaultAcct {
     VaultAcct { key, lamports: 1_000_000_000, data: v.to_bytes().to_vec() }
 }
 
-fn mandate_key(program_id: &Pubkey, holder: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[b"mandate", holder.as_ref()], program_id).0
+/// `[b"mandate", principal, holder]` — reseeded in sprint item 7.
+fn mandate_key(program_id: &Pubkey, principal: &Pubkey, holder: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"mandate", principal.as_ref(), holder.as_ref()], program_id).0
 }
 
-fn authorization_key(program_id: &Pubkey, holder: &Pubkey, action: &[u8; 32]) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"authorization", holder.as_ref(), action.as_ref()], program_id)
+/// The mandate address a stored mandate lives at, from the principal it records.
+fn mandate_key_of(program_id: &Pubkey, mandate: &[u8]) -> Pubkey {
+    let m = Mandate::try_from_bytes(mandate).unwrap();
+    let principal = m.binding.map(|b| b.principal).unwrap_or(m.holder);
+    mandate_key(program_id, &principal, &m.holder)
+}
+
+/// `[b"authorization", mandate, action]` — keyed by the issuing mandate (sprint item 7).
+fn authorization_key(program_id: &Pubkey, mandate: &Pubkey, action: &[u8; 32]) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[b"authorization", mandate.as_ref(), action.as_ref()], program_id)
 }
 
 fn bound_mandate(k: Keys) -> Mandate {
@@ -94,7 +103,8 @@ fn open_mandate(
     vault: &mut VaultAcct,
     engine: Pubkey,
 ) -> (Result<(), ProgramError>, Vec<u8>) {
-    let mkey = mandate_key(program_id, &holder);
+    // The program derives the mandate from the SIGNER as principal.
+    let mkey = mandate_key(program_id, &signer, &holder);
     let mut data = ix::OPEN_MANDATE.to_vec();
     data.extend(LIMIT.to_le_bytes());
     data.extend(50_000u64.to_le_bytes());
@@ -125,9 +135,22 @@ fn authorize(
     amount: u64,
     recipient: Pubkey,
 ) -> (Result<(), ProgramError>, Vec<u8>) {
+    let mkey = mandate_key_of(program_id, mandate);
+    authorize_at(program_id, signer, mkey, mandate, action, amount, recipient)
+}
+
+/// `authorize` with the mandate account's address named explicitly.
+fn authorize_at(
+    program_id: &Pubkey,
+    signer: Pubkey,
+    mkey: Pubkey,
+    mandate: &[u8],
+    action: [u8; 32],
+    amount: u64,
+    recipient: Pubkey,
+) -> (Result<(), ProgramError>, Vec<u8>) {
     let holder = Mandate::try_from_bytes(mandate).unwrap().holder;
-    let mkey = mandate_key(program_id, &holder);
-    let (akey, abump) = authorization_key(program_id, &holder, &action);
+    let (akey, abump) = authorization_key(program_id, &mkey, &action);
     let mut data = ix::AUTHORIZE.to_vec();
     data.extend(action);
     data.extend(amount.to_le_bytes());
@@ -158,6 +181,7 @@ struct SpendOutcome {
 }
 
 /// `spend_authorized` with no signer at all — exactly what any observer can send.
+/// The permit account is the one the given mandate would have issued.
 fn spend(
     program_id: &Pubkey,
     recipient: Pubkey,
@@ -166,9 +190,40 @@ fn spend(
     mandate: &[u8],
     action: [u8; 32],
 ) -> SpendOutcome {
-    let holder = Mandate::try_from_bytes(mandate).unwrap().holder;
-    let (akey, _) = authorization_key(program_id, &holder, &action);
-    let mkey = mandate_key(program_id, &holder);
+    let akey = permit_key_for(program_id, mandate, &action);
+    spend_at(program_id, recipient, vault, akey, permit, mandate, action)
+}
+
+/// Where `mandate` would have put its permit for `action`.
+fn permit_key_for(program_id: &Pubkey, mandate: &[u8], action: &[u8; 32]) -> Pubkey {
+    authorization_key(program_id, &mandate_key_of(program_id, mandate), action).0
+}
+
+/// `spend_authorized` with the permit account named explicitly — what an attacker
+/// does when presenting one mandate's permit alongside a different mandate.
+fn spend_at(
+    program_id: &Pubkey,
+    recipient: Pubkey,
+    vault: &mut VaultAcct,
+    akey: Pubkey,
+    permit: &[u8],
+    mandate: &[u8],
+    action: [u8; 32],
+) -> SpendOutcome {
+    spend_with_mandate_at(program_id, recipient, vault, akey, permit, mandate_key_of(program_id, mandate), mandate, action)
+}
+
+/// `spend_authorized` with both the permit's and the mandate's addresses named.
+fn spend_with_mandate_at(
+    program_id: &Pubkey,
+    recipient: Pubkey,
+    vault: &mut VaultAcct,
+    akey: Pubkey,
+    permit: &[u8],
+    mkey: Pubkey,
+    mandate: &[u8],
+    action: [u8; 32],
+) -> SpendOutcome {
     let mut data = ix::SPEND_AUTHORIZED.to_vec();
     data.extend(action);
 
@@ -194,7 +249,7 @@ fn spend(
 
 fn amend(program_id: &Pubkey, signer: Pubkey, mandate: &mut Vec<u8>, limit: u64, revoke: bool) -> Result<(), ProgramError> {
     let holder = Mandate::try_from_bytes(mandate).unwrap().holder;
-    let mkey = mandate_key(program_id, &holder);
+    let mkey = mandate_key_of(program_id, mandate);
     let mut data = ix::AMEND_MANDATE.to_vec();
     data.extend(limit.to_le_bytes());
     data.extend(500_000u64.to_le_bytes());
@@ -444,3 +499,68 @@ fn a_mandate_must_name_a_real_policy_engine() {
     let (r, _) = open_mandate(&pid, k.principal, true, k.holder, &mut vault, Pubkey::default());
     assert_eq!(r.unwrap_err(), ProgramError::InvalidArgument);
 }
+
+// ── the reseed (sprint item 7): one holder, two principals ──────────────────
+
+/// After the mandate reseed, one agent can hold mandates from several principals.
+/// A permit then has to be bound to the MANDATE that issued it, not only to the
+/// holder: otherwise principal A's engine could issue a permit for the shared
+/// holder and spend it against principal B's mandate, draining B's vault — F51's
+/// confused deputy, re-opened by the reseed itself. Found before the redeploy.
+#[test]
+fn a_permit_from_one_principals_mandate_cannot_spend_another_principals_vault_through_a_shared_holder() {
+    let pid = mitra_vault::program_id();
+    let attacker = keys(60);
+    let victim = keys(80);
+    let shared_holder = attacker.holder;
+    let mut attacker_vault = vault_of(&pid, attacker.principal);
+    let mut victim_vault = vault_of(&pid, victim.principal);
+
+    let (r, attacker_mandate) = open_mandate(&pid, attacker.principal, true, shared_holder, &mut attacker_vault, attacker.engine);
+    r.expect("the attacker grants the shared holder a mandate over the attacker's own vault");
+    let (r, victim_mandate) = open_mandate(&pid, victim.principal, true, shared_holder, &mut victim_vault, victim.engine);
+    r.expect("after the reseed a second principal can grant the same holder");
+
+    let action = [9u8; 32];
+    let (r, permit) = authorize(&pid, attacker.engine, &attacker_mandate, action, LIMIT, attacker.payee);
+    r.expect("the attacker's own engine may issue under the attacker's mandate");
+    let permit_key = permit_key_for(&pid, &attacker_mandate, &action);
+
+    let s = spend_at(&pid, attacker.payee, &mut victim_vault, permit_key, &permit, &victim_mandate, action);
+    assert!(s.result.is_err(), "a permit issued under the attacker's mandate must not spend under the victim's");
+    assert_eq!(s.paid, 0, "nothing may leave the victim's vault");
+    assert_eq!(s.vault_available, FUNDED);
+    assert!(!s.permit_consumed, "a refused spend must not burn the permit");
+
+    // The same permit, with the mandate that issued it, still works.
+    let s = spend(&pid, attacker.payee, &mut attacker_vault, &permit, &attacker_mandate, action);
+    s.result.expect("the permit is valid under its own mandate");
+    assert_eq!(s.paid, LIMIT);
+}
+
+/// Defence in depth: a mandate the program did not create at its canonical
+/// (principal, holder) address is refused by `authorize` and `spend_authorized`,
+/// even though program ownership is satisfied. No honest flow produces such an
+/// account today; the check is what keeps a future migration or bug that writes a
+/// mandate elsewhere from becoming a second, unchecked mandate for a holder.
+#[test]
+fn a_program_owned_mandate_at_a_non_canonical_address_is_refused() {
+    let pid = mitra_vault::program_id();
+    let k = keys(150);
+    let mut vault = vault_of(&pid, k.principal);
+    let mandate = bound_mandate(k).to_bytes().to_vec();
+    let elsewhere = Pubkey::new_unique();
+
+    let (r, _) = authorize_at(&pid, k.engine, elsewhere, &mandate, [3u8; 32], 1, k.payee);
+    assert_eq!(r.unwrap_err(), ProgramError::InvalidSeeds);
+
+    // A permit legitimately issued under the canonical mandate, presented with the
+    // same mandate's bytes at a non-canonical address.
+    let (r, permit) = authorize(&pid, k.engine, &mandate, [3u8; 32], 1, k.payee);
+    r.expect("the canonical mandate authorizes");
+    let akey = permit_key_for(&pid, &mandate, &[3u8; 32]);
+    let s = spend_with_mandate_at(&pid, k.payee, &mut vault, akey, &permit, elsewhere, &mandate, [3u8; 32]);
+    assert_eq!(s.result.unwrap_err(), ProgramError::InvalidSeeds);
+    assert_eq!(s.paid, 0);
+}
+

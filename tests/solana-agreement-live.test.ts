@@ -58,7 +58,7 @@ describe.skipIf(!(process.env.SOLANA_LIVE === "1" && existsSync(KEY)))("live: an
       ), [principal]);
     }
     await send(new Transaction().add(depositIx(principal.publicKey, vault, 100_000n)), [principal]);
-    const m = await conn.getAccountInfo(mandatePda(holder)[0]);
+    const m = await conn.getAccountInfo(mandatePda(principal.publicKey, holder)[0]);
     if (!m) {
       await send(new Transaction().add(openMandateIx({
         principal: principal.publicKey, holder, limit: 1_000_000n, ceiling: 10_000_000n,
@@ -72,7 +72,7 @@ describe.skipIf(!(process.env.SOLANA_LIVE === "1" && existsSync(KEY)))("live: an
     const engineFile = join(dir, "engine.json");
     writeFileSync(engineFile, JSON.stringify(Array.from(engine.secretKey)), { mode: 0o600 });
     const rails = await railsFromEnv({
-      SOLANA_RPC_URL: rpc, MITRA_SOLANA_ENGINE_KEY_FILE: engineFile, MITRA_SOLANA_HOLDER: holder.toBase58(), MITRA_SOLANA_VAULT: vault.toBase58(),
+      SOLANA_RPC_URL: rpc, MITRA_SOLANA_ENGINE_KEY_FILE: engineFile, MITRA_SOLANA_PRINCIPAL: principal.publicKey.toBase58(), MITRA_SOLANA_HOLDER: holder.toBase58(), MITRA_SOLANA_VAULT: vault.toBase58(),
     });
     expect(rails.solana, "railsFromEnv builds the Solana rail").toBeDefined();
     __setRailsForTests(rails);

@@ -44,8 +44,9 @@ impl Fx {
         // a fixture that cannot happen on chain is a fixture testing nothing.)
         let program_id = mitra_vault::program_id();
         let holder_key = m.holder;
+        let principal = m.binding.as_ref().expect("fixture mandates are bound").principal;
         let (mandate_key, _) = Pubkey::find_program_address(
-            &[b"mandate", holder_key.as_ref()], &program_id,
+            &[b"mandate", principal.as_ref(), holder_key.as_ref()], &program_id,
         );
         Self {
             program_id,
@@ -306,13 +307,14 @@ impl SpendFx {
         let program_id = mitra_vault::program_id();
         let holder = m.holder;
         let hash = [42u8; 32];
-        let (authz_key, _) = Pubkey::find_program_address(
-            &[b"authorization", holder.as_ref(), hash.as_ref()], &program_id,
-        );
-        let (mandate_key, _) = Pubkey::find_program_address(&[b"mandate", holder.as_ref()], &program_id);
         // The PRINCIPAL's vault. This fixture used the holder's, which only
         // worked because spend never asked whose vault it was debiting (F51).
         let principal = m.binding.expect("fixture mandates are bound").principal;
+        let (mandate_key, _) = Pubkey::find_program_address(&[b"mandate", principal.as_ref(), holder.as_ref()], &program_id);
+        // Keyed by the issuing mandate, not the holder (sprint item 7).
+        let (authz_key, _) = Pubkey::find_program_address(
+            &[b"authorization", mandate_key.as_ref(), hash.as_ref()], &program_id,
+        );
         let (vault_key, vault_bump) = Pubkey::find_program_address(&[b"vault", principal.as_ref()], &program_id);
 
         let mut v = Vault::new(principal, vault_bump);

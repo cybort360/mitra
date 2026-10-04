@@ -26,8 +26,9 @@ const agent = der("agent").publicKey, engine = der("engine").publicKey, recipien
 const sha = (b) => createHash("sha256").update(b).digest();
 const ah = sha(Buffer.from(`phase3-action-${run}`));
 
-const [mandate] = PublicKey.findProgramAddressSync([Buffer.from("mandate"), Buffer.from(agent.toBytes())], PID);
-const [authz] = PublicKey.findProgramAddressSync([Buffer.from("authorization"), Buffer.from(agent.toBytes()), ah], PID);
+// Reseeded (sprint item 7): mandate by (principal, holder), permit by (mandate, action).
+const [mandate] = PublicKey.findProgramAddressSync([Buffer.from("mandate"), a.publicKey.toBuffer(), Buffer.from(agent.toBytes())], PID);
+const [authz] = PublicKey.findProgramAddressSync([Buffer.from("authorization"), mandate.toBuffer(), ah], PID);
 
 let bad = 0;
 const check = (n, c2, d = "") => { console.log(`  ${c2 ? "PASS" : "FAIL"}  ${n}${d ? `  ${d}` : ""}`); if (!c2) bad++; };

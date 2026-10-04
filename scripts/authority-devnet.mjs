@@ -101,7 +101,10 @@ const findPda = (seeds) => {
   return { pda, bump };
 };
 
-const mandate = findPda([Buffer.from("mandate"), Buffer.from(agent.toBytes())]);
+// Reseeded (sprint item 7): [b"mandate", principal, holder]. Matches the program on
+// feat/solana-reseed-on-v2 — run this harness against the program only AFTER
+// that version is deployed; against the earlier deployment these addresses are wrong.
+const mandate = findPda([Buffer.from("mandate"), authority.publicKey.toBuffer(), Buffer.from(agent.toBytes())]);
 const vault = findPda([Buffer.from("vault"), authority.publicKey.toBuffer()]);
 
 console.log(`rpc        ${RPC}`);
@@ -237,7 +240,8 @@ const openMandateIx = (limit, ceiling, expiresAt, bump) => new TransactionInstru
 
 /** The action this run will authorize. Distinct per run so reruns don't collide. */
 const actionHash = sha256(Buffer.from(`phase3-action-${process.env.PHASE3_RUN ?? "1"}`));
-const authz = findPda([Buffer.from("authorization"), Buffer.from(agent.toBytes()), actionHash]);
+// Keyed by the issuing mandate, not the holder (sprint item 7).
+const authz = findPda([Buffer.from("authorization"), mandate.pda.toBuffer(), actionHash]);
 
 const authorizeIx = (amount, bump) => new TransactionInstruction({
   programId,

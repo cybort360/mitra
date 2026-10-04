@@ -47,8 +47,6 @@ const PERMIT: u64 = 2_500;
 
 fn fixture() -> Fixture {
     let program_id = Pubkey::new_unique();
-    let mandate = Pubkey::new_unique();
-    let auth = Pubkey::new_unique();
     let recipient = Pubkey::new_unique();
 
     // The vault is the PRINCIPAL's PDA, and the principal is the one recorded on
@@ -68,6 +66,12 @@ fn fixture() -> Fixture {
     // right and the fixture was modelling a cross-mandate replay, which is
     // exactly the confusion it is built to refuse.
     let holder = Pubkey::new_unique();
+    // Canonical addresses, as the program creates them (sprint item 7): the mandate
+    // at [b"mandate", principal, holder], the permit at [b"authorization", mandate,
+    // action]. The fixture used random keys — accounts no honest flow could
+    // produce — which passed only while spend never asked where they lived.
+    let (mandate, _) = Pubkey::find_program_address(&[b"mandate", principal.as_ref(), holder.as_ref()], &program_id);
+    let (auth, _) = Pubkey::find_program_address(&[b"authorization", mandate.as_ref(), [7u8; 32].as_ref()], &program_id);
     let m = Mandate {
         holder,
         limit: 5_000,

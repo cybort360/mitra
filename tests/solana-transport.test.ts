@@ -35,11 +35,11 @@ const holder = seeded(8).publicKey;
 const principal = seeded(9).publicKey;
 const recipient = seeded(10).publicKey;
 const [vault] = vaultPda(principal);
-const [mandateKey] = mandatePda(holder);
+const [mandateKey] = mandatePda(principal, holder);
 const AMOUNT = 3_000n; // lamports; the golden mandate's limit is 5_000
 const COMMIT = `0x${"cd".repeat(32)}`;
 const ACTION = Buffer.from(COMMIT.slice(2), "hex");
-const [permitKey] = authorizationPda(holder, ACTION);
+const [permitKey] = authorizationPda(mandateKey, ACTION);
 const SIG = "5".repeat(88);
 
 /** The golden mandate, re-keyed for this test's holder, principal and engine. */
@@ -87,7 +87,7 @@ const sendInput = { from: vault.toBase58(), to: recipient.toBase58(), amountAtom
 describe("VaultTransport.send — one transaction: authorize, then spend", () => {
   it("signs, as the engine and fee payer, exactly the two instructions the program expects", async () => {
     const c = fakeCluster(withMandate());
-    const r = await new VaultTransport({ rpc: c.rpc, engine, holder }).send(sendInput);
+    const r = await new VaultTransport({ rpc: c.rpc, engine, holder, principal }).send(sendInput);
     expect(r.txHash).toBe(SIG);
 
     const tx = Transaction.from(c.sent[0]);
@@ -96,7 +96,7 @@ describe("VaultTransport.send — one transaction: authorize, then spend", () =>
     expect(tx.instructions).toHaveLength(2);
     // The builders are pinned to the Rust golden bytes (vault-program.test.ts),
     // so equality here means the program would parse what was signed.
-    const auth = authorizeIx({ engine: engine.publicKey, holder, action: ACTION, amount: AMOUNT, recipient });
+    const auth = authorizeIx({ engine: engine.publicKey, principal, holder, action: ACTION, amount: AMOUNT, recipient });
     const spend = spendAuthorizedIx({ principal, holder, action: ACTION, recipient });
     expect(tx.instructions[0].data.equals(auth.data)).toBe(true);
     expect(tx.instructions[1].data.equals(spend.data)).toBe(true);
@@ -120,7 +120,7 @@ describe("VaultTransport.send — one transaction: authorize, then spend", () =>
     }, {}, "SETTLEMENT_ALREADY_AUTHORIZED"],
   ])("refuses %s, and broadcasts nothing", async (_n, world, override, error) => {
     const c = fakeCluster((world as { accounts?: Accounts }).accounts ?? withMandate());
-    await expect(new VaultTransport({ rpc: c.rpc, engine, holder }).send({ ...sendInput, ...override } as typeof sendInput))
+    await expect(new VaultTransport({ rpc: c.rpc, engine, holder, principal }).send({ ...sendInput, ...override } as typeof sendInput))
       .rejects.toThrow(error);
     expect(c.sent).toHaveLength(0);
   });
@@ -131,7 +131,7 @@ describe("VaultTransport.send — one transaction: authorize, then spend", () =>
 /** The transaction `send` really signed, decompiled into what an RPC returns. */
 async function signedView(): Promise<SolanaTxView> {
   const c = fakeCluster(withMandate());
-  await new VaultTransport({ rpc: c.rpc, engine, holder }).send(sendInput);
+  await new VaultTransport({ rpc: c.rpc, engine, holder, principal }).send(sendInput);
   const msg = Transaction.from(c.sent[0]).compileMessage();
   const accountKeys = msg.accountKeys.map((k) => k.toBase58());
   const pre = accountKeys.map((k) => (k === vault.toBase58() ? 1_000_000_000 : k === engine.publicKey.toBase58() ? 50_000_000 : 0));
@@ -157,7 +157,7 @@ const settledWorld = (permit = permitBytes(), mandate = mandateBytes()): Account
 
 async function confirmed(view: SolanaTxView | null, accounts = settledWorld(), h = holder) {
   const c = fakeCluster(accounts, view);
-  return (await new VaultTransport({ rpc: c.rpc, engine, holder: h }).verify(SIG)).confirmed;
+  return (await new VaultTransport({ rpc: c.rpc, engine, holder: h, principal }).verify(SIG)).confirmed;
 }
 
 describe("VaultTransport.verify — the transaction's own record, and the permit consumed", () => {
@@ -215,7 +215,7 @@ describe("VaultTransport.verify — the transaction's own record, and the permit
     const c = fakeCluster(settledWorld(), await signedView());
     let asked = false;
     c.rpc.getTransaction = async () => { asked = true; return null; };
-    expect((await new VaultTransport({ rpc: c.rpc, engine, holder }).verify("0xnot-base58")).confirmed).toBe(false);
+    expect((await new VaultTransport({ rpc: c.rpc, engine, holder, principal }).verify("0xnot-base58")).confirmed).toBe(false);
     expect(asked).toBe(false);
   });
 });
@@ -225,7 +225,7 @@ describe("VaultTransport.verify — the transaction's own record, and the permit
 describe("SolanaSettlementAdapter over VaultTransport", () => {
   it("settles: the commitment is the program's action_hash", async () => {
     const c = fakeCluster(withMandate());
-    const adapter = new SolanaSettlementAdapter({ transport: new VaultTransport({ rpc: c.rpc, engine, holder }) });
+    const adapter = new SolanaSettlementAdapter({ transport: new VaultTransport({ rpc: c.rpc, engine, holder, principal }) });
     const intent = { settlementId: "s1", from: vault.toBase58(), to: recipient.toBase58(), amount: { asset: "SOL" as AssetSymbol, amount: 0.000003 } };
     const commitmentHash = solanaCommitment(intent);
     await adapter.settle({ ...intent, commitmentHash });
@@ -238,9 +238,9 @@ describe("SolanaSettlementAdapter over VaultTransport", () => {
   it("a second settlement with the same commitment is refused before it is sent", async () => {
     const intent = { settlementId: "s1", from: vault.toBase58(), to: recipient.toBase58(), amount: { asset: "SOL" as AssetSymbol, amount: 0.000003 } };
     const commitmentHash = solanaCommitment(intent);
-    const [pk] = authorizationPda(holder, Buffer.from(commitmentHash.slice(2), "hex"));
+    const [pk] = authorizationPda(mandateKey, Buffer.from(commitmentHash.slice(2), "hex"));
     const c = fakeCluster(new Map([...withMandate(), [pk.toBase58(), { data: permitBytes(), owner: VAULT_PROGRAM_ID }]]));
-    const adapter = new SolanaSettlementAdapter({ transport: new VaultTransport({ rpc: c.rpc, engine, holder }) });
+    const adapter = new SolanaSettlementAdapter({ transport: new VaultTransport({ rpc: c.rpc, engine, holder, principal }) });
     await expect(adapter.settle({ ...intent, commitmentHash })).rejects.toThrow("SETTLEMENT_ALREADY_AUTHORIZED");
     expect(c.sent).toHaveLength(0);
   });
@@ -306,7 +306,7 @@ describe.skipIf(!live)("live Solana devnet (SOLANA_LIVE=1)", () => {
       SystemProgram.transfer({ fromPubkey: principalKp.publicKey, toPubkey: payee, lamports: 1_000_000 }),
     ), [principalKp]);
 
-    const mAcct = await conn.getAccountInfo(mandatePda(liveHolder)[0]);
+    const mAcct = await conn.getAccountInfo(mandatePda(principalKp.publicKey, liveHolder)[0]);
     if (!mAcct) {
       await send(new Transaction().add(openMandateIx({
         principal: principalKp.publicKey, holder: liveHolder, limit: 1_000_000n, ceiling: 10_000_000n,
@@ -316,7 +316,7 @@ describe.skipIf(!live)("live Solana devnet (SOLANA_LIVE=1)", () => {
       expect(decodeMandate(Buffer.from(mAcct.data)).binding, "mandate must be bound (F51 layout)").not.toBeNull();
     }
 
-    const adapter = new SolanaSettlementAdapter({ transport: new VaultTransport({ rpc: connectionRpc(conn), engine: liveEngine, holder: liveHolder }) });
+    const adapter = new SolanaSettlementAdapter({ transport: new VaultTransport({ rpc: connectionRpc(conn), engine: liveEngine, holder: liveHolder, principal: principalKp.publicKey }) });
     const intent = { settlementId: `live-${Date.now()}`, from: liveVault.toBase58(), to: payee.toBase58(), amount: { asset: "SOL" as AssetSymbol, amount: 0.000003 } };
     const { txHash } = await adapter.settle({ ...intent, commitmentHash: solanaCommitment(intent) });
 
@@ -358,7 +358,7 @@ describe.skipIf(!live)("live Solana devnet (SOLANA_LIVE=1)", () => {
     // The principal: funded and real, but NOT the engine its own mandate names.
     const stranger = principalKp;
     const tx = new Transaction().add(authorizeIx({
-      engine: stranger.publicKey, holder: liveHolder, action: new Uint8Array(32).fill(0x5a), amount: 3_000n, recipient: stranger.publicKey,
+      engine: stranger.publicKey, principal: principalKp.publicKey, holder: liveHolder, action: new Uint8Array(32).fill(0x5a), amount: 3_000n, recipient: stranger.publicKey,
     }));
     tx.feePayer = stranger.publicKey;
     tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;

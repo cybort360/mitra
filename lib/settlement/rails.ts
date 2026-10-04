@@ -30,7 +30,7 @@
  * (`lib/evm/deployments.json`, the chain's non-`__` entry): the key is principal, mandate engine and relayer on
  * testnet; `MITRA_EVM_VAULT_HOLDER` names the agent holding the mandate. The payer is
  * the principal whose vault position pays.
- * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
+ * | solana | `SOLANA_RPC_URL`, `MITRA_SOLANA_ENGINE_KEY_FILE`, `MITRA_SOLANA_PRINCIPAL`, `MITRA_SOLANA_HOLDER`, `MITRA_SOLANA_VAULT` |
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -135,7 +135,7 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
     };
   }
 
-  if (env.SOLANA_RPC_URL && env.MITRA_SOLANA_ENGINE_KEY_FILE && env.MITRA_SOLANA_HOLDER && env.MITRA_SOLANA_VAULT) {
+  if (env.SOLANA_RPC_URL && env.MITRA_SOLANA_ENGINE_KEY_FILE && env.MITRA_SOLANA_PRINCIPAL && env.MITRA_SOLANA_HOLDER && env.MITRA_SOLANA_VAULT) {
     const engine = Keypair.fromSecretKey(
       Uint8Array.from(JSON.parse(readFileSync(env.MITRA_SOLANA_ENGINE_KEY_FILE, "utf8")) as number[]),
     );
@@ -145,6 +145,7 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
         transport: new VaultTransport({
           rpc: connectionRpc(new Connection(env.SOLANA_RPC_URL, "confirmed")),
           engine,
+          principal: new PublicKey(env.MITRA_SOLANA_PRINCIPAL),
           holder: new PublicKey(env.MITRA_SOLANA_HOLDER),
         }),
       }),
