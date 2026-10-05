@@ -1,6 +1,6 @@
 {
   "fromNodeId": "lead",
-  "highSeq": 85,
+  "highSeq": 86,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1729,6 +1729,22 @@
         "6b78c295d44a8adbaebf3c277859501d8c799a232c30406eda8c0b509aa05b3d"
       ],
       "hash": "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
+    },
+    {
+      "entryId": "ctx_1115d8061a809d55",
+      "seq": 86,
+      "kind": "decision",
+      "title": "PK1 Commerce Substrate & PK2 Arcium Harness Shipped (f83e63c)",
+      "body": "Commit f83e63c landed and verified:\n1. PK1 (Phase 4 Commerce Substrate):\n   - Added createSpace to Repository interface and both Postgres (upsert on space_id) and in-memory backends.\n   - Implemented POST /api/v1/spaces (validates governance, closed-union assets, and budget headroom) and GET /api/v1/spaces/[id].\n   - Added lib/adapters/erc8183.ts with reachability-preserving mapping and lossy projection flags.\n   - Added tests/commerce-lifecycle.test.ts (17/17) covering accept->release, reject->refund, Space containment guards, and ERC-8183 round-tripping.\n2. PK2 (Arcium Circuit Harness):\n   - Added tests/arcium-circuit.test.ts (14/14) mirroring Arcis circuit branchless logic.\n   - Pinned both F43 defects and verified reachability of all 7 reason codes.\n3. Gates: forge test 36/36, npm test 53 files (835 pass, 0 fail), typecheck 0 errors.",
+      "status": "active",
+      "scope": "commerce",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-05T11:58:00.323Z",
+      "parents": [
+        "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
+      ],
+      "hash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
     }
   ],
   "actors": [
@@ -1766,5 +1782,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
+  "tipHash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
 }
