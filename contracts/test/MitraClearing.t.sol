@@ -4,10 +4,12 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {MitraClearing} from "../MitraClearing.sol";
 
+/// The lead's original suite, on the PRD §14.4 lifecycle (F62): open → record →
+/// freeze → propose → finalize. Assertions unchanged: operator gating, the
+/// challenge window, and single finalization (F47).
 contract MitraClearingTest is Test {
     MitraClearing clearing;
     address operator = address(0xAA);
-    address challenger = address(0xBB);
     address stranger = address(0xCC);
     address alice = address(0x11);
     address bob = address(0x22);
@@ -22,35 +24,33 @@ contract MitraClearingTest is Test {
         assertEq(clearing.operator(), operator);
     }
 
-    function test_stranger_cannot_open_or_commit_epoch() public {
+    function test_stranger_cannot_open_or_freeze_epoch() public {
         vm.prank(stranger);
         vm.expectRevert(MitraClearing.NotOperator.selector);
-        clearing.openEpoch(epochId);
+        clearing.openEpoch(epochId, 3600);
 
+        vm.prank(operator);
+        clearing.openEpoch(epochId, 3600);
         vm.prank(stranger);
         vm.expectRevert(MitraClearing.NotOperator.selector);
-        clearing.commitEpoch(epochId, 3600, keccak256("inputs"));
+        clearing.freezeEpoch(epochId);
     }
 
     function test_happy_path_clearing_lifecycle() public {
-        vm.prank(operator);
-        clearing.commitEpoch(epochId, 3600, keccak256("inputs"));
-
-        vm.prank(operator);
+        vm.startPrank(operator);
+        clearing.openEpoch(epochId, 3600);
         clearing.recordObligation(epochId, alice, bob, 100e6);
-
+        clearing.freezeEpoch(epochId);
         MitraClearing.TransferInstruction[] memory net = new MitraClearing.TransferInstruction[](1);
         net[0] = MitraClearing.TransferInstruction({from: alice, to: bob, amount: 100e6});
-
-        vm.prank(operator);
-        clearing.recordSettlement(epochId, net, keccak256("results"));
+        clearing.proposeResult(epochId, net, keccak256("results"));
+        vm.stopPrank();
 
         // Finalize before challenge window expires should fail
         vm.prank(stranger);
         vm.expectRevert(MitraClearing.ChallengeWindowOpen.selector);
         clearing.finalizeEpoch(epochId);
 
-        // Warp past challenge window
         vm.warp(block.timestamp + 3601);
 
         // Anyone can finalize
@@ -64,13 +64,19 @@ contract MitraClearingTest is Test {
         clearing.finalizeEpoch(epochId);
     }
 
-    function test_permissionless_challenge_within_window() public {
-        vm.prank(operator);
-        clearing.commitEpoch(epochId, 3600, keccak256("inputs"));
+    function test_a_party_may_challenge_within_window() public {
+        vm.startPrank(operator);
+        clearing.openEpoch(epochId, 3600);
+        clearing.recordObligation(epochId, alice, bob, 100e6);
+        clearing.freezeEpoch(epochId);
+        MitraClearing.TransferInstruction[] memory net = new MitraClearing.TransferInstruction[](1);
+        net[0] = MitraClearing.TransferInstruction({from: alice, to: bob, amount: 100e6});
+        clearing.proposeResult(epochId, net, keccak256("results"));
+        vm.stopPrank();
 
         bytes32 reason = keccak256("bogus-netting");
-        vm.prank(challenger);
-        clearing.challengeEpoch(epochId, reason);
+        vm.prank(alice);
+        clearing.challengeObligation(epochId, 0, reason);
 
         (MitraClearing.EpochStatus status,,,,,,,) = clearing.epochs(epochId);
         assertEq(uint8(status), uint8(MitraClearing.EpochStatus.Challenged));

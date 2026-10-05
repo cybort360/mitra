@@ -19,13 +19,20 @@ import { baseSepolia } from "viem/chains";
 const OUT = "lib/evm/deployments.json";
 const ART = "out/MitraClearing.sol/MitraClearing.json";
 
+/** Bump when the contract changes in a way that makes earlier deployments unsafe to reuse. */
+const REVISION = "F62";
+const SUPERSEDED_REASON =
+  "F62: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, " +
+  "a late result swap finalized without a fresh window; see forge/FAILURES.md";
+const REDEPLOY = process.argv.includes("--redeploy");
+
 const CHAINS = {
   baseSepolia: { id: 84532, name: "baseSepolia", rpc: process.env.BASE_SEPOLIA_RPC ?? "https://sepolia.base.org" },
   moderato:    { id: 42431, name: "moderato",    rpc: process.env.TEMPO_RPC ?? "https://rpc.moderato.tempo.xyz" },
 };
 
 async function main() {
-  const only = process.argv[2];
+  const only = process.argv.slice(2).find((a) => !a.startsWith("--"));
   const artifact = JSON.parse(readFileSync(ART, "utf8"));
   const bytecode = artifact.bytecode.object;
   if (!bytecode || bytecode === "0x") throw new Error(`no bytecode in ${ART} — run forge build first`);
@@ -45,6 +52,16 @@ async function main() {
     let addr;
     let hash;
     let blockNumber;
+
+    // F62: an entry deployed before the fix (no `revision`) is not reused. It is
+    // kept, labelled, under `clearingSuperseded`, and a fresh instance is deployed.
+    const prior = db.clearing?.[name];
+    if (prior?.address && (REDEPLOY || prior.revision !== REVISION)) {
+      db.clearingSuperseded ??= [];
+      db.clearingSuperseded.push({ network: name, ...prior, supersededAt: new Date().toISOString(), reason: SUPERSEDED_REASON });
+      delete db.clearing[name];
+      console.log(`\n${name}: superseding ${prior.address} (${prior.revision ?? "pre-F62"})`);
+    }
 
     if (db.clearing?.[name]?.address) {
       addr = db.clearing[name].address;
@@ -94,12 +111,21 @@ async function main() {
     }
     console.log(`  verified  operator() == deployer (${onChain})`);
 
+    // The code at the address must be the code we compiled, not just a contract
+    // that answers operator().
+    const code = await pub.getCode({ address: addr });
+    const runtimeCodeMatchesArtifact = code?.toLowerCase() === artifact.deployedBytecode.object.toLowerCase();
+    if (!runtimeCodeMatchesArtifact) throw new Error(`${name}: runtime code at ${addr} does not match ${ART}`);
+    console.log(`  verified  runtime code == ${ART} (${(code.length - 2) / 2} bytes)`);
+
     db.clearing[name] = {
       address: addr,
       chainId: cfg.id,
       operator: account.address,
       deployTx: hash,
       deployBlock: blockNumber,
+      revision: REVISION,
+      runtimeCodeMatchesArtifact,
     };
   }
 
