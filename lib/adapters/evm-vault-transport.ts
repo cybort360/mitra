@@ -46,7 +46,7 @@ import type { TempoTransport } from "./tempo";
 
 /** The canonical v2 contract's surface this transport uses (`contracts/MitraVault.sol`). */
 export const MITRA_VAULT_ABI = parseAbi([
-  "function mandates(address principal, address holder) view returns (address principal, address holder, uint64 limit, uint64 ceiling, uint64 spent, uint64 expiresAt, uint32 version, address policyEngine, bool revoked)",
+  "function mandates(address principal, address holder, address token) view returns (address principal, address holder, uint64 limit, uint64 ceiling, uint64 spent, uint64 expiresAt, uint32 version, address policyEngine, bool revoked)",
   "function spendAuthorized((address principal, address holder, address token, bytes32 actionHash, uint256 amount, address recipient, uint32 mandateVersion, uint64 deadline) permit, bytes signature)",
   "event SpendExecuted(address indexed principal, address indexed recipient, address indexed token, uint256 amount, bytes32 actionHash)",
   "event Transfer(address indexed from, address indexed to, uint256 value)",
@@ -112,10 +112,12 @@ export class MitraVaultTransport {
     const reported = await this.publicClient.getChainId();
     if (reported !== this.opts.chain.id) throw new Error(`CHAIN_MISMATCH: expected ${this.opts.chain.id}, node reports ${reported}`);
 
-    // The mandate as the chain holds it. Refusing here, before signing, is friendlier
-    // than a revert — the contract re-checks every one of these regardless.
+    // The mandate as the chain holds it, for THIS token (F61: mandates are keyed
+    // [principal][holder][token], so a limit is in this token's units only).
+    // Refusing here, before signing, is friendlier than a revert — the contract
+    // re-checks every one of these regardless.
     const [mPrincipal, , limit, ceiling, spent, expiresAt, version, engine, revoked] = await this.publicClient.readContract({
-      address: this.opts.vault, abi: MITRA_VAULT_ABI, functionName: "mandates", args: [this.opts.principal, this.opts.holder],
+      address: this.opts.vault, abi: MITRA_VAULT_ABI, functionName: "mandates", args: [this.opts.principal, this.opts.holder, input.token as Hex],
     });
     const amount = BigInt(input.amountAtomic);
     const now = Math.floor((this.opts.now ?? Date.now)() / 1000);

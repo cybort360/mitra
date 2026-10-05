@@ -1,17 +1,23 @@
 {
   "baseSepolia": {
     "chainId": 84532,
-    "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
-    "deployTx": "0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445",
-    "deployBlock": 47687892,
-    "deployedAt": "2026-10-04T20:01:10.395Z"
+    "address": "0x92dcee6acbfcf50f32a3e9c689d7f2ceef9ee489",
+    "deployTx": "0xb8a7562fca984d2aaba30b2c6dc6370e1b33625b3cf84489f2dfa8284e7982bd",
+    "deployBlock": 47729699,
+    "deployedAt": "2026-10-05T19:15:15.409Z",
+    "deployer": "0x7823d6bea51cc21c5d8588c7ff72e33130848116",
+    "revision": "F61",
+    "runtimeCodeMatchesArtifact": true
   },
   "moderato": {
     "chainId": 42431,
-    "address": "0x81798c6f4ff1257b53b0be512c979f2656269329",
-    "deployTx": "0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77",
-    "deployBlock": 38179538,
-    "deployedAt": "2026-10-04T20:01:30.023Z"
+    "address": "0x85409dfc30fa0671b06f98cc56c5b04eb921b568",
+    "deployTx": "0xe3e3cbe7e14ad2e8eb4e2b2ef719813539dca70f7c5455e4e094e58aa4a22684",
+    "deployBlock": 38318925,
+    "deployedAt": "2026-10-05T19:15:20.676Z",
+    "deployer": "0x7823d6bEA51cC21C5d8588C7ff72E33130848116",
+    "revision": "F61",
+    "runtimeCodeMatchesArtifact": true
   },
   "clearing": {
     "baseSepolia": {
@@ -77,6 +83,28 @@
       "deployBlock": 38180738,
       "supersededAt": "2026-10-05T18:46:35.614Z",
       "reason": "F62: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, a late result swap finalized without a fresh window; see forge/FAILURES.md"
+    }
+  ],
+  "vaultSuperseded": [
+    {
+      "network": "baseSepolia",
+      "chainId": 84532,
+      "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+      "deployTx": "0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445",
+      "deployBlock": 47687892,
+      "deployedAt": "2026-10-04T20:01:10.395Z",
+      "supersededAt": "2026-10-05T19:15:15.409Z",
+      "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md"
+    },
+    {
+      "network": "moderato",
+      "chainId": 42431,
+      "address": "0x81798c6f4ff1257b53b0be512c979f2656269329",
+      "deployTx": "0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77",
+      "deployBlock": 38179538,
+      "deployedAt": "2026-10-04T20:01:30.023Z",
+      "supersededAt": "2026-10-05T19:15:17.387Z",
+      "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md"
     }
   ]
 }

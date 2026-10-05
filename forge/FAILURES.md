@@ -2808,3 +2808,33 @@ decision.
 
 **Not changed:** the operator is still one EOA. Conservation and party challenges bound
 what it can propose; they do not decentralise it (spec 55.3).
+
+## F63 — the "F61" MitraVault deployments ran pre-F61 bytecode
+
+**Status:** fixed (purple, 2026-10-05; decision `ctx_0c8226e672997299`). F61 vaults redeployed with
+the code verified on-chain; the vault rail re-proven live on both chains.
+**Found:** 2026-10-05, preparing the Phase 7 live run on the vault rail.
+
+`lib/evm/deployments.json`'s canonical vaults after `bfbe8a6` — Base Sepolia
+`0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b`, Tempo Moderato
+`0x81798c6f4ff1257b53b0be512c979f2656269329` — were recorded as the F61 deployment. On-chain
+both runtimes are 8701 bytes (the previous v2's size), against 8816 for the F61 source; they
+carry `mandates(address,address)` and the five-argument `openMandate`, and lack the token-keyed
+forms (an `eth_call` to the 3-key getter reverts). The ledger's F61 "CURRENT figures" were
+therefore true of the source and not of the chain: F61 was open live. The escrow sagas that
+re-verified those deployments use `lockEscrow`/`refundEscrow`, which both versions share, so
+they could not tell.
+
+Separately, the TS vault transport still read the 2-key `mandates` — matching the stale
+deployment, so the rail worked, and would have broken against a real F61 vault.
+
+**Fix:** a test-first change to `lib/adapters/evm-vault-transport.ts` (it reads
+`mandates(principal, holder, token)` for the token it pays); the live provisioning in
+`tests/evm-vault-transport.test.ts` uses the token-keyed `openMandate`/`amendMandate`;
+`scripts/deploy-evm-vault.mjs` keeps the stale entries under `vaultSuperseded` and refuses
+unless the runtime code equals the artifact with immutables masked and the F61 selector is
+present. New vaults: Base `0x92dcee6acbfcf50f32a3e9c689d7f2ceef9ee489`, Tempo
+`0x85409dfc30fa0671b06f98cc56c5b04eb921b568`.
+
+**RULE ADDED:** (18) a deployment is not evidence until the code at the address is shown
+to be the code in the repository. Record the runtime-code check with the address.

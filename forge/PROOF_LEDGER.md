@@ -343,7 +343,9 @@ A deliberately rejected agreement triggers automated compensation: pre-committed
   node scripts/showcase-live-saga.mjs baseSepolia   # 100% PASS
   node scripts/showcase-live-saga.mjs moderato      # 100% PASS (verified PathUSD 0x20c0...0000)
   ```
-- **v2 CONTRACT (with F61 token-scoped mandates) — CURRENT figures**
+- **v2 CONTRACT, F61 token-scoped mandates — CURRENT figures (purple, 2026-10-05, F63).** `node scripts/deploy-evm-vault.mjs` now refuses unless the runtime code equals `out/MitraVault.sol/MitraVault.json` (immutables masked) and carries `mandates(address,address,address)`. Base Sepolia vault `0x92dcee6acbfcf50f32a3e9c689d7f2ceef9ee489` (tx `0xb8a7562fca984d2aaba30b2c6dc6370e1b33625b3cf84489f2dfa8284e7982bd`, block 47729699); Tempo Moderato vault `0x85409dfc30fa0671b06f98cc56c5b04eb921b568` (tx `0xe3e3cbe7e14ad2e8eb4e2b2ef719813539dca70f7c5455e4e094e58aa4a22684`, block 38318925); both 8816 bytes. Vault rail re-proven live through `spendAuthorized` with token-keyed mandates (`BASE_VAULT_LIVE=1` / `TEMPO_VAULT_LIVE=1 npx vitest run tests/evm-vault-transport.test.ts -t live`): Base `0x31822a95e6eb13c68091674ab079f6c7aa8a8b386a4dc58c9cb5353ebbe138ac`, Tempo `0x1ef139d4f19675c206a72b623536fb6cd01f7175b9d4c1d8466b51fc63bea9e1`, both CONFIRMED, evidence `TESTNET_PASS`.
+- **CORRECTED (F63) — the entry below was recorded as the F61 deployment but its bytecode is pre-F61**: 8701 bytes on both chains, 2-key `mandates`, no token-keyed getter. Its lockEscrow/refundEscrow hashes are real transactions on the pre-F61 code. Retained for provenance.
+- ~~v2 CONTRACT (with F61 token-scoped mandates) — CURRENT figures~~
   (keying mandates by `[principal][holder][token]`, deployed fresh on both chains;
   see superseded runs below for provenance).
   - Base Sepolia, vault `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b`

@@ -69,7 +69,7 @@ describe("observeVaultSpend — what counts as a payment through the v2 vault", 
   const refused: Array<[string, Parameters<typeof spend>[0]]> = [
     ["the transaction reverted", { status: "reverted" }],
     ["the transaction did not call the vault", { to: TO }],
-    ["the calldata is not spendAuthorized", { input: encodeFunctionData({ abi: MITRA_VAULT_ABI, functionName: "mandates", args: [PRINCIPAL, HOLDER] }) }],
+    ["the calldata is not spendAuthorized", { input: encodeFunctionData({ abi: MITRA_VAULT_ABI, functionName: "mandates", args: [PRINCIPAL, HOLDER, USDC] }) }],
     ["the calldata is garbage", { input: "0xdeadbeef" }],
     ["the spend was another principal's", { principal: TO }],
     ["the calldata names another principal, whatever the event says", { principal: TO, eventPrincipal: PRINCIPAL }],
@@ -160,6 +160,15 @@ describe("MitraVaultTransport.pay — refuses before signing, pays exactly what 
     expect((await make(n).pay(ask)).txHash).toBe(TX);
   });
 
+  it("reads the mandate for the token it pays (F61): a USDC ceiling is not a ceiling on any other token", async () => {
+    const n = node(live());
+    await make(n).pay(ask);
+    const call = n.calls.find((c) => c.method === "eth_call")!;
+    const { functionName, args } = decodeFunctionData({ abi: MITRA_VAULT_ABI, data: (call.params[0] as { data?: Hex; input?: Hex }).data ?? (call.params[0] as { input: Hex }).input });
+    expect(functionName).toBe("mandates");
+    expect((args as unknown as Hex[]).map((a) => a.toLowerCase())).toEqual([key.address.toLowerCase(), HOLDER, USDC]);
+  });
+
   it("refuses a node on another chain", async () => {
     const n = node(live(), 8453);
     await expect(make(n).pay(ask)).rejects.toThrow("CHAIN_MISMATCH");
@@ -217,8 +226,8 @@ const KEY = ".dev-keys/evm-testnet.key";
 const VAULT_ADMIN_ABI = parseAbi([
   "function vaults(address principal, address token) view returns (uint256 total, uint256 available, uint256 reserved, uint256 escrowed, uint256 encumbered, uint256 settling, uint256 frozen, bool emergencyFreeze)",
   "function deposit(address token, uint256 amount)",
-  "function openMandate(address holder, uint64 limit, uint64 ceiling, uint64 expiresAt, address policyEngine)",
-  "function amendMandate(address holder, uint64 newLimit, uint64 newCeiling, uint64 newExpiresAt)",
+  "function openMandate(address holder, address token, uint64 limit, uint64 ceiling, uint64 expiresAt, address policyEngine)",
+  "function amendMandate(address holder, address token, uint64 newLimit, uint64 newCeiling, uint64 newExpiresAt)",
 ]);
 /** The canonical (v2) deployment for a chain: never a `__callerVariant` entry. */
 const canonical = (deployments: Record<string, { chainId?: number; address?: string }>, chainId: number) =>
@@ -261,15 +270,15 @@ for (const rail of LIVE_RAILS) {
 
       // One-time, conditional provisioning: a mandate for `holder` with headroom, and capital in the position.
       // v2 opens a (principal, holder) mandate once; after that it is amended, never reopened.
-      const [mPrincipal, , , ceiling, spent, expiresAt, , engine, revoked] = await client.readContract({ address: vaultAddr, abi: MITRA_VAULT_ABI, functionName: "mandates", args: [me.address, holder] });
+      const [mPrincipal, , , ceiling, spent, expiresAt, , engine, revoked] = await client.readContract({ address: vaultAddr, abi: MITRA_VAULT_ABI, functionName: "mandates", args: [me.address, holder, rail.token as Hex] });
       const until = BigInt(Math.floor(Date.now() / 1000) + 30 * 86_400);
       if (mPrincipal === "0x0000000000000000000000000000000000000000") {
-        await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "openMandate", args: [holder, 100_000n, 1_000_000n, until, me.address] });
+        await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "openMandate", args: [holder, rail.token as Hex, 100_000n, 1_000_000n, until, me.address] });
       } else {
         expect(revoked, "the test holder's mandate was revoked; derive a new holder").toBe(false);
         expect(engine.toLowerCase()).toBe(me.address.toLowerCase());
         if (expiresAt <= BigInt(Math.floor(Date.now() / 1000) + 600) || spent + 10_000n > ceiling) {
-          await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "amendMandate", args: [holder, 100_000n, spent + 1_000_000n, until] });
+          await write({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "amendMandate", args: [holder, rail.token as Hex, 100_000n, spent + 1_000_000n, until] });
         }
       }
       const [, available] = await client.readContract({ address: vaultAddr, abi: VAULT_ADMIN_ABI, functionName: "vaults", args: [me.address, rail.token as Hex] });
