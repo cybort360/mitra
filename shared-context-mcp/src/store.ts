@@ -3,8 +3,38 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { GENESIS, canonical, hashEntry, sha256 } from "./hash.js";
 import type {
-  Actor, AuditResult, Entry, MergeReport, NewEntry, SyncBundle,
+  Actor, AuditResult, Entry, EntryStatus, MergeReport, NewEntry, SyncBundle,
 } from "./types.js";
+
+const WRITTEN_STATUSES: EntryStatus[] = ["active", "resolved", "archived", "superseded"];
+
+/** Why an entry's stored content fails its own id or hash, or null if it holds. */
+function integrityFailure(entry: Entry): string | null {
+  const { entryId, hash, seq: _localSeq, ...rest } = entry;
+  if (entryId !== `ctx_${sha256(canonical(rest)).slice(0, 16)}`) {
+    return "ENTRY_ID_MISMATCH: content was altered after the id was issued";
+  }
+  if (hashEntry({ ...rest, entryId }) !== hash) {
+    return "CONTENT_HASH_MISMATCH: entry content was altered after it was written";
+  }
+  return null;
+}
+
+/**
+ * The status an entry's id commits to. Older nodes published the read-time
+ * "superseded" instead of the status an entry was written with, and those
+ * bundles are still on disk; for them, recover the written status the id and
+ * hash prove. Anything that verifies under no status is refused.
+ */
+function committedStatus(entry: Entry): EntryStatus {
+  const failure = integrityFailure(entry);
+  if (!failure) return entry.status;
+  if (entry.status === "superseded") {
+    const written = WRITTEN_STATUSES.find((status) => !integrityFailure({ ...entry, status }));
+    if (written) return written;
+  }
+  throw new Error(`${failure} (${entry.entryId})`);
+}
 
 export interface StoreOptions {
   /** Path to the sqlite file, or ":memory:". */
@@ -25,6 +55,23 @@ export class ContextStore {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.migrate();
+    this.restoreWrittenStatus();
+  }
+
+  /**
+   * Undo what older merges stored: the read-time "superseded" in place of the
+   * status an entry was written with. The id and hash prove the written value,
+   * so this restores content rather than rewriting it. A row that verifies
+   * under no status is left alone for the audit to report.
+   */
+  private restoreWrittenStatus(): void {
+    const rows = this.db.prepare("SELECT * FROM entries WHERE status = 'superseded'").all() as Record<string, unknown>[];
+    for (const row of rows) {
+      const entry = this.rowToEntry(row);
+      if (!integrityFailure(entry)) continue;
+      const written = WRITTEN_STATUSES.find((status) => !integrityFailure({ ...entry, status }));
+      if (written) this.db.prepare("UPDATE entries SET status = ? WHERE entry_id = ?").run(written, entry.entryId);
+    }
   }
 
   private migrate(): void {
@@ -236,19 +283,16 @@ export class ContextStore {
       // The entryId is content-addressed and was handed to peers, so it is an
       // independent commitment. Without this a forger could rewrite an entry,
       // recompute its hash, and leave the log internally consistent.
-      const { entryId, hash, seq: _localSeq, ...rest } = entry;
-      if (entryId !== `ctx_${sha256(canonical(rest)).slice(0, 16)}`) {
-        return { ok: false, checked: expectedSeq - 1, brokenAtSeq: entry.seq, brokenReason: "ENTRY_ID_MISMATCH: content was altered after the id was issued", tipHash };
-      }
-      if (hashEntry({ ...rest, entryId }) !== hash) {
-        return { ok: false, checked: expectedSeq - 1, brokenAtSeq: entry.seq, brokenReason: "CONTENT_HASH_MISMATCH: entry content was altered after it was written", tipHash };
+      const failure = integrityFailure(entry);
+      if (failure) {
+        return { ok: false, checked: expectedSeq - 1, brokenAtSeq: entry.seq, brokenReason: failure, tipHash };
       }
       for (const parent of entry.parents) {
         if (!known.has(parent)) {
           return { ok: false, checked: expectedSeq - 1, brokenAtSeq: entry.seq, brokenReason: `DANGLING_PARENT: ${entry.entryId} references history this log does not contain`, tipHash };
         }
       }
-      tipHash = hash;
+      tipHash = entry.hash;
       expectedSeq += 1;
     }
     return { ok: true, checked: rows.length, tipHash };
@@ -257,13 +301,18 @@ export class ContextStore {
 
   // ------------------------------------------------------------------- sync
 
-  /** Bundle everything after `sinceSeq` (0 = entire history). */
+  /**
+   * Bundle everything after `sinceSeq` (0 = entire history). Entries go out with
+   * the status they were written with, which is what their id commits to; the
+   * read-time "superseded" is re-derived by each receiver.
+   */
   exportBundle(sinceSeq = 0): SyncBundle {
     const tip = this.tip();
+    const rows = this.db.prepare("SELECT * FROM entries WHERE seq > ? ORDER BY seq ASC").all(sinceSeq) as Record<string, unknown>[];
     return {
       fromNodeId: this.nodeId,
       highSeq: tip?.seq ?? 0,
-      entries: this.since(sinceSeq),
+      entries: rows.map((r) => this.rowToEntry(r)),
       actors: this.listActors(),
       tipHash: tip?.hash ?? GENESIS,
     };
@@ -309,6 +358,10 @@ export class ContextStore {
         // unknown parents count as orphaned.
         if (incoming.parents.some((p) => !knownHashes.has(p))) report.orphaned += 1;
 
+        // Throws for content its own id or hash does not prove, which rolls
+        // back the whole bundle: a peer cannot plant an entry the audit rejects.
+        const status = committedStatus(incoming);
+
         // `seq` is local: assign the next local value rather than copying the
         // peer's, which would collide with our own autoincrement.
         this.db.prepare(
@@ -318,7 +371,7 @@ export class ContextStore {
         ).run(
           (this.tip()?.seq ?? 0) + 1,
           incoming.entryId, incoming.kind, incoming.title, incoming.body,
-          incoming.status, incoming.scope, JSON.stringify(incoming.tags), incoming.authorId,
+          status, incoming.scope, JSON.stringify(incoming.tags), incoming.authorId,
           incoming.createdAt, JSON.stringify(incoming.parents), incoming.hash, incoming.supersedesId ?? null,
           incoming.data ? JSON.stringify(incoming.data) : null,
         );

@@ -134,6 +134,26 @@ describe("auto-sync", () => {
     expect(log.mock.calls.filter((c) => String(c[0]).includes("unreadable"))).toHaveLength(1);
   });
 
+  it("refuses a forged peer bundle without blocking the peers after it", () => {
+    const dir = sharedDir();
+    const forger = mkStore("node0");
+    forger.append(note("real"));
+    const forged = forger.exportBundle();
+    forged.entries[0] = { ...forged.entries[0], body: "forged" };
+    // "node0" sorts before "nodeA", so the forged bundle is read first.
+    writeFileSync(join(dir, "ctxbundle-node0.json"), JSON.stringify(forged), "utf8");
+    const a = mkStore("nodeA");
+    a.append(note("from A"));
+    new SyncAgent({ store: a, dir, log: silent() }).tick();
+
+    const log = silent();
+    const b = mkStore("nodeB");
+    new SyncAgent({ store: b, dir, log }).tick();
+    expect(b.list({ limit: 10 }).map((e) => e.title)).toEqual(["from A"]);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/refused bundle ctxbundle-node0\.json.*ENTRY_ID_MISMATCH/));
+    expect(b.verify().ok).toBe(true);
+  });
+
   it("leaves no temp files behind after publishing", () => {
     const dir = sharedDir();
     const store = mkStore("nodeA");

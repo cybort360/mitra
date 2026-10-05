@@ -157,7 +157,14 @@ export class SyncAgent {
       }
 
       this.seen.set(name, digest);
-      const report = this.store.merge(bundle);
+      let report: MergeReport;
+      try {
+        report = this.store.merge(bundle);
+      } catch (err) {
+        // The merge rolled back; one bad peer must not stop the rest importing.
+        this.log(`refused bundle ${name}: ${err instanceof Error ? err.message : String(err)}`);
+        continue;
+      }
       reports.push(report);
       this.status.applied += report.applied;
       this.status.conflicts += report.conflicts.length;

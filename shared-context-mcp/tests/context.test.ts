@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ContextStore } from "../src/store.js";
 import { GENESIS, canonical, hashEntry, sha256 } from "../src/hash.js";
@@ -286,5 +289,96 @@ describe("sync", () => {
     // author_id is NOT NULL, so this must abort without partial application.
     expect(() => b.merge(bundle)).toThrow();
     expect(b.list({ limit: 100 })).toHaveLength(0);
+  });
+
+  it("publishes the status an entry was written with, not its read-time status", () => {
+    const a = fresh();
+    const old = a.append(entry({ title: "old" }));
+    a.append(entry({ title: "new", supersedesId: old.entryId }));
+    const published = a.exportBundle().entries.find((e) => e.entryId === old.entryId)!;
+    // "superseded" is derived on read; the id commits to the written status.
+    expect(published.status).toBe("active");
+  });
+
+  it("verifies on a node that first receives an entry after it was superseded", () => {
+    const a = fresh();
+    const old = a.append(entry({ title: "old" }));
+    a.append(entry({ title: "new", supersedesId: old.entryId }));
+    const b = fresh();
+    b.merge(a.exportBundle());
+    expect(b.verify().ok).toBe(true);
+    expect(b.get(old.entryId)?.status).toBe("superseded");
+  });
+
+  it("accepts a bundle carrying the leaked superseded status from an older node", () => {
+    const a = fresh();
+    const old = a.append(entry({ title: "old" }));
+    a.append(entry({ title: "new", supersedesId: old.entryId }));
+    const bundle = a.exportBundle();
+    // Older nodes published read-time status; their bundles are still on disk.
+    bundle.entries = bundle.entries.map((e) => (e.entryId === old.entryId ? { ...e, status: "superseded" as const } : e));
+    const b = fresh();
+    const report = b.merge(bundle);
+    expect(report.applied).toBe(2);
+    expect(b.verify().ok).toBe(true);
+    expect(b.get(old.entryId)?.status).toBe("superseded");
+  });
+
+  it("refuses a new entry whose id does not match its content", () => {
+    const a = fresh();
+    a.append(entry({ title: "real" }));
+    const bundle = a.exportBundle();
+    bundle.entries[0] = { ...bundle.entries[0], body: "forged" };
+    const b = fresh();
+    expect(() => b.merge(bundle)).toThrow(/ENTRY_ID_MISMATCH/);
+    expect(b.list({ limit: 100 })).toHaveLength(0);
+  });
+
+  it("refuses a new entry whose hash does not match its content", () => {
+    const a = fresh();
+    a.append(entry({ title: "real" }));
+    const bundle = a.exportBundle();
+    bundle.entries[0] = { ...bundle.entries[0], hash: "f".repeat(64) };
+    const b = fresh();
+    expect(() => b.merge(bundle)).toThrow(/CONTENT_HASH_MISMATCH/);
+    expect(b.list({ limit: 100 })).toHaveLength(0);
+  });
+
+  it("restores a row already stored with the leaked status when the store opens", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ctxstore-"));
+    try {
+      const path = join(dir, "context.db");
+      const a = new ContextStore({ path, nodeId: "n_test" });
+      const old = a.append(entry({ title: "old" }));
+      a.append(entry({ title: "new", supersedesId: old.entryId }));
+      // What an older node's merge left behind.
+      a.db.prepare("UPDATE entries SET status = 'superseded' WHERE entry_id = ?").run(old.entryId);
+      expect(a.verify().brokenReason).toMatch(/ENTRY_ID_MISMATCH/);
+      a.db.close();
+
+      const reopened = new ContextStore({ path, nodeId: "n_test" });
+      expect(reopened.verify().ok).toBe(true);
+      expect(reopened.get(old.entryId)?.status).toBe("superseded");
+      reopened.db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not touch a row whose content was genuinely altered", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ctxstore-"));
+    try {
+      const path = join(dir, "context.db");
+      const a = new ContextStore({ path, nodeId: "n_test" });
+      const e = a.append(entry({ title: "real" }));
+      a.db.prepare("UPDATE entries SET body = 'tampered', status = 'superseded' WHERE entry_id = ?").run(e.entryId);
+      a.db.close();
+
+      const reopened = new ContextStore({ path, nodeId: "n_test" });
+      expect(reopened.verify().ok).toBe(false);
+      reopened.db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
