@@ -60,7 +60,7 @@ export function rpcClearingReader(contracts: Partial<Record<Chain, { address: `0
  * `TEMPO_RPC_URL`). Null when no chain is configured: a residual is then refused,
  * never paid unchecked.
  */
-export function clearingReaderFromEnv(env: NodeJS.ProcessEnv = process.env): ClearingReader | null {
+export function clearingReaderFromEnv(env: Record<string, string | undefined> = process.env): ClearingReader | null {
   const deployments = JSON.parse(readFileSync(join(process.cwd(), "lib/evm/deployments.json"), "utf8"));
   const contracts: Partial<Record<Chain, { address: `0x${string}`; client: PublicClient }>> = {};
   const add = (chain: Chain, network: string, rpc: string | undefined) => {
