@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 99,
+  "highSeq": 100,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2033,6 +2033,29 @@
         "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
       ],
       "hash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
+    },
+    {
+      "entryId": "ctx_f192e7e59b8d7778",
+      "seq": 100,
+      "kind": "finding",
+      "title": "RENUMBERED F62 → F64: \"MitraClearing had no challenge outcome\" is F64; F62 stays the lead's cross-chain CREATE collision",
+      "body": "The lead recorded F62 (cross-chain CREATE address collision, commit eecc573, 2026-10-05 09:57 UTC) before purple claimed F62 for the clearing challenge flaw (seq 90). Purple's finding is now F64 everywhere except one place: the header comment of contracts/MitraClearing.sol still says \"fixed in F62\". Editing it would change the metadata hash and the bytecode, and the repo source must stay byte-identical to the deployed instances at Base 0xaacba512… and Tempo 0xd03d91c3…. Both match the artifact as of 2026-10-05.\n\nThe lead's F62 redeploy of the clearing contract on Tempo (0x6ca633a0…) runs the pre-F64 code, which has no challenge outcome. It is recorded under clearingSuperseded.\n\nF-numbers in use: lead F58, F59, F62; purple F57, F60, F61, F63, F64. The next free number is F65; claim it in shared context first.",
+      "status": "active",
+      "scope": "clearing",
+      "tags": [
+        "F62",
+        "F64",
+        "clearing",
+        "numbering"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T19:36:56.733Z",
+      "parents": [
+        "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47",
+        "c0b9400bee13b1ed7816b328bd5fc6b45f0912a38b56ae4eb05bda8798e47d02"
+      ],
+      "hash": "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae",
+      "supersedesId": "ctx_38c77fddc6e979b5"
     }
   ],
   "actors": [
@@ -2070,5 +2093,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
+  "tipHash": "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae"
 }
