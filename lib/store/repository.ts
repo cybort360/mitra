@@ -25,7 +25,7 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import type { ReceiptDraft, ReceiptSigner } from "@/lib/kernel/receipts";
@@ -115,6 +115,19 @@ export interface EconomicRepository {
   listSpaces(): Promise<Space[]>;
   getSpace?(spaceId: string): Promise<Space | null>;
   updateSpace?(space: Space): Promise<void>;
+  /**
+   * Integration and evidence records (PRD §52 Phase 10).
+   *
+   * These are DECLARATIONS about this repository — "adapter X is at evidence
+   * level Y, proven by command Z" — not runtime state produced by the ledger.
+   * They are read through the store anyway so /integrations and /evidence stop
+   * importing fixtures directly, but note the consequence: a Postgres backend
+   * here means the rows are durable, NOT that the claims were re-verified. Only
+   * a chain read or an executed test re-verifies a claim.
+   */
+  listIntegrations(): Promise<Integration[]>;
+  listEvidenceRecords(): Promise<EvidenceRecord[]>;
+
   listAgreements(spaceId?: string): Promise<Agreement[]>;
   getAgreement?(agreementId: string): Promise<Agreement | null>;
   saveAgreement?(agreement: Agreement): Promise<void>;
