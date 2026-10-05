@@ -42,16 +42,27 @@ async function main() {
     const pub = createPublicClient({ transport: http(cfg.rpc) });
     const wallet = createWalletClient({ account, chain, transport: http(cfg.rpc) });
 
+    const force = process.env.FORCE_REDEPLOY === "1" || process.argv.includes("--force");
     let addr;
     let hash;
     let blockNumber;
+    let superseded = db.clearing?.[name]?.superseded;
 
-    if (db.clearing?.[name]?.address) {
+    if (db.clearing?.[name]?.address && !force) {
       addr = db.clearing[name].address;
       hash = db.clearing[name].deployTx;
       blockNumber = db.clearing[name].deployBlock;
       console.log(`\n=== ${cfg.name} (${cfg.id}) [already deployed at ${addr}] ===`);
     } else {
+      if (db.clearing?.[name]?.address && force) {
+        superseded = {
+          address: db.clearing[name].address,
+          caip10: `eip155:${cfg.id}:${db.clearing[name].address}`,
+          deployTx: db.clearing[name].deployTx,
+          deployBlock: db.clearing[name].deployBlock,
+          note: "Superseded to break coincidental cross-chain CREATE nonce collision with Base Sepolia vault",
+        };
+      }
       hash = await wallet.deployContract({
         abi: artifact.abi,
         bytecode,
@@ -67,6 +78,7 @@ async function main() {
       console.log(`\n=== ${cfg.name} (${cfg.id}) ===`);
       console.log(`  operator  ${account.address}`);
       console.log(`  clearing  ${addr}`);
+      console.log(`  caip10    eip155:${cfg.id}:${addr}`);
       console.log(`  tx        ${hash}`);
       console.log(`  block     ${blockNumber}`);
     }
@@ -96,10 +108,12 @@ async function main() {
 
     db.clearing[name] = {
       address: addr,
+      caip10: `eip155:${cfg.id}:${addr}`,
       chainId: cfg.id,
       operator: account.address,
       deployTx: hash,
       deployBlock: blockNumber,
+      ...(superseded ? { superseded } : {}),
     };
   }
 

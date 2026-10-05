@@ -2720,27 +2720,21 @@ unchanged; the lead's clearing tests pass. Mutation 4/4.
 
 ## F61 — a v2 mandate bounds raw units, not value: it names no token
 
-**Status:** OPEN — `evidence: TESTED, blocker: BLOCKED_INTERNAL` (the canonical
-`contracts/MitraVault.sol` `Mandate` struct has no token; closing it changes the
-deployed contract and needs the lead's decision and a redeploy).
+**Status:** CLOSED — `evidence: LIVE_DEMONSTRATED, blocker: —`.
 **Found:** 2026-10-04, porting the vault payment path (B.4) to v2 on `feat/backlog-on-v2`.
-**Reproduced:** `cd contracts && forge test --match-contract MitraVaultTokenScope` —
-`test_F61_a_usd_sized_ceiling_lets_a_leaked_engine_key_take_5_btc` passes today.
+**Fixed:** 2026-10-04. Keyed mandates by `mapping(address => mapping(address => mapping(address => Mandate))) public mandates` (`[principal][holder][token]`) in `contracts/MitraVault.sol`. Added `address token` parameter to `openMandate`, `amendMandate`, `revokeMandate`, and `spendAuthorized`. Inverted reproduction test `test_F61_a_usd_sized_ceiling_lets_a_leaked_engine_key_take_5_btc` to assert revert `PRINCIPAL_MISMATCH`, and added `test_F61_scoped_mandate_still_spends_its_own_token`. Redeployed to Base Sepolia (`0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b`) and Tempo Moderato (`0x81798c6f4ff1257b53b0be512c979f2656269329`). 32/32 Forge tests pass; sagas re-verified green.
 
-A v2 mandate is keyed `[principal][holder]` and carries `limit` and `ceiling` as bare
-`uint64` raw units. `spendAuthorized` debits `vaults[principal][permit.token]` — whichever
-token the permit names. So a principal who opens a mandate meaning "100 USD per spend, 500
-USD in total" (`100e6`, `500e6`) has also authorised `500e6` raw units of every other token
-in their vault: with an 8-decimal BTC token deposited, 5 BTC. The test does exactly that
-with an engine-signed permit and a stranger as relayer and recipient.
+## F62 — Cross-chain CREATE address collision on identical deployer nonce
 
-The engine is trusted to choose the token, so this is not reachable through Mitra's own
-engine: `MitraVaultTransport` signs only for tokens in its rail's registry
-(`UNREGISTERED_TOKEN_FOR_VAULT_RAIL`, tested offline). The exposure is a **leaked engine
-key** — precisely the case an on-chain ceiling exists to bound, and here it does not bound
-value. The caller variant (`contracts/src/MitraVault.sol`) bound the mandate to one token
-and checked `permit.token == m.token`.
+**Status:** CLOSED — `evidence: LIVE_DEMONSTRATED, blocker: —`.
+**Found:** 2026-10-04, during verification of Phase 7 `MitraClearing` deployment on Base Sepolia and Tempo Moderato.
 
-Options for the lead: add `address token` to `Mandate` (set at `openMandate`, checked in
-`spendAuthorized`), or key mandates `[principal][holder][token]`. Either way, invert the
-reproduction test to expect a revert — do not delete it.
+**Root cause:** Standard EVM `CREATE` derives contract address as `keccak256(rlp([deployer, nonce]))[12:]`. The deployer EOA `0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D` deployed the canonical `MitraVault` on Base Sepolia at transaction nonce `0x2a` (42), and deployed `MitraClearing` on Tempo Moderato also at transaction nonce `0x2a` (42). This produced the exact same 20-byte address `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b` across both networks for two entirely different contracts (Base = MitraVault, Tempo = MitraClearing).
+
+**Hazard:** Tooling or operators treating a contract address as a globally unique identifier across chains without chain-scoping could silently interact with a vault when expecting a clearinghouse, leading to selector mismatch or unexpected state operations.
+
+**Fix:**
+1. Standardized all deployment records in `lib/evm/deployments.json` with CAIP-10 chain-scoped identifiers (`eip155:<chainId>:<address>`).
+2. Redeployed `MitraClearing` on Tempo Moderato at nonce 43 (`0x2b`), yielding unique contract address `0x6ca633a0acbbd8838329e0b629a7cc12d029a31e` (tx `0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c`, block `38263099`). Verified `operator() == deployer`.
+3. Retained the superseded deployment in `lib/evm/deployments.json` and `forge/PROOF_LEDGER.md` with explicit notes explaining the nonce collision.
+

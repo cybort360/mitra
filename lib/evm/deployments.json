@@ -2,6 +2,7 @@
   "baseSepolia": {
     "chainId": 84532,
     "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+    "caip10": "eip155:84532:0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
     "deployTx": "0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445",
     "deployBlock": 47687892,
     "deployedAt": "2026-10-04T20:01:10.395Z"
@@ -9,6 +10,7 @@
   "moderato": {
     "chainId": 42431,
     "address": "0x81798c6f4ff1257b53b0be512c979f2656269329",
+    "caip10": "eip155:42431:0x81798c6f4ff1257b53b0be512c979f2656269329",
     "deployTx": "0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77",
     "deployBlock": 38179538,
     "deployedAt": "2026-10-04T20:01:30.023Z"
@@ -16,17 +18,26 @@
   "clearing": {
     "baseSepolia": {
       "address": "0x2179bf055c62c57eeb4045957d57f7e460df76d9",
+      "caip10": "eip155:84532:0x2179bf055c62c57eeb4045957d57f7e460df76d9",
       "chainId": 84532,
       "operator": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
       "deployTx": "0x09087cfebb6d786d8e6c5321e33fc5669f9ed3580d7e5476b3c56cea5f381a8e",
       "deployBlock": 47688141
     },
     "moderato": {
-      "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+      "address": "0x6ca633a0acbbd8838329e0b629a7cc12d029a31e",
+      "caip10": "eip155:42431:0x6ca633a0acbbd8838329e0b629a7cc12d029a31e",
       "chainId": 42431,
       "operator": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
-      "deployTx": "0x557a4674b442f9955693f098ddc815904419b7d7d643781d838c484519d957ed",
-      "deployBlock": 38180738
+      "deployTx": "0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c",
+      "deployBlock": 38263099,
+      "superseded": {
+        "address": "0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+        "caip10": "eip155:42431:0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b",
+        "deployTx": "0x557a4674b442f9955693f098ddc815904419b7d7d643781d838c484519d957ed",
+        "deployBlock": 38180738,
+        "note": "Superseded to break coincidental cross-chain CREATE nonce collision with Base Sepolia vault"
+      }
     }
   },
   "moderato__callerVariant": {

@@ -12,8 +12,8 @@
 >   - **Tempo Moderato** (`42431`): `0x81798c6f4ff1257b53b0be512c979f2656269329` (tx `0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77`, block `38179538`)
 > - `PERMIT_TYPEHASH` verified on-chain via `eth_call 0x30adf81f`: `0xcae3f4fbf2f6d96ea9b2c34236eaafd63d622d4a5e7c33f861c116f33cff1a88`.
 > - Phase 7 `contracts/MitraClearing.sol` deployed and verified on:
->   - **Base Sepolia** (`84532`): `0x2179bf055c62c57eeb4045957d57f7e460df76d9` (tx `0x09087cfebb6d786d8e6c5321e33fc5669f9ed3580d7e5476b3c56cea5f381a8e`, block `47688141`)
->   - **Tempo Moderato** (`42431`): `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b` (tx `0x557a4674b442f9955693f098ddc815904419b7d7d643781d838c484519d957ed`, block `38180738`)
+>   - **Base Sepolia** (`84532`): `0x2179bf055c62c57eeb4045957d57f7e460df76d9` (`eip155:84532:0x2179bf055c62c57eeb4045957d57f7e460df76d9`, tx `0x09087cfebb6d786d8e6c5321e33fc5669f9ed3580d7e5476b3c56cea5f381a8e`, block `47688141`)
+>   - **Tempo Moderato** (`42431`): `0x6ca633a0acbbd8838329e0b629a7cc12d029a31e` (`eip155:42431:0x6ca633a0acbbd8838329e0b629a7cc12d029a31e`, tx `0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c`, block `38263099`; redeployed at nonce 43 to eliminate cross-chain CREATE nonce collision with Base vault, F62)
 >   - Both verified `operator()`: `0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D`.
 > - Solana Devnet program (`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY`) upgraded on devnet with `(principal, holder)` mandate reseed (PR #31 merged, slot 507483795+). Live tests pass (41/41 on transport, 1/1 on agreement).
 > - Phase 6 Distributed Sagas (`ADR-0012`) re-evidenced on-chain with automated compensation (`lockEscrow` → `refundEscrow`). Runnable via `npm run verify:saga-events`. Full un-truncated 66-character hashes verified live (`F52`).

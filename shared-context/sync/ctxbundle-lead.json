@@ -1,6 +1,6 @@
 {
   "fromNodeId": "lead",
-  "highSeq": 83,
+  "highSeq": 84,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1697,6 +1697,22 @@
         "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
       ],
       "hash": "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+    },
+    {
+      "entryId": "ctx_9d2e37af38f749dd",
+      "seq": 84,
+      "kind": "decision",
+      "title": "F62 Resolved: Broken cross-chain CREATE nonce-42 collision; CAIP-10 scoping standardized",
+      "body": "Addressed cross-chain CREATE address collision (F62):\n1. Root cause: Base Sepolia MitraVault and Tempo Moderato MitraClearing were both transaction nonce 0x2a (42) for deployer 0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D, generating identical 0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b.\n2. Resolution:\n   - Redeployed MitraClearing on Tempo Moderato at nonce 43 (0x2b) -> 0x6ca633a0acbbd8838329e0b629a7cc12d029a31e (blk 38263099, tx 0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c). Verified operator() == deployer.\n   - Standardized all deployment records in lib/evm/deployments.json with CAIP-10 chain-scoped identifiers (eip155:<chainId>:<address>).\n   - Retained superseded deployment in deployments.json and PROOF_LEDGER.md with explicit notes explaining provenance.\n3. FAILURES.md: Closed F61, logged and closed F62.",
+      "status": "active",
+      "scope": "cross-chain",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-05T09:56:38.370Z",
+      "parents": [
+        "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+      ],
+      "hash": "6b78c295d44a8adbaebf3c277859501d8c799a232c30406eda8c0b509aa05b3d"
     }
   ],
   "actors": [
@@ -1734,5 +1750,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+  "tipHash": "6b78c295d44a8adbaebf3c277859501d8c799a232c30406eda8c0b509aa05b3d"
 }
