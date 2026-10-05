@@ -56,3 +56,7 @@ test-ledger/
 # Foundry build artefacts for contracts/
 out/
 cache/
+
+# Brand / visual design exploration — local only, never committed.
+# Rendered by hand from docs/product/MITRA_0_1_FULL_PRODUCT_SPEC.md.
+brand/
