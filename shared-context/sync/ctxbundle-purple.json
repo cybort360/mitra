@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 82,
+  "highSeq": 86,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -532,7 +532,7 @@
       "kind": "handoff",
       "title": "Phase status 2026-10-02 + the one-shot plan (waves 1-6)",
       "body": "PHASE AUDIT, honest, with the caveat below.\n\n  0 Ground truth  INTEGRATED        schemas + ADRs; 6/7 machines had no write path (Phase 4 starts fixing)\n  1 Core          E2E_VERIFIED      full local lifecycle\n  2 Solana kernel LIVE_DEMONSTRATED devnet\n  3 Authority     LIVE_DEMONSTRATED spend+amend+revoke on devnet; replay refused on-chain (0x177c)\n  4 Commerce      IN PROGRESS       Space type + commerce lifecycle landed; no API routes yet\n  5 Ecosystem     IMPLEMENTED       only a 65-LOC local stub; no A2A/MCP/ERC-8004/x402\n  6 Recovery      PROPOSED          failure-lab.ts has ZERO exports; TALOS absent from disk (F24)\n  7 Clearing      TESTED            netObligations only; no epochs/challenge/adversarial suite\n  8 Base          PROPOSED          no adapter\n  9 Tempo         PROPOSED          env funded, no adapter\n 10 Tooling       IMPLEMENTED       console is a mockup; AND 4 of 9 API routes serve static seed.ts\n                                   instead of the repository (/vaults, /runs, /clearing, /obligations)\n\nREAL DEFECT FOUND WHILE GROUNDING: /api/v1/vaults imports  from lib/store/seed, so it returns\nFIXTURES with a reconciliation computed on top. 4 of 9 routes do this. That is Phase 10's 'console is\na mockup' leaking into the API layer, and it means the API is not yet a view of the store.\n\nTHE ONE-SHOT PLAN, waves 1-6 in dependency order (user asked for this):\n  W1 Authority 3c/3d  <- policy seam DONE, signer abstraction DONE, Arcium unblocked + circuit compiles\n  W2 Commerce         <- Space + lifecycle DONE; needs API routes + tests + mutation audit\n  W3 Recovery         <- saga/compensation/redirect; TALOS is BLOCKED_EXTERNAL (F24)\n  W4 Clearing         <- epochs, netting, challenges, adversarial tests\n  W5 Adapters         <- A2A/MCP/ERC-8004/x402 | Base | Tempo\n  W6 Tooling          <- accounting, webhooks, observability, FIX THE 4 SEEDED ROUTES\n\nVERIFICATION STAYS INSIDE EACH WAVE. Mutation audit is part of the step, not a later ceremony.\nEvidence for why: F25 (green suite, replay protection deleted, nobody noticed), F28 (5 mutations\nsurvived, 3 tests named guarantees and never tested them), F30 (harness printed ALL CHECKS PASSED\nhaving skipped half the run). All three were caught by stopping to verify, not by moving faster.\n\nCURRENT GATES: Rust 72/72, TS 164 pass / 15 gated (persistence needs DATABASE_URL), tsc clean.\n30 failure records in forge/FAILURES.md - read them before trusting any claim.",
-      "status": "superseded",
+      "status": "active",
       "scope": "general",
       "tags": [],
       "authorId": "lead",
@@ -1159,7 +1159,7 @@
       "kind": "handoff",
       "title": "Handoff status written into docs/HANDOFF_CODEVELOPER.md: all three rails live; ERC-4337, ERC-1271, caller wiring and getEvidence still open",
       "body": "On feat/solana-settlement-binding (pushed). It is not merged; the lead merges.\n\nDONE: items 1 (Base EOA transport), 2 (Tempo) and 3 (Solana, bound to spend_authorized on the F51 vault). All three are live on testnets. The proof is in PROOF_LEDGER.\n\nOPEN, each listed in the new 'Status — 2026-10-03' section of docs/HANDOFF_CODEVELOPER.md:\n- sendUserOp (ERC-4337) is not wired through the transport.\n- verify1271 has no on-chain implementation.\n- No route or kernel code calls any adapter. The seq-55 answers unblock this.\n- getEvidence() returns null on every rail.\n- The mandate PDA reseed is approved but not implemented, and needs a redeploy.\n- authority-devnet.mjs still uses the pre-F51 layouts. Port it to lib/solana/vault-program.ts.\n- context audit still breaks at seq 29.\n- dev-scripts tests can time out on live RPCs.\n\nEXECUTION_PLAN rows 8 and 9 were stale ('no transport wired'). They are now LIVE_DEMONSTRATED (adapter leg) / PARTIAL, with the open items named.",
-      "status": "superseded",
+      "status": "active",
       "scope": "settlement",
       "tags": [
         "handoff",
@@ -1262,7 +1262,7 @@
       "kind": "task",
       "title": "Starting: wire a settlement caller so an ACCEPTED agreement reaches a SettlementAdapter (sprint item 1)",
       "body": "human:purple + agent:claude-purple, branch feat/settlement-caller (cut from feat/solana-settlement-binding @ 17b5b4c, which fast-forwards onto fix/integrity-f40-f45).\n\nSprint plan written to docs/HANDOFF_CODEVELOPER.md \"Sprint plan — 2026-10-03\": 1 settlement caller, 2 getEvidence on three rails, 3 ERC-4337 + ERC-1271, 4 live MCP server + x402 gateway, 5 Console on real data + event stream, 6 MitraVault.sol, 7 security.txt + mandate reseed in one redeploy (build/upgrade needs the lead's key C4ZoTdNS...).\n\nItem 1 constraints, from the lead's seq 55: payment releases only from ACCEPTED; testnet signs with the relayer key. The call must go through the execution guard. ACCEPTED is not by itself permission to move value.\n\nCorrections to the incoming scope (detail in the doc): MitraVault.sol sketch keys mandates by holder alone, which repeats F51. Package A names our key as the upgrade authority, but on-chain it is C4ZoTdNS.... No Arcium source exists in the repo despite EXECUTION_PLAN row 3. Arcium is left for the lead.",
-      "status": "superseded",
+      "status": "active",
       "scope": "settlement",
       "tags": [
         "phase-8",
@@ -1309,7 +1309,7 @@
       "kind": "task",
       "title": "Starting sprint item 2: getEvidence() on Base, Tempo and Solana, built from the live settlement record",
       "body": "Branch feat/settlement-caller, which is pushed and contains item 1 (4659a70). Today getEvidence returns null on every rail. lib/evm/evidence.ts already defines EvidenceBundle and verifyEvidenceBundle. Plan: build bundles only from a settlement that was observed on chain, and keep returning null otherwise. A bundle must re-derive its commitment; that is what makes it evidence rather than a claim.",
-      "status": "superseded",
+      "status": "active",
       "scope": "settlement",
       "tags": [
         "evidence",
@@ -1681,6 +1681,87 @@
         "6dd4ff876d8338b90195691579bf1c3ad6cb03a585453e96773fce1b884b7c19"
       ],
       "hash": "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+    },
+    {
+      "entryId": "ctx_c21fe7e7baa87ab8",
+      "seq": 83,
+      "kind": "decision",
+      "title": "F55 caller identity is signed requests (EIP-712, verified for EOA/ERC-1271/ERC-6492), not API keys and not a bare X-Mitra-Actor-Id header",
+      "body": "DECIDED by human:purple, 2026-10-05. This resolves the model choice left open in the F55 blocker ctx_871aeabc10febca9 and in seq 81/82. The blocker stays open until the code ships.\n\nMODEL: every call to fund, accept, reject and register_agent carries an EIP-712 signature over the exact instruction: action, agreement id, amount/terms where present, nonce, expiry and chain/domain. The API recovers the signer and verifies it through the existing verifyAuthorisation + RpcSignatureVerifier (EOA, ERC-1271, ERC-6492). It binds the signer to the actor's address, then runs kernel role checks: only the client funds; only the client or evaluator accepts or rejects; only the provider submits. An X-Mitra-Actor-Id header may name the claimed actor, but it is only a lookup hint. The signature is the proof. A nonce store blocks replays and an expiry bounds them.\n\nREJECTED:\n- A bare X-Mitra-Actor-Id header, as written in lead handoff seq 83. The caller writes it themselves, so anyone could act as any party. That is F55 itself, not a fix.\n- API keys (bearer secrets). A leaked key means full impersonation, the server holds secrets that can forge, and a key does not tie approval to an exact instruction. Keys would also be a second identity system beside the mandate addresses ([principal][holder][token]).\n- HMAC-signed keys. They are tamper-evident, but the secret is shared, so the server can still forge.\n\nWHY: the API now asks the same question the execution guard asks on-chain: may this exact instruction move capital? This is no substitute for the guard, which still runs.\n\nOPEN (not decided): Solana-native actors need an ed25519 signed-request path beside EIP-712. Until that exists, they cannot use the four tools.\n\nThe MCP bearer token (MITRA_MCP_TOKEN) is still connection gating, not identity. Purple builds F55 against this model.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "api",
+        "eip-712",
+        "erc-1271",
+        "identity",
+        "mcp"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T15:45:08.744Z",
+      "parents": [
+        "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+      ],
+      "hash": "f673979a34b02b2627249e3fa361cac1e5e87ffc2aec30328c8f754164278585"
+    },
+    {
+      "entryId": "ctx_18c2ca81832f004e",
+      "seq": 84,
+      "kind": "handoff",
+      "title": "Lead Work Packages Complete: F61 Mandates, Solana Reseed Upgraded, MitraClearing Deployed",
+      "body": "Lead work packages completed and verified on-chain:\n1. Part 1 (F61 Token-Scoped Mandates): MitraVault.sol updated to key mandates by [principal][holder][token]. Deployed to Base Sepolia (0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b, blk 47687892) and Tempo Moderato (0x81798c6f4ff1257b53b0be512c979f2656269329, blk 38179538). 32/32 Foundry tests pass. Sagas re-verified live (100% verified via verify:saga-events).\n2. Part 2 (Solana Devnet Reseed Upgrade & PR #31): Upgraded program GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY on devnet with upgrade key C4ZoTdNS... (slot 507483795+). Merged PR #31 (feat/solana-reseed-on-v2) into feat/mitra-vault-v2-reseed. Live devnet tests (solana-transport: 41/41, solana-agreement-live: 1/1) pass green.\n3. Part 3 (MitraClearing Deployment): MitraClearing.sol deployed to Base Sepolia (0x2179bf055c62c57eeb4045957d57f7e460df76d9, blk 47688141) and Tempo Moderato (0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b, blk 38180738). Both verified operator() == deployer (0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D). 4/4 Foundry tests pass.\n\nHanding off to Purple:\n- F55: Implement caller identity (X-Mitra-Actor-Id) in HTTP API and MCP server to un-withhold fund, accept, reject, register_agent.\n- Phase 7 Live Epoch Runner: Implement scripts/run-live-clearing-epoch.mjs against the live deployed MitraClearing contracts.",
+      "status": "active",
+      "scope": "cross-chain",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-04T20:17:17.632Z",
+      "parents": [
+        "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+      ],
+      "hash": "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+    },
+    {
+      "entryId": "ctx_c506c519a38357f7",
+      "seq": 85,
+      "kind": "decision",
+      "title": "Audit break at seq 29 is a sync bug: exportBundle publishes read-time \"superseded\" status, merge stores it unverified, so late receivers fail ENTRY_ID_MISMATCH",
+      "body": "FINDING: the content of ctx_42aa4a63e2d0bb0d (lead, seq 29 locally) is intact. With status \"active\" it reproduces its id and hash, and all 84 local rows then verify. Cause: exportBundle() builds entries with since(), which applies withDerivedStatus, so bundles carry \"superseded\". merge() inserts incoming.status as received and never checks entryId or hash. Any node that first receives an entry after it was superseded stores the wrong status and fails audit. 9 of the 10 bundles on disk that carry this entry show it as \"superseded\".\n\nFIX (purple, in progress, test-first in shared-context-mcp):\n1. exportBundle publishes stored status, not derived.\n2. merge verifies entryId and hash before insert. If an incoming \"superseded\" entry only verifies under another EntryStatus, it is stored with that status, because bundles already in the wild carry the leak. An entry that verifies under no status is refused and reported, not inserted.\n3. On open, rows already stored with a leaked status are restored to the status their id commits to. The id and hash prove the correct value, so this restores content rather than rewriting it.\nREJECTED: editing the row by hand, which fixes only us and leaves every peer to hit it again.",
+      "status": "active",
+      "scope": "shared-context",
+      "tags": [
+        "audit",
+        "integrity",
+        "shared-context-mcp",
+        "sync"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T15:47:59.008Z",
+      "parents": [
+        "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+      ],
+      "hash": "c5d446442436bb03813a1744220fe301ad1ed2787967abfc1e4370328b973ffb"
+    },
+    {
+      "entryId": "ctx_77b1884dc8534f70",
+      "seq": 86,
+      "kind": "finding",
+      "title": "Calling BaseSettlementAdapter/TempoSettlementAdapter.settle() directly bypasses the execution guard; the Phase 7 epoch runner must settle residuals through the guarded path",
+      "body": "The lead's handoff (docs/HANDOFF_CODEVELOPER.md, Live Harness step) says the runner \"settles residual obligations via BaseSettlementAdapter / TempoSettlementAdapter\". adapter.settle() validates only the target (address, amount, asset) and re-derives the commitment hash. It has no mandate, policy or guard check. The guard is above it: validateExecutionBinding in lib/kernel/settlement.ts:123, plus the single-use nonce consumption in lib/settlement/settle-agreement.ts. A runner that calls the adapter directly moves value on an ALLOW it never re-derived. That is the bypass AGENTS.md names as no guarantee at all.\n\nSo each net residual must settle through the guarded path: a reservation that policy approved, then the execution guard, then the adapter or the vault rail (an engine-signed MitraVault permit). This is the same chain POST /api/v1/settlements uses. Committing the epoch on-chain (commitEpoch, recordSettlement) is operator-only bookkeeping and moves no value, so the guard concern does not apply to it.\n\nAlso, 2026-10-05: forge/PROOF_LEDGER.md row 7 was LIVE_DEMONSTRATED + PARTIAL. That breaks coherence rule 1, and nothing had run live. It is now TESTED + PARTIAL. The deployment was re-checked by eth_call operator() on both chains; the remaining items are named in the row.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "clearing",
+        "execution-guard",
+        "invariant",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T15:51:36.639Z",
+      "parents": [
+        "c5d446442436bb03813a1744220fe301ad1ed2787967abfc1e4370328b973ffb"
+      ],
+      "hash": "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435"
     }
   ],
   "actors": [
@@ -1718,5 +1799,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+  "tipHash": "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435"
 }
