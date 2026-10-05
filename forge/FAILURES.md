@@ -2767,3 +2767,44 @@ and checked `permit.token == m.token`.
 Options for the lead: add `address token` to `Mandate` (set at `openMandate`, checked in
 `spendAuthorized`), or key mandates `[principal][holder][token]`. Either way, invert the
 reproduction test to expect a revert — do not delete it.
+
+## F62 — the deployed MitraClearing had no challenge outcome
+
+**Status:** fixed in `contracts/MitraClearing.sol` (purple, 2026-10-05; decision
+`ctx_79718f2aadabac9b`). Foundry 18/18. The fixed contract must be **redeployed**: the
+instances at Base Sepolia `0x2179bf055c62c57eeb4045957d57f7e460df76d9` and Tempo Moderato
+`0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b` run the flawed code and are superseded.
+**Found:** 2026-10-05, reading the contract before building the Phase 7 epoch runner on it.
+
+Reproduced in `contracts/test/MitraClearingChallenge.t.sol` against the deployed source:
+
+1. **A challenge did nothing.** `finalizeEpoch` refused only `Finalized`/`Settled` and an
+   open window, so a `Challenged` epoch finalized normally once the window closed. PRD §14.8
+   requires a challenge outcome; the contract's own header said challenge existed so the
+   operator "cannot unilaterally settle a challenged epoch".
+2. **FROZEN accepted obligations.** `recordObligation` allowed `Frozen` (PRD §14.5: "New
+   obligations are excluded"; its own comment: "Only while OPEN"). The operator supplied
+   `inputsRoot` and nothing on-chain related it to the recorded obligations.
+3. **A late result swap finalized without a window.** `recordSettlement` could replace the
+   transfers and `resultHash` at any time in the window without restarting it: swap one
+   second before close, finalize one second later.
+
+Also: no function reached `Settled`, so PRD §14.5's SETTLING/SETTLED (receipts attached)
+did not exist; `openEpoch` and `commitEpoch` could not both apply to one epoch. The
+original 4 Foundry tests exercised none of these paths.
+
+**Fix:** the PRD §14.4 lifecycle — `openEpoch(id, window)` → `recordObligation` (OPEN only;
+folded into an on-chain rolling `inputsRoot`) → `freezeEpoch` → `proposeResult` (every
+proposal restarts the window) → `challengeObligation` (only the obligation's debtor or
+creditor; the leg is excluded and keeps its reason; the result must be re-proposed) →
+`finalizeEpoch` (permissionless after the window; a challenged result never finalizes;
+F47 single-shot) → `recordReceipt` per residual transfer → `Settled`. **Added:**
+`proposeResult` checks on-chain that the transfers conserve every address's net position
+over the included obligations, so a result that pays anyone what the obligations do not
+net to reverts rather than waiting to be challenged. Epochs are capped at 64 obligations
+and 64 transfers to bound that check. The lead's 4 tests are kept on the new API with
+their assertions; the "permissionless challenge" test now challenges as a party, per the
+decision.
+
+**Not changed:** the operator is still one EOA. Conservation and party challenges bound
+what it can propose; they do not decentralise it (spec 55.3).
