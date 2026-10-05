@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {MitraClearing} from "../MitraClearing.sol";
 
-/// F62 — reproductions against PRD §14.4–14.8, and the fix's challenge,
+/// F64 — reproductions against PRD §14.4–14.8, and the fix's challenge,
 /// conservation and settlement rules (decision ctx_79718f2aadabac9b).
 contract MitraClearingChallengeTest is Test {
     MitraClearing clearing;
@@ -47,7 +47,7 @@ contract MitraClearingChallengeTest is Test {
         clearing.proposeResult(epochId, _chainResult(), keccak256("result-1"));
     }
 
-    // ── F62 reproductions ────────────────────────────────────────────────────
+    // ── F64 reproductions ────────────────────────────────────────────────────
 
     /// §14.8 requires a challenge outcome. A challenged epoch must not finalize
     /// on the strength of the result that was challenged.

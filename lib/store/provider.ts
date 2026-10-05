@@ -43,7 +43,7 @@
 // already enforced by the fact that only app/api routes import this module.
 import type { Pool } from "pg";
 import type {
-  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
@@ -54,7 +54,8 @@ import { createPool } from "@/lib/store/db";
 import { PostgresRepository } from "@/lib/store/postgres";
 import { CapitalLedger, getLedger } from "@/lib/store/ledger";
 import {
-  agents as seedAgents, agreements, clearingEpochs as seedEpochs, deliverables, mandates, obligations, runs, settlements, spaces,
+  agents as seedAgents, agreements, clearingEpochs as seedEpochs, deliverables, evidence, integrations, mandates, obligations, runs,
+  settlements, spaces,
 } from "@/lib/store/seed";
 
 /** Which store served a request. Surfaced in API responses; never inferred. */
@@ -125,8 +126,25 @@ export class InMemoryRepository implements EconomicRepository {
    * Spaces and agreements, initialized from reference fixtures and updated
    * by commercial operations.
    */
+  /**
+   * Integration + evidence declarations. See `repository.ts` for why these are
+   * served through the store but are NOT runtime state, and why a "postgres"
+   * backend label says nothing about whether a claim was re-verified.
+   */
+  async listIntegrations(): Promise<Integration[]> {
+    return integrations.map((i) => ({ ...i }));
+  }
+
+  async listEvidenceRecords(): Promise<EvidenceRecord[]> {
+    return evidence.map((e) => ({ ...e }));
+  }
+
   async listSpaces(): Promise<Space[]> {
     return [...this.spacesMap.values()].map((s) => ({ ...s }));
+  }
+
+  async createSpace(space: Space): Promise<void> {
+    this.spacesMap.set(space.spaceId, { ...space });
   }
 
   async getSpace(spaceId: string): Promise<Space | null> {

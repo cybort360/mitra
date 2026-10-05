@@ -7,7 +7,8 @@
     "deployedAt": "2026-10-05T19:15:15.409Z",
     "deployer": "0x7823d6bea51cc21c5d8588c7ff72e33130848116",
     "revision": "F61",
-    "runtimeCodeMatchesArtifact": true
+    "runtimeCodeMatchesArtifact": true,
+    "caip10": "eip155:84532:0x92dcee6acbfcf50f32a3e9c689d7f2ceef9ee489"
   },
   "moderato": {
     "chainId": 42431,
@@ -17,7 +18,8 @@
     "deployedAt": "2026-10-05T19:15:20.676Z",
     "deployer": "0x7823d6bEA51cC21C5d8588C7ff72E33130848116",
     "revision": "F61",
-    "runtimeCodeMatchesArtifact": true
+    "runtimeCodeMatchesArtifact": true,
+    "caip10": "eip155:42431:0x85409dfc30fa0671b06f98cc56c5b04eb921b568"
   },
   "clearing": {
     "baseSepolia": {
@@ -26,8 +28,9 @@
       "operator": "0x7823d6bEA51cC21C5d8588C7ff72E33130848116",
       "deployTx": "0x061615d2750f44a0215715f314ed1ac716c9f27bfdb2e8724a6385fda35ddaa1",
       "deployBlock": 47728854,
-      "revision": "F62",
-      "runtimeCodeMatchesArtifact": true
+      "revision": "F64",
+      "runtimeCodeMatchesArtifact": true,
+      "caip10": "eip155:84532:0xaacba512ba6dc726cb6cafdc2799198dbddb1c4c"
     },
     "moderato": {
       "address": "0xd03d91c3ae594c6b1163d89a5cee622c3c1f8688",
@@ -35,8 +38,9 @@
       "operator": "0x7823d6bEA51cC21C5d8588C7ff72E33130848116",
       "deployTx": "0x46791629fb80b7fb7599a58844ee77764a905d95ad042212c7b6810d2592e233",
       "deployBlock": 38316051,
-      "revision": "F62",
-      "runtimeCodeMatchesArtifact": true
+      "revision": "F64",
+      "runtimeCodeMatchesArtifact": true,
+      "caip10": "eip155:42431:0xd03d91c3ae594c6b1163d89a5cee622c3c1f8688"
     }
   },
   "moderato__callerVariant": {
@@ -72,7 +76,8 @@
       "deployTx": "0x09087cfebb6d786d8e6c5321e33fc5669f9ed3580d7e5476b3c56cea5f381a8e",
       "deployBlock": 47688141,
       "supersededAt": "2026-10-05T18:46:29.657Z",
-      "reason": "F62: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, a late result swap finalized without a fresh window; see forge/FAILURES.md"
+      "reason": "F64: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, a late result swap finalized without a fresh window; see forge/FAILURES.md",
+      "caip10": "eip155:84532:0x2179bf055c62c57eeb4045957d57f7e460df76d9"
     },
     {
       "network": "moderato",
@@ -82,7 +87,19 @@
       "deployTx": "0x557a4674b442f9955693f098ddc815904419b7d7d643781d838c484519d957ed",
       "deployBlock": 38180738,
       "supersededAt": "2026-10-05T18:46:35.614Z",
-      "reason": "F62: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, a late result swap finalized without a fresh window; see forge/FAILURES.md"
+      "reason": "F64: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, a late result swap finalized without a fresh window; see forge/FAILURES.md",
+      "caip10": "eip155:42431:0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b"
+    },
+    {
+      "network": "moderato",
+      "address": "0x6ca633a0acbbd8838329e0b629a7cc12d029a31e",
+      "chainId": 42431,
+      "caip10": "eip155:42431:0x6ca633a0acbbd8838329e0b629a7cc12d029a31e",
+      "operator": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
+      "deployTx": "0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c",
+      "deployBlock": 38263099,
+      "supersededAt": "2026-10-05T20:30:00.000Z",
+      "reason": "The lead's F62 redeploy (cross-chain CREATE collision) of the pre-F64 contract: no challenge outcome; superseded by the F64 instance at 0xd03d91c3\u2026"
     }
   ],
   "vaultSuperseded": [
@@ -94,7 +111,8 @@
       "deployBlock": 47687892,
       "deployedAt": "2026-10-04T20:01:10.395Z",
       "supersededAt": "2026-10-05T19:15:15.409Z",
-      "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md"
+      "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md",
+      "caip10": "eip155:84532:0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b"
     },
     {
       "network": "moderato",
@@ -104,7 +122,8 @@
       "deployBlock": 38179538,
       "deployedAt": "2026-10-04T20:01:30.023Z",
       "supersededAt": "2026-10-05T19:15:17.387Z",
-      "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md"
+      "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md",
+      "caip10": "eip155:42431:0x81798c6f4ff1257b53b0be512c979f2656269329"
     }
   ]
 }

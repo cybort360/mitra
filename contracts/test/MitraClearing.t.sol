@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {MitraClearing} from "../MitraClearing.sol";
 
-/// The lead's original suite, on the PRD §14.4 lifecycle (F62): open → record →
+/// The lead's original suite, on the PRD §14.4 lifecycle (F64): open → record →
 /// freeze → propose → finalize. Assertions unchanged: operator gating, the
 /// challenge window, and single finalization (F47).
 contract MitraClearingTest is Test {

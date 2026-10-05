@@ -3,9 +3,10 @@ import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type {
   Agent, ClearingEpoch,
-  Agreement, Authorization, Deliverable, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
+  Agreement, Authorization, Deliverable, EvidenceRecord, Integration, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
+import { evidence, integrations } from "@/lib/store/seed";
 import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
 import type { CapitalResult, EconomicRepository, ReserveCapitalInput, SeedCounts } from "./repository";
 
@@ -195,6 +196,26 @@ export class PostgresRepository implements EconomicRepository {
     return rows.map((r) => r.document as Deliverable);
   }
 
+  /**
+   * Integration + evidence declarations (PRD §52 Phase 10).
+   *
+   * These are declarations ABOUT THIS REPOSITORY, not ledger state. There is no
+   * table for them and there should not be: nothing writes them at runtime, and a
+   * row here would imply an audit trail that does not exist. They are served from
+   * the same reference module the in-memory backend uses, so the two backends
+   * report identical content — which is what backend parity actually requires.
+   *
+   * The Postgres backend label on /evidence therefore tells you the ROWS would be
+   * durable if anything wrote them. It does NOT tell you any claim was re-verified.
+   */
+  async listIntegrations(): Promise<Integration[]> {
+    return integrations.map((i) => ({ ...i }));
+  }
+
+  async listEvidenceRecords(): Promise<EvidenceRecord[]> {
+    return evidence.map((e) => ({ ...e }));
+  }
+
   async listSpaces(): Promise<Space[]> {
     const { rows } = await this.pool.query(
       "SELECT document FROM mitra.spaces ORDER BY space_id",
@@ -211,6 +232,16 @@ export class PostgresRepository implements EconomicRepository {
    * written — the next request read the seed state back. Same class as F36: the
    * in-memory backend worked, so the suite was green whenever DATABASE_URL was unset.
    */
+  async createSpace(space: Space): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.spaces (space_id, owner, status, document)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (space_id) DO UPDATE
+         SET document = $4::jsonb, status = $3, owner = $2`,
+      [space.spaceId, space.owner, space.status, JSON.stringify(space)],
+    );
+  }
+
   async getSpace(spaceId: string): Promise<Space | null> {
     const { rows } = await this.pool.query("SELECT document FROM mitra.spaces WHERE space_id = $1", [spaceId]);
     return rows[0] ? (rows[0].document as Space) : null;

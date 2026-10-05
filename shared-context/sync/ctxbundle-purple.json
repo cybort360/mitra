@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 96,
+  "highSeq": 99,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1985,6 +1985,54 @@
       ],
       "hash": "4d7c17014427f8737b7240bc64d5e710fdea1c81f02e8c505faf3a1d3fe89159",
       "supersedesId": "ctx_c890a04fb87d7187"
+    },
+    {
+      "entryId": "ctx_9d2e37af38f749dd",
+      "seq": 97,
+      "kind": "decision",
+      "title": "F62 Resolved: Broken cross-chain CREATE nonce-42 collision; CAIP-10 scoping standardized",
+      "body": "Addressed cross-chain CREATE address collision (F62):\n1. Root cause: Base Sepolia MitraVault and Tempo Moderato MitraClearing were both transaction nonce 0x2a (42) for deployer 0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D, generating identical 0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b.\n2. Resolution:\n   - Redeployed MitraClearing on Tempo Moderato at nonce 43 (0x2b) -> 0x6ca633a0acbbd8838329e0b629a7cc12d029a31e (blk 38263099, tx 0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c). Verified operator() == deployer.\n   - Standardized all deployment records in lib/evm/deployments.json with CAIP-10 chain-scoped identifiers (eip155:<chainId>:<address>).\n   - Retained superseded deployment in deployments.json and PROOF_LEDGER.md with explicit notes explaining provenance.\n3. FAILURES.md: Closed F61, logged and closed F62.",
+      "status": "active",
+      "scope": "cross-chain",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-05T09:56:38.370Z",
+      "parents": [
+        "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+      ],
+      "hash": "6b78c295d44a8adbaebf3c277859501d8c799a232c30406eda8c0b509aa05b3d"
+    },
+    {
+      "entryId": "ctx_605a9c010906504e",
+      "seq": 98,
+      "kind": "handoff",
+      "title": "Master Handoff: Multi-Chain Deployments Complete, PK3/PK4 Shipped (71ff031), PK1 & PK2 Harness Queued",
+      "body": "Full repository & deployment state as of 2026-10-05 (branch feat/mitra-vault-v2-reseed, tip 71ff031 pushed):\n\n1. ON-CHAIN DEPLOYMENTS VERIFIED LIVE:\n   - Base Sepolia (84532):\n     * Canonical MitraVault v2 (F61 token-scoped): 0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b (blk 47687892, typehash 0xcae3f4fb...)\n     * MitraClearing (Phase 7): 0x2179bf055c62c57eeb4045957d57f7e460df76d9 (blk 47688141, operator 0xAeA8bc34...eb26D)\n     * Sagas re-verified live: lock blk 47688063, refund blk 47688074 (verify:saga-events 100% pass)\n   - Tempo Moderato (42431):\n     * Canonical MitraVault v2 (F61 token-scoped): 0x81798c6f4ff1257b53b0be512c979f2656269329 (blk 38179538)\n     * MitraClearing (Phase 7): 0x6ca633a0acbbd8838329e0b629a7cc12d029a31e (blk 38263099, redeployed at nonce 43 breaking F62 cross-chain CREATE collision with Base vault)\n     * Sagas re-verified live: lock blk 38179597, refund blk 38179633\n   - Solana Devnet:\n     * Program GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY upgraded with (principal, holder) mandate reseed (slot 507483795+).\n     * PR #31 merged into history. 42/42 devnet tests pass live (solana-transport & solana-agreement-live).\n   - Standardized CAIP-10 (eip155:<chainId>:<address>) across lib/evm/deployments.json. F61 & F62 recorded CLOSED in FAILURES.md.\n\n2. SHIPPED & PUSHED IN COMMIT 71ff031:\n   - Work Package 3 (Console & Observability): listIntegrations() & listEvidenceRecords() added to store. /evidence & /integrations rewired via getStore() with <DataSource backend={store.backend}/>. 0 seed imports remain. GET /api/v1/metrics added (Prometheus 0.0.4 gauges/counters).\n   - Work Package 4 (Postgres CI Isolation): vitest.config.ts gates fileParallelism on !process.env.DATABASE_URL. Added test:postgres and test:all scripts. 853 tests pass.\n   - Work Package 2 (Arcium SBF Build): SBPFv3 toolchain skew (F44) solved via cargo-build-sbf --tools-version v1.57 --arch v1. probe.so built at target/deploy/probe.so (423 KB).\n\n3. DIVISION OF LABOR & NEXT QUEUE:\n   - PURPLE ACTIVE QUEUE (Do not collide):\n     * F55: Actor identity header (X-Mitra-Actor-Id) in REST & MCP to un-withhold fund_agreement, accept_deliverable, reject_deliverable, register_agent.\n     * Phase 7: scripts/run-live-clearing-epoch.mjs executing 3-party netting against live deployed MitraClearing contracts.\n   - LEAD ACTIVE QUEUE (Ready for next session):\n     * Work Package 1 (Phase 4 Commerce Substrate): createSpace in store, POST /api/v1/spaces, GET /api/v1/spaces/[id], lib/adapters/erc8183.ts, and tests/commerce-lifecycle.test.ts. Spec written at docs/HANDOFF_LEAD_PACKAGES.md.\n     * Work Package 2 Harness: tests/arcium-circuit.test.ts testing evaluate_mandate logic.",
+      "status": "active",
+      "scope": "roadmap",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-05T11:42:30.092Z",
+      "parents": [
+        "6b78c295d44a8adbaebf3c277859501d8c799a232c30406eda8c0b509aa05b3d"
+      ],
+      "hash": "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
+    },
+    {
+      "entryId": "ctx_1115d8061a809d55",
+      "seq": 99,
+      "kind": "decision",
+      "title": "PK1 Commerce Substrate & PK2 Arcium Harness Shipped (f83e63c)",
+      "body": "Commit f83e63c landed and verified:\n1. PK1 (Phase 4 Commerce Substrate):\n   - Added createSpace to Repository interface and both Postgres (upsert on space_id) and in-memory backends.\n   - Implemented POST /api/v1/spaces (validates governance, closed-union assets, and budget headroom) and GET /api/v1/spaces/[id].\n   - Added lib/adapters/erc8183.ts with reachability-preserving mapping and lossy projection flags.\n   - Added tests/commerce-lifecycle.test.ts (17/17) covering accept->release, reject->refund, Space containment guards, and ERC-8183 round-tripping.\n2. PK2 (Arcium Circuit Harness):\n   - Added tests/arcium-circuit.test.ts (14/14) mirroring Arcis circuit branchless logic.\n   - Pinned both F43 defects and verified reachability of all 7 reason codes.\n3. Gates: forge test 36/36, npm test 53 files (835 pass, 0 fail), typecheck 0 errors.",
+      "status": "active",
+      "scope": "commerce",
+      "tags": [],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-05T11:58:00.323Z",
+      "parents": [
+        "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
+      ],
+      "hash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
     }
   ],
   "actors": [
@@ -2022,5 +2070,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "4d7c17014427f8737b7240bc64d5e710fdea1c81f02e8c505faf3a1d3fe89159"
+  "tipHash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
 }

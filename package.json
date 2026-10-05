@@ -9,6 +9,8 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:postgres": "vitest run --no-file-parallelism",
+    "test:all": "npm test && npm run test:postgres",
     "test:watch": "vitest",
     "mcp": "tsx scripts/mitra-mcp.ts",
     "contracts:setup": "cd contracts && forge install foundry-rs/forge-std --no-git",

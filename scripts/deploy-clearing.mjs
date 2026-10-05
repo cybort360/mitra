@@ -20,9 +20,9 @@ const OUT = "lib/evm/deployments.json";
 const ART = "out/MitraClearing.sol/MitraClearing.json";
 
 /** Bump when the contract changes in a way that makes earlier deployments unsafe to reuse. */
-const REVISION = "F62";
+const REVISION = "F64";
 const SUPERSEDED_REASON =
-  "F62: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, " +
+  "F64: no challenge outcome (a challenged epoch finalized), FROZEN accepted obligations, " +
   "a late result swap finalized without a fresh window; see forge/FAILURES.md";
 const REDEPLOY = process.argv.includes("--redeploy");
 
@@ -49,18 +49,20 @@ async function main() {
     const pub = createPublicClient({ transport: http(cfg.rpc) });
     const wallet = createWalletClient({ account, chain, transport: http(cfg.rpc) });
 
+    // `--force` / FORCE_REDEPLOY=1 (the lead's flag) and `--redeploy` both force a fresh instance.
+    const force = REDEPLOY || process.env.FORCE_REDEPLOY === "1" || process.argv.includes("--force");
     let addr;
     let hash;
     let blockNumber;
 
-    // F62: an entry deployed before the fix (no `revision`) is not reused. It is
-    // kept, labelled, under `clearingSuperseded`, and a fresh instance is deployed.
+    // F64: an entry deployed before the fix (no matching `revision`) is not reused.
+    // It is kept, labelled, under `clearingSuperseded`, and a fresh instance is deployed.
     const prior = db.clearing?.[name];
-    if (prior?.address && (REDEPLOY || prior.revision !== REVISION)) {
+    if (prior?.address && (force || prior.revision !== REVISION)) {
       db.clearingSuperseded ??= [];
       db.clearingSuperseded.push({ network: name, ...prior, supersededAt: new Date().toISOString(), reason: SUPERSEDED_REASON });
       delete db.clearing[name];
-      console.log(`\n${name}: superseding ${prior.address} (${prior.revision ?? "pre-F62"})`);
+      console.log(`\n${name}: superseding ${prior.address} (${prior.revision ?? "pre-F64"})`);
     }
 
     if (db.clearing?.[name]?.address) {
@@ -84,6 +86,7 @@ async function main() {
       console.log(`\n=== ${cfg.name} (${cfg.id}) ===`);
       console.log(`  operator  ${account.address}`);
       console.log(`  clearing  ${addr}`);
+      console.log(`  caip10    eip155:${cfg.id}:${addr}`);
       console.log(`  tx        ${hash}`);
       console.log(`  block     ${blockNumber}`);
     }
@@ -120,6 +123,7 @@ async function main() {
 
     db.clearing[name] = {
       address: addr,
+      caip10: `eip155:${cfg.id}:${addr}`,
       chainId: cfg.id,
       operator: account.address,
       deployTx: hash,
