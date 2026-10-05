@@ -2613,9 +2613,9 @@ that system's hash, not only against itself.
 
 ## F55 — the API has no caller identity, so any caller can act as any party to an agreement
 
-**Status:** `BLOCKED_INTERNAL` — open, for the lead. Contained on the MCP surface, not
-fixed: `mitra_fund_agreement`, `mitra_accept_deliverable` and `mitra_reject_deliverable`
-are withheld from the live MCP server (decided by human:purple, 2026-10-04).
+**Status:** fixed on `feat/backlog-on-v2` (2026-10-05), tested on the in-memory store only —
+the Postgres suite and a live (deployed) run are still to do. Was `BLOCKED_INTERNAL`, with
+fund/accept/reject withheld from MCP (decided by human:purple, 2026-10-04).
 **Found:** 2026-10-04, before exposing the agreement verbs to external agents (sprint item 4).
 
 No route in `app/api` authenticates its caller — there is no middleware, header check or
@@ -2635,6 +2635,29 @@ credentials, or signed requests — `verifyAuthorisation` + `RpcSignatureVerifie
 verify EOA, ERC-1271 and ERC-6492 signatures on chain), and role checks in the kernel:
 only the client or evaluator may accept or reject, only the provider may submit, only the
 client may fund. Then the three MCP tools can move from `withheld` to `served`.
+
+**Fix (decided by human:purple 2026-10-05, shared context `ctx_d236086bde9601ee`):** every
+agreement transition and every agent registration is an EIP-712 signed request
+(`lib/identity/signed-request.ts`) — `MitraRequest { op, agreementId, fromStatus, actor,
+bodyHash, expiresAt }` under `{ name: "Mitra API", version: "1", chainId }`. The route checks,
+in order: a signature is present (`SIGNATURE_REQUIRED`, 401); `actor` holds a role the op
+allows (`AGREEMENT_OP_ROLES` in `lib/kernel/commerce.ts` — fund: client; start, submit:
+provider; accept, reject, refund: client or evaluator; else `ACTOR_NOT_PERMITTED`, 403);
+`actor` is a registered agent; the signer is one of its wallets **on the chain signed for**;
+the signature verifies over the request rebuilt from the stored agreement and the parsed
+body (EOA, then ERC-1271/6492 via `verifyDigestSignature`); not expired. No nonce store:
+the agreement machine is acyclic and the signature commits to `fromStatus`, so the
+transition it authorises makes it stale. Registration (`POST /api/v1/agents`) needs a
+proof from every EVM wallet listed, refuses an existing agentId (`AGENT_EXISTS`, 409) and
+refuses Solana wallets until an ed25519 proof exists (`WALLET_CHAIN_UNPROVABLE`). The four
+MCP tools are served and pass the agent's `auth` through; the server still holds no keys.
+A bare `X-Mitra-Actor-Id` header (the lead's seq 83 proposal) and API keys were rejected.
+
+**Rejected as identity:** a party that is not a registered agent (e.g. the seeded
+`mech-research-backup-04`) can no longer instruct a transition at all; it must register.
+**Not covered:** who may OPEN an agreement (funding still needs the named client's
+signature); the pre-existing race where two concurrent copies of one transition both
+apply (`updateAgreement` is not compare-and-swap) — identity does not change it.
 
 ## F56 — the in-memory event log accepted every event and kept none
 
