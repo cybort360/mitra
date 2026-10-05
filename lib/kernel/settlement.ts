@@ -20,7 +20,7 @@
  * Pure by kernel convention: no clock, no store, no IO.
  */
 
-import type { Agreement, Chain, Mandate, Money, Reservation, Vault } from "@/lib/domain/types";
+import type { Agent, Agreement, Chain, ClearingEpoch, Mandate, Money, Reservation, Vault } from "@/lib/domain/types";
 import { assertSettlementBinding, fail, pass, type Result } from "@/lib/kernel/commerce";
 import { validateExecutionBinding } from "@/lib/kernel/authorization";
 import { actionDigestFor } from "@/lib/store/ids";
@@ -136,5 +136,102 @@ export function planAgreementSettlement(input: {
     chain,
     amount: agreement.price,
     to: agreement.payTo.address,
+  });
+}
+
+// ── Clearing residuals (Phase 7) ─────────────────────────────────────────────
+//
+// A FINALIZED epoch's residual transfer is paid like an agreement: from the
+// FROM party's vault, under its mandate, by a reservation the policy engine
+// approved for exactly that transfer, through the execution guard. Decision:
+// shared context ctx_9b9e7a8c3172e71b.
+
+/** Fixed for the same reason as AGREEMENT_PAYMENT_CAPABILITY: it is part of the digest. */
+export const RESIDUAL_CAPABILITY = "clearing_residual";
+
+/** Names one residual transfer of one epoch. */
+export const residualRef = (epochId: string, index: number) => `${epochId}#${index}`;
+
+/** One settlement per residual, by construction: the store's key refuses a second. */
+export const residualSettlementIdFor = (epochId: string, index: number) => `set_${epochId}_${index}`;
+
+/** The action digest a reservation must carry to pay residual `index` of `epoch`. */
+export function residualPaymentDigest(
+  epoch: ClearingEpoch,
+  index: number,
+  reservation: Pick<Reservation, "vaultId" | "mandateId" | "mandateVersion">,
+  chain: Chain,
+): string {
+  const t = epoch.residualTransfers[index];
+  return actionDigestFor({
+    vaultId: reservation.vaultId,
+    mandateId: reservation.mandateId,
+    mandateVersion: reservation.mandateVersion,
+    amount: t.amount,
+    asset: epoch.asset,
+    chain,
+    counterparty: t.to,
+    capability: RESIDUAL_CAPABILITY,
+    residualRef: residualRef(epoch.epochId, index),
+  });
+}
+
+/**
+ * Decides whether `reservation` may pay residual `transferIndex` of `epoch`, and to
+ * which address. The payee is the TO party's registered wallet on the epoch's
+ * chain, so no caller can name where the money goes.
+ */
+export function planResidualSettlement(input: {
+  epoch: ClearingEpoch;
+  transferIndex: number;
+  /** The TO party's agent record, from the registry. */
+  payee: Pick<Agent, "agentId" | "wallets">;
+  reservation: Reservation;
+  mandate: Mandate;
+  vault: Vault;
+  now: Date;
+  /** From the store, never from the request. */
+  consumedNonces: number[];
+}): Result<SettlementPlan> {
+  const { epoch, transferIndex, payee, reservation, mandate, vault, now } = input;
+
+  // FINALIZED, or SETTLING once its first residual is paid. Never before: a
+  // result still open to challenge is not a debt yet.
+  if (epoch.status !== "FINALIZED" && epoch.status !== "SETTLING") return fail("EPOCH_NOT_FINALIZED");
+  const transfer = epoch.residualTransfers[transferIndex];
+  if (!transfer) return fail("UNKNOWN_RESIDUAL");
+  const chain = epoch.settlementDomain;
+
+  if (payee.agentId !== transfer.to) return fail("PAYEE_IS_NOT_THE_CREDITOR");
+  const wallet = payee.wallets.find((w) => w.chain === chain);
+  if (!wallet) return fail("PAYEE_HAS_NO_WALLET_ON_CHAIN");
+
+  if (reservation.residualRef !== residualRef(epoch.epochId, transferIndex)) return fail("RESERVATION_NOT_FOR_RESIDUAL");
+  if (mandate.mandateId !== reservation.mandateId) return fail("MANDATE_MISMATCH");
+  // The debtor pays, so the mandate spending must be the debtor's.
+  if (mandate.agentId !== transfer.from) return fail("MANDATE_NOT_HELD_BY_DEBTOR");
+  if (mandate.vaultId !== vault.vaultId || reservation.vaultId !== vault.vaultId) return fail("VAULT_MISMATCH");
+  if (vault.chain !== chain) return fail("VAULT_CHAIN_MISMATCH");
+
+  if (mandate.status !== "ACTIVE") return fail("MANDATE_NOT_ACTIVE");
+  if (now >= new Date(mandate.expiresAt)) return fail("MANDATE_EXPIRED");
+  if (vault.emergencyFreeze) return fail("VAULT_FROZEN");
+
+  const guard = validateExecutionBinding(
+    reservation,
+    residualPaymentDigest(epoch, transferIndex, reservation, chain),
+    transfer.amount,
+    epoch.asset,
+    chain,
+    now,
+    { consumedNonces: input.consumedNonces },
+  );
+  if (!guard.ok) return fail(guard.reason);
+
+  return pass({
+    settlementId: residualSettlementIdFor(epoch.epochId, transferIndex),
+    chain,
+    amount: { asset: epoch.asset, amount: transfer.amount },
+    to: wallet.address,
   });
 }

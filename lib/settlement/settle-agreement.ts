@@ -31,14 +31,19 @@
  * hash-chained per run but not yet signed.
  */
 
-import type { Agreement, Settlement } from "@/lib/domain/types";
+import type { Agreement, ClearingEpoch, Reservation, Settlement, Vault } from "@/lib/domain/types";
 import type { EconomicRepository } from "@/lib/store/repository";
-import { planAgreementSettlement } from "@/lib/kernel/settlement";
+import { planAgreementSettlement, planResidualSettlement, residualSettlementIdFor } from "@/lib/kernel/settlement";
 import { settlementReceipt, type ReceiptSigner } from "@/lib/kernel/receipts";
+import { toAtomic } from "@/lib/evm/eip712";
 import type { Rails, SettlementRail } from "@/lib/settlement/rails";
+import type { ClearingReader } from "@/lib/settlement/clearing-reader";
+
+/** What a settlement discharged: the agreement it paid, or the epoch whose residual it paid. */
+type Discharged = { agreement?: Agreement; epoch?: ClearingEpoch };
 
 export type SettleOutcome =
-  | { ok: true; httpStatus: 200 | 202; settlement: Settlement; agreement: Agreement }
+  | ({ ok: true; httpStatus: 200 | 202; settlement: Settlement } & Discharged)
   | { ok: false; httpStatus: number; reason: string; settlement?: Settlement };
 
 const refuse = (httpStatus: number, reason: string, settlement?: Settlement): SettleOutcome =>
@@ -52,6 +57,56 @@ type SettlementStore = EconomicRepository &
 function canPersist(repo: EconomicRepository): repo is SettlementStore {
   return typeof repo.getAgreement === "function" && typeof repo.updateAgreement === "function";
 }
+
+/**
+ * The thing a settlement pays, and what confirming it changes. The IO below is
+ * the same for an agreement and a clearing residual; only this differs.
+ */
+interface Subject {
+  runId: string;
+  metadata: Record<string, unknown>;
+  current: Discharged;
+  settledTitle: string;
+  settledDescription: string;
+  /** Said while the transfer is broadcast but unconfirmed. */
+  pendingDescription: string;
+  /** Applied once the chain confirmed; idempotent. */
+  onConfirmed(settlement: Settlement): Promise<Discharged>;
+}
+
+const agreementSubject = (repo: SettlementStore, agreement: Agreement): Subject => ({
+  runId: agreement.runId,
+  metadata: { agreementId: agreement.agreementId },
+  current: { agreement },
+  settledTitle: "Agreement settled",
+  settledDescription: "The transfer was confirmed from the chain and bound to this agreement.",
+  pendingDescription: "The transfer was broadcast but the chain has not confirmed it. The agreement is not marked settled.",
+  async onConfirmed(settlement) {
+    const settled: Agreement = { ...agreement, settledRef: settlement.settlementId, version: agreement.version + 1 };
+    await repo.updateAgreement(settled);
+    return { agreement: settled };
+  },
+});
+
+const residualSubject = (repo: EconomicRepository, epoch: ClearingEpoch, transferIndex: number): Subject => ({
+  runId: `run_${epoch.epochId}`,
+  metadata: { epochId: epoch.epochId, transferIndex },
+  current: { epoch },
+  settledTitle: "Clearing residual settled",
+  settledDescription: "The residual transfer was confirmed from the chain against the epoch MitraClearing finalized.",
+  pendingDescription: "The residual transfer was broadcast but the chain has not confirmed it. The epoch is not marked settled.",
+  async onConfirmed() {
+    // SETTLED once every residual has a confirmed settlement; SETTLING until then.
+    const confirmed = new Set((await repo.listSettlements())
+      .filter((s) => s.epochId === epoch.epochId && s.status === "CONFIRMED")
+      .map((s) => s.settlementId));
+    const latest = (await repo.getEpoch(epoch.epochId)) ?? epoch;
+    const all = latest.residualTransfers.every((_, i) => confirmed.has(residualSettlementIdFor(epoch.epochId, i)));
+    const next: ClearingEpoch = { ...latest, status: all ? "SETTLED" : "SETTLING" };
+    await repo.saveEpoch(next);
+    return { epoch: next };
+  },
+});
 
 export async function settleAgreement(
   repo: EconomicRepository,
@@ -72,13 +127,93 @@ export async function settleAgreement(
   if (!vault) return refuse(404, "VAULT_NOT_FOUND");
 
   // From the store, never the request (same rule as /reservations/execute).
-  const consumedNonces = (await repo.listReservations(vault.vaultId))
-    .filter((r) => r.status === "COMMITTED" || r.status === "SETTLING" || r.status === "SETTLED")
-    .map((r) => r.nonce);
+  const consumedNonces = await consumedNoncesOf(repo, vault);
 
   const plan = planAgreementSettlement({ agreement, reservation, mandate, vault, now: input.now, consumedNonces });
   if (!plan.ok) return refuse(409, plan.reason);
-  const { settlementId, chain, amount, to } = plan.value;
+
+  return execute(repo, rails, {
+    plan: plan.value, reservation, vault, now: input.now, receiptSigner: input.receiptSigner,
+    subject: agreementSubject(repo, agreement), draft: { runId: agreement.runId, agreementId: agreement.agreementId },
+  });
+}
+
+/**
+ * Pays residual `transferIndex` of a FINALIZED epoch (Phase 7). Refused unless the
+ * kernel plan passes AND MitraClearing on the epoch's chain says the epoch is
+ * Finalized (or Settling) with exactly this transfer at this index.
+ */
+export async function settleResidual(
+  repo: EconomicRepository,
+  rails: Rails,
+  reader: ClearingReader | null,
+  input: { epochId: string; transferIndex: number; reservationId: string; now: Date; receiptSigner?: ReceiptSigner },
+): Promise<SettleOutcome> {
+  const epoch = await repo.getEpoch(input.epochId);
+  if (!epoch) return refuse(404, "EPOCH_NOT_FOUND");
+  const transfer = epoch.residualTransfers[input.transferIndex];
+  if (!transfer) return refuse(404, "UNKNOWN_RESIDUAL");
+  const payee = await repo.getAgent(transfer.to);
+  if (!payee) return refuse(404, "PAYEE_NOT_REGISTERED");
+  const reservation = await repo.getReservation(input.reservationId);
+  if (!reservation) return refuse(404, "RESERVATION_NOT_FOUND");
+  const mandate = await repo.getMandate(reservation.mandateId);
+  if (!mandate) return refuse(404, "MANDATE_NOT_FOUND");
+  const vault = await repo.getVault(reservation.vaultId);
+  if (!vault) return refuse(404, "VAULT_NOT_FOUND");
+
+  const plan = planResidualSettlement({
+    epoch, transferIndex: input.transferIndex, payee, reservation, mandate, vault, now: input.now,
+    consumedNonces: await consumedNoncesOf(repo, vault),
+  });
+  if (!plan.ok) return refuse(409, plan.reason);
+
+  // The chain must agree before anything is claimed or spent.
+  if (!reader) return refuse(503, "CLEARING_READER_NOT_CONFIGURED");
+  let onChain: Awaited<ReturnType<ClearingReader["residual"]>>;
+  try {
+    onChain = await reader.residual({ chain: plan.value.chain, epochId: epoch.epochId, transferIndex: input.transferIndex });
+  } catch (e) {
+    return refuse(503, message(e).startsWith("CLEARING_READER_NOT_CONFIGURED") ? "CLEARING_READER_NOT_CONFIGURED" : "CLEARING_READ_FAILED");
+  }
+  if (onChain && onChain.status !== "Finalized" && onChain.status !== "Settling") {
+    return refuse(409, "RESIDUAL_NOT_FINALIZED_ON_CHAIN");
+  }
+  const rail = rails[plan.value.chain];
+  const matches = !!onChain && !!rail
+    && onChain.from.toLowerCase() === rail.payer.toLowerCase()
+    && onChain.to.toLowerCase() === plan.value.to.toLowerCase()
+    && onChain.amountAtomic === toAtomic(plan.value.amount.amount, 6);
+  if (rail && !matches) return refuse(409, "RESIDUAL_MISMATCH_ON_CHAIN");
+
+  return execute(repo, rails, {
+    plan: plan.value, reservation, vault, now: input.now, receiptSigner: input.receiptSigner,
+    subject: residualSubject(repo, epoch, input.transferIndex), draft: { runId: `run_${epoch.epochId}`, epochId: epoch.epochId },
+  });
+}
+
+async function consumedNoncesOf(repo: EconomicRepository, vault: Vault): Promise<number[]> {
+  return (await repo.listReservations(vault.vaultId))
+    .filter((r) => r.status === "COMMITTED" || r.status === "SETTLING" || r.status === "SETTLED")
+    .map((r) => r.nonce);
+}
+
+/** Steps 1 (rail checks) to 5, shared by every kind of settlement. */
+async function execute(
+  repo: EconomicRepository,
+  rails: Rails,
+  input: {
+    plan: { settlementId: string; chain: Settlement["chain"]; amount: { asset: Settlement["asset"]; amount: number }; to: string };
+    reservation: Reservation;
+    vault: Vault;
+    now: Date;
+    receiptSigner?: ReceiptSigner;
+    subject: Subject;
+    draft: Pick<Settlement, "runId" | "agreementId" | "epochId">;
+  },
+): Promise<SettleOutcome> {
+  const { settlementId, chain, amount, to } = input.plan;
+  const { reservation, vault, subject } = input;
 
   const rail = rails[chain];
   if (!rail) return refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED");
@@ -95,8 +230,7 @@ export async function settleAgreement(
   // ── 2. claim ───────────────────────────────────────────────────────────────
   let settlement: Settlement = {
     settlementId,
-    runId: agreement.runId,
-    agreementId: agreement.agreementId,
+    ...input.draft,
     reservationId: reservation.reservationId,
     obligationIds: [],
     chain,
@@ -141,7 +275,7 @@ export async function settleAgreement(
     // operator knows what to reconcile.
     settlement = { ...settlement, failureReason: `OUTCOME_UNKNOWN: ${message(e)}` };
     await repo.updateSettlement(settlement);
-    await event(repo, input.now, agreement, settlement, "FAILURE", "Settlement outcome unknown",
+    await event(repo, input.now, subject, settlement, "FAILURE", "Settlement outcome unknown",
       "The transport failed after the nonce was consumed. The transfer may or may not have been broadcast; reconcile against the chain before any retry.");
     return refuse(502, "SETTLEMENT_OUTCOME_UNKNOWN", settlement);
   }
@@ -149,7 +283,7 @@ export async function settleAgreement(
   await repo.updateSettlement(settlement);
 
   // ── 5. verify ──────────────────────────────────────────────────────────────
-  return finish(repo, rail, agreement, settlement, input.now, input.receiptSigner);
+  return finish(repo, rail, subject, settlement, input.now, input.receiptSigner);
 }
 
 /**
@@ -164,20 +298,31 @@ export async function confirmSettlement(
   if (!canPersist(repo)) return refuse(501, "STORE_CANNOT_PERSIST_SETTLEMENT");
   const settlement = await repo.getSettlement(input.settlementId);
   if (!settlement) return refuse(404, "SETTLEMENT_NOT_FOUND");
-  if (!settlement.agreementId) return refuse(409, "SETTLEMENT_PAYS_NO_AGREEMENT");
-  const agreement = await repo.getAgreement(settlement.agreementId);
-  if (!agreement) return refuse(404, "AGREEMENT_NOT_FOUND");
-  if (settlement.status === "CONFIRMED") return { ok: true, httpStatus: 200, settlement, agreement };
+  let subject: Subject;
+  if (settlement.agreementId) {
+    const agreement = await repo.getAgreement(settlement.agreementId);
+    if (!agreement) return refuse(404, "AGREEMENT_NOT_FOUND");
+    subject = agreementSubject(repo, agreement);
+  } else if (settlement.epochId) {
+    const epoch = await repo.getEpoch(settlement.epochId);
+    if (!epoch) return refuse(404, "EPOCH_NOT_FOUND");
+    const index = epoch.residualTransfers.findIndex((_, i) => residualSettlementIdFor(epoch.epochId, i) === settlement.settlementId);
+    if (index < 0) return refuse(409, "UNKNOWN_RESIDUAL");
+    subject = residualSubject(repo, epoch, index);
+  } else {
+    return refuse(409, "SETTLEMENT_PAYS_NO_AGREEMENT");
+  }
+  if (settlement.status === "CONFIRMED") return { ok: true, httpStatus: 200, settlement, ...subject.current };
   if (settlement.status !== "SUBMITTED" || !settlement.txHash) return refuse(409, `SETTLEMENT_${settlement.status}`, settlement);
   const rail = rails[settlement.chain];
   if (!rail) return refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED");
-  return finish(repo, rail, agreement, settlement, input.now, input.receiptSigner);
+  return finish(repo, rail, subject, settlement, input.now, input.receiptSigner);
 }
 
 async function finish(
-  repo: SettlementStore,
+  repo: EconomicRepository,
   rail: SettlementRail,
-  agreement: Agreement,
+  subject: Subject,
   submitted: Settlement,
   now: Date,
   receiptSigner?: ReceiptSigner,
@@ -189,9 +334,8 @@ async function finish(
     // A failed read is not a failed transfer. It stays SUBMITTED.
   }
   if (!confirmed) {
-    await event(repo, now, agreement, submitted, "WARNING", "Settlement submitted, not yet confirmed",
-      "The transfer was broadcast but the chain has not confirmed it. The agreement is not marked settled.");
-    return { ok: true, httpStatus: 202, settlement: submitted, agreement };
+    await event(repo, now, subject, submitted, "WARNING", "Settlement submitted, not yet confirmed", subject.pendingDescription);
+    return { ok: true, httpStatus: 202, settlement: submitted, ...subject.current };
   }
 
   // Capital first, and exactly once: SETTLING → SETTLED is the gate, so a second,
@@ -213,24 +357,22 @@ async function finish(
   const receipt = await repo.appendReceipt(settlementReceipt(confirmedRecord, rail.network, now), receiptSigner);
   const settlement: Settlement = { ...confirmedRecord, receiptId: receipt.receiptId };
   await repo.updateSettlement(settlement);
-  const settled: Agreement = { ...agreement, settledRef: settlement.settlementId, version: agreement.version + 1 };
-  await repo.updateAgreement(settled);
-  await event(repo, now, settled, settlement, "SUCCESS", "Agreement settled",
-    "The transfer was confirmed from the chain and bound to this agreement.");
-  return { ok: true, httpStatus: 200, settlement, agreement: settled };
+  const discharged = await subject.onConfirmed(settlement);
+  await event(repo, now, subject, settlement, "SUCCESS", subject.settledTitle, subject.settledDescription);
+  return { ok: true, httpStatus: 200, settlement, ...discharged };
 }
 
 async function event(
   repo: EconomicRepository,
   at: Date,
-  agreement: Agreement,
+  subject: Subject,
   settlement: Settlement,
   status: "SUCCESS" | "WARNING" | "FAILURE",
   title: string,
   description: string,
 ) {
   await repo.appendEvent({
-    runId: agreement.runId,
+    runId: subject.runId,
     at: at.toISOString(),
     kind: "SETTLEMENT",
     title,
@@ -238,7 +380,7 @@ async function event(
     status,
     objectRef: settlement.settlementId,
     metadata: {
-      agreementId: agreement.agreementId,
+      ...subject.metadata,
       chain: settlement.chain,
       amount: settlement.amount,
       asset: settlement.asset,

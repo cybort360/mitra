@@ -341,12 +341,12 @@ export class PostgresRepository implements EconomicRepository {
       const { rows: inserted } = await client.query(
         `INSERT INTO mitra.reservations
            (reservation_id, run_id, vault_id, intent_id, mandate_id, mandate_version,
-            asset, amount, chain, action_digest, expires_at, nonce, status, version, agreement_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'RESERVED',1,$13)
+            asset, amount, chain, action_digest, expires_at, nonce, status, version, agreement_id, residual_ref)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'RESERVED',1,$13,$14)
          RETURNING *`,
         [input.reservationId, input.runId, input.vaultId, input.intentId, input.mandateId,
           input.mandateVersion, input.asset, input.amount, input.chain, input.actionDigest,
-          input.expiresAt, nonce, input.agreementId ?? null],
+          input.expiresAt, nonce, input.agreementId ?? null, input.residualRef ?? null],
       );
       // Read the updated vault back on the same connection, inside the
       // transaction, so no second connection is needed while holding the lock.
@@ -478,10 +478,10 @@ export class PostgresRepository implements EconomicRepository {
     await this.pool.query(
       `INSERT INTO mitra.reservations
          (reservation_id, run_id, vault_id, intent_id, mandate_id, mandate_version,
-          asset, amount, chain, action_digest, expires_at, nonce, status, version, agreement_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          asset, amount, chain, action_digest, expires_at, nonce, status, version, agreement_id, residual_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (reservation_id) DO UPDATE SET
-         agreement_id = EXCLUDED.agreement_id,
+         agreement_id = EXCLUDED.agreement_id, residual_ref = EXCLUDED.residual_ref,
          run_id = EXCLUDED.run_id, vault_id = EXCLUDED.vault_id,
          intent_id = EXCLUDED.intent_id, mandate_id = EXCLUDED.mandate_id,
          mandate_version = EXCLUDED.mandate_version, asset = EXCLUDED.asset,
@@ -491,7 +491,7 @@ export class PostgresRepository implements EconomicRepository {
       [reservation.reservationId, reservation.runId, reservation.vaultId, reservation.intentId,
         reservation.mandateId, reservation.mandateVersion, reservation.asset, reservation.amount,
         reservation.chain, reservation.actionDigest, reservation.expiresAt, reservation.nonce,
-        reservation.status, reservation.version, reservation.agreementId ?? null],
+        reservation.status, reservation.version, reservation.agreementId ?? null, reservation.residualRef ?? null],
     );
     return reservation;
   }
@@ -726,6 +726,7 @@ function rowToReservation(r: Record<string, unknown>): Reservation {
     expiresAt: new Date(String(r.expires_at)).toISOString(), nonce: num(r.nonce),
     status: String(r.status) as Reservation["status"], version: num(r.version),
     ...(r.agreement_id != null ? { agreementId: String(r.agreement_id) } : {}),
+    ...(r.residual_ref != null ? { residualRef: String(r.residual_ref) } : {}),
   };
 }
 

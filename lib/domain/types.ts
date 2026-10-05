@@ -285,6 +285,8 @@ export interface Reservation {
   vaultId: string;
   intentId: string;
   agreementId?: string;
+  /** The clearing residual this reservation pays, `<epochId>#<index>` (Phase 7). Bound into the digest. */
+  residualRef?: string;
   mandateId: string;
   mandateVersion: number;
   asset: AssetSymbol;

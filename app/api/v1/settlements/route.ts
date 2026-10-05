@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getStore } from "@/lib/store/provider";
 import { getRails } from "@/lib/settlement/rails";
-import { confirmSettlement, settleAgreement } from "@/lib/settlement/settle-agreement";
+import { confirmSettlement, settleAgreement, settleResidual } from "@/lib/settlement/settle-agreement";
+import { getClearingReader } from "@/lib/settlement/clearing-reader";
 import { receiptSignerFromEnv } from "@/lib/settlement/receipt-signer";
 
 /**
@@ -33,6 +34,15 @@ const PostSchema = z.discriminatedUnion("op", [
     now: z.string().datetime().optional(),
   }),
   z.object({
+    // Phase 7: residual `transferIndex` of a FINALIZED epoch. The payee, amount
+    // and chain come from the epoch and the registry, and MitraClearing must agree.
+    op: z.literal("settleResidual"),
+    epochId: z.string().min(1),
+    transferIndex: z.number().int().min(0),
+    reservationId: z.string().min(1),
+    now: z.string().datetime().optional(),
+  }),
+  z.object({
     op: z.literal("confirm"),
     settlementId: z.string().min(1),
     now: z.string().datetime().optional(),
@@ -52,7 +62,11 @@ export async function POST(req: Request) {
   const receiptSigner = receiptSignerFromEnv();
   const outcome = body.op === "settle"
     ? await settleAgreement(repo, rails, { agreementId: body.agreementId, reservationId: body.reservationId, now, receiptSigner })
-    : await confirmSettlement(repo, rails, { settlementId: body.settlementId, now, receiptSigner });
+    : body.op === "settleResidual"
+      ? await settleResidual(repo, rails, getClearingReader(), {
+        epochId: body.epochId, transferIndex: body.transferIndex, reservationId: body.reservationId, now, receiptSigner,
+      })
+      : await confirmSettlement(repo, rails, { settlementId: body.settlementId, now, receiptSigner });
 
   if (!outcome.ok) {
     return NextResponse.json(
@@ -61,7 +75,7 @@ export async function POST(req: Request) {
     );
   }
   return NextResponse.json(
-    { data: { settlement: outcome.settlement, agreement: outcome.agreement }, backend, evidenceLevel: outcome.settlement.evidenceLevel },
+    { data: { settlement: outcome.settlement, agreement: outcome.agreement ?? null, epoch: outcome.epoch ?? null }, backend, evidenceLevel: outcome.settlement.evidenceLevel },
     { status: outcome.httpStatus },
   );
 }

@@ -279,6 +279,8 @@ export const MIGRATIONS: string[] = [
   -- pay no agreement. ADD COLUMN IF NOT EXISTS so a database created earlier
   -- gains it on the next migrate, which CREATE TABLE IF NOT EXISTS cannot do.
   ALTER TABLE mitra.reservations ADD COLUMN IF NOT EXISTS agreement_id TEXT;
+  -- The clearing residual a reservation pays, '<epochId>#<index>' (Phase 7). Nullable.
+  ALTER TABLE mitra.reservations ADD COLUMN IF NOT EXISTS residual_ref TEXT;
   -- The authorization's recipient constraint was accepted and then dropped on write
   -- (backlog #5): the column did not exist, so a listed authorization lost it.
   ALTER TABLE mitra.authorizations ADD COLUMN IF NOT EXISTS recipient_constraint TEXT;

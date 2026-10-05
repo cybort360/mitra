@@ -46,6 +46,11 @@ export function actionDigestFor(input: {
    * unchanged (the F11 consequence above does not recur).
    */
   agreementId?: string;
+  /**
+   * The clearing residual this action pays, `<epochId>#<index>`, bound the same way
+   * as `agreementId`: absent from the hashed object when absent.
+   */
+  residualRef?: string;
 }): string {
   return typedHash("mitra.action.v1", {
     vaultId: input.vaultId,
@@ -57,6 +62,7 @@ export function actionDigestFor(input: {
     counterparty: input.counterparty,
     capability: input.capability,
     ...(input.agreementId !== undefined ? { agreementId: input.agreementId } : {}),
+    ...(input.residualRef !== undefined ? { residualRef: input.residualRef } : {}),
   });
 }
 

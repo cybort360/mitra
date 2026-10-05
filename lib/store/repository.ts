@@ -77,6 +77,8 @@ export interface ReserveCapitalInput {
   expiresAt: string;
   /** The agreement this reservation pays, when it pays one. Bound into `actionDigest`. */
   agreementId?: string;
+  /** The clearing residual this reservation pays, `<epochId>#<index>`. Bound into `actionDigest`. */
+  residualRef?: string;
 }
 
 /**

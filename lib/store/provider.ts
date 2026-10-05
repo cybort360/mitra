@@ -256,6 +256,7 @@ export class InMemoryRepository implements EconomicRepository {
         actionDigest: input.actionDigest,
         expiresAt: input.expiresAt,
         ...(input.agreementId !== undefined ? { agreementId: input.agreementId } : {}),
+        ...(input.residualRef !== undefined ? { residualRef: input.residualRef } : {}),
         nonce: this.ledger.allocateNonce(input.vaultId),
         status: "RESERVED",
         version: 1,

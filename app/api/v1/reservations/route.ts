@@ -3,7 +3,7 @@ import { z } from "zod";
 import { evaluateProposal } from "@/lib/kernel/authorization";
 import { getStore } from "@/lib/store/provider";
 import { actionDigestFor, newId } from "@/lib/store/ids";
-import { AGREEMENT_PAYMENT_CAPABILITY } from "@/lib/kernel/settlement";
+import { AGREEMENT_PAYMENT_CAPABILITY, RESIDUAL_CAPABILITY, residualRef } from "@/lib/kernel/settlement";
 import { recordEvent } from "@/lib/store/events";
 import type { Reservation } from "@/lib/domain/types";
 
@@ -31,6 +31,12 @@ export const createReservationSchema = z.object({
    * reservation can settle that agreement and no other (`lib/kernel/settlement.ts`).
    */
   agreementId: z.string().min(1).optional(),
+  /**
+   * The clearing residual this reservation will pay (Phase 7): transfer
+   * `transferIndex` of a FINALIZED stored epoch. Bound into the digest as
+   * `<epochId>#<index>`, so the reservation pays that residual and no other.
+   */
+  residual: z.object({ epochId: z.string().min(1), transferIndex: z.number().int().min(0) }).optional(),
   now: z.string().datetime().optional(),
 });
 
@@ -58,6 +64,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "MANDATE_VAULT_MISMATCH", mandateVaultId: mandate.vaultId }, { status: 409 });
   }
 
+  // One reservation pays one thing: an agreement or a clearing residual, not both.
+  if (body.agreementId && body.residual) {
+    return NextResponse.json({ error: "RESERVATION_PAYS_ONE_THING", note: "No capital was reserved." }, { status: 400 });
+  }
+
   // A reservation for an agreement must carry exactly the terms the settlement will
   // re-derive. Settlement would refuse a mismatch anyway (ACTION_DIGEST_MISMATCH);
   // checking here means the capital is never reserved for a payment that cannot
@@ -81,12 +92,42 @@ export async function POST(req: Request) {
     }
   }
 
+  // A residual reservation must carry exactly the transfer's terms, for the same
+  // reason as an agreement's: capital is never reserved for a payment that the
+  // settlement would refuse.
+  let ref: string | undefined;
+  if (body.residual) {
+    const epoch = await repo.getEpoch(body.residual.epochId);
+    if (!epoch) return NextResponse.json({ error: "EPOCH_NOT_FOUND", epochId: body.residual.epochId }, { status: 404 });
+    if (epoch.status !== "FINALIZED" && epoch.status !== "SETTLING") {
+      return NextResponse.json({ error: "EPOCH_NOT_FINALIZED", status: epoch.status, note: "No capital was reserved." }, { status: 409 });
+    }
+    const transfer = epoch.residualTransfers[body.residual.transferIndex];
+    if (!transfer) return NextResponse.json({ error: "UNKNOWN_RESIDUAL", note: "No capital was reserved." }, { status: 404 });
+    const mismatch =
+      body.counterparty !== transfer.to ? "counterparty"
+      : body.amount !== transfer.amount ? "amount"
+      : body.asset !== epoch.asset ? "asset"
+      : body.chain !== epoch.settlementDomain ? "chain"
+      : body.capability !== RESIDUAL_CAPABILITY ? "capability"
+      : mandate.agentId !== transfer.from ? "mandate"
+      : null;
+    if (mismatch) {
+      return NextResponse.json(
+        { error: "RESERVATION_TERMS_DO_NOT_MATCH_RESIDUAL", term: mismatch, note: "No capital was reserved." },
+        { status: 409 },
+      );
+    }
+    ref = residualRef(epoch.epochId, body.residual.transferIndex);
+  }
+
   const now = body.now ? new Date(body.now) : new Date();
   const actionDigest = actionDigestFor({
     vaultId: vault.vaultId, mandateId: mandate.mandateId, mandateVersion: mandate.version,
     amount: body.amount, asset: body.asset, chain: body.chain,
     counterparty: body.counterparty, capability: body.capability,
     ...(body.agreementId ? { agreementId: body.agreementId } : {}),
+    ...(ref ? { residualRef: ref } : {}),
   });
 
   // Policy runs before any capital moves. A DENY must leave nothing behind.
@@ -126,6 +167,7 @@ export async function POST(req: Request) {
     actionDigest,
     expiresAt: new Date(now.getTime() + body.ttlMinutes * 60_000).toISOString(),
     ...(body.agreementId ? { agreementId: body.agreementId } : {}),
+    ...(ref ? { residualRef: ref } : {}),
   });
   if (!reserved.ok) {
     return NextResponse.json({ error: reserved.reason, backend }, { status: 409 });
