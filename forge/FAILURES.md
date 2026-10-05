@@ -2613,8 +2613,8 @@ that system's hash, not only against itself.
 
 ## F55 — the API has no caller identity, so any caller can act as any party to an agreement
 
-**Status:** fixed on `feat/backlog-on-v2` (2026-10-05), tested on the in-memory store only —
-the Postgres suite and a live (deployed) run are still to do. Was `BLOCKED_INTERNAL`, with
+**Status:** fixed on `feat/backlog-on-v2` (2026-10-05), tested on the in-memory store and on
+Postgres (874/874 twice) — a live run against a deployed Mitra is still to do. Was `BLOCKED_INTERNAL`, with
 fund/accept/reject withheld from MCP (decided by human:purple, 2026-10-04).
 **Found:** 2026-10-04, before exposing the agreement verbs to external agents (sprint item 4).
 
