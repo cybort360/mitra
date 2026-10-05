@@ -292,7 +292,7 @@ export const MIGRATIONS: string[] = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 
-  -- Agents (backlog #5). Read-only through the API until callers are identified (F55).
+  -- Agents (backlog #5). Written only by a registration every listed wallet signed (F55).
   CREATE TABLE IF NOT EXISTS mitra.agents (
     agent_id   TEXT PRIMARY KEY,
     status     TEXT NOT NULL,

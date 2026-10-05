@@ -611,6 +611,15 @@ export class PostgresRepository implements EconomicRepository {
     return rows[0] ? (rows[0].document as Agent) : null;
   }
 
+  async insertAgent(agent: Agent): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `INSERT INTO mitra.agents (agent_id, status, document) VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (agent_id) DO NOTHING`,
+      [agent.agentId, agent.status, JSON.stringify(agent)],
+    );
+    return rowCount === 1;
+  }
+
   async listMandates(): Promise<Mandate[]> {
     const { rows } = await this.pool.query("SELECT * FROM mitra.mandates ORDER BY mandate_id");
     return rows.map(rowToMandate);

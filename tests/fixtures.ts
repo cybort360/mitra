@@ -1,4 +1,6 @@
-import type { Reservation } from "@/lib/domain/types";
+import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
+import type { Chain, Reservation } from "@/lib/domain/types";
+import { mitraRequestTypedData, requestBodyHash } from "@/lib/identity/signed-request";
 import { __resetLedgerForTests } from "@/lib/store/ledger";
 import { __resetStoreForTests } from "@/lib/store/provider";
 
@@ -35,6 +37,70 @@ export const req = (body: unknown) =>
  * so state leaked between tests, and the Postgres path had no fixtures at all.
  * One helper, used by every suite that drives a route, removes both problems.
  */
+/**
+ * Give a seeded agent a wallet whose key the test holds, so the test can sign as
+ * that agent (F55). Test setup only: no route can attach a wallet to an existing
+ * agent, and the seed carries no known keys.
+ */
+export async function bindTestWallet(agentId: string, address: `0x${string}`, chain: Chain = "base"): Promise<void> {
+  const { getStore, __putAgentForTests } = await import("@/lib/store/provider");
+  const { repo, backend } = await getStore();
+  const agent = await repo.getAgent(agentId);
+  if (!agent) throw new Error(`bindTestWallet: no agent ${agentId}`);
+  const bound = { ...agent, wallets: [...agent.wallets, { chain, address }] };
+  // Follow the store the routes use: some suites install their own memory repo
+  // even when DATABASE_URL is set.
+  if (backend === "memory") {
+    await __putAgentForTests(bound);
+    return;
+  }
+  const { createPool } = await import("@/lib/store/db");
+  const pool = createPool(process.env.DATABASE_URL);
+  try {
+    await pool.query("UPDATE mitra.agents SET document = $2::jsonb WHERE agent_id = $1", [agentId, JSON.stringify(bound)]);
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
+ * Test-only signing keys for seeded agents (F55). Bound by `bindTestParties`
+ * at test setup; the seed itself carries no known keys.
+ */
+export const TEST_PARTIES = {
+  agent_buyer_07: privateKeyToAccount(`0x${"a1".repeat(32)}`),
+  agent_data_03: privateKeyToAccount(`0x${"b2".repeat(32)}`),
+  agent_eval_02: privateKeyToAccount(`0x${"c3".repeat(32)}`),
+} as const;
+export type TestParty = keyof typeof TEST_PARTIES;
+
+export async function bindTestParties(): Promise<void> {
+  for (const [agentId, account] of Object.entries(TEST_PARTIES)) await bindTestWallet(agentId, account.address);
+}
+
+/**
+ * A transition body as a real client sends it: signed by `account` acting as
+ * `actor`, against the agreement's current `fromStatus`.
+ */
+export async function signAs(
+  account: PrivateKeyAccount,
+  actor: string,
+  fromStatus: string,
+  body: { op: string; agreementId: string } & Record<string, unknown>,
+) {
+  const expiresAt = Math.floor(Date.now() / 1000) + 300;
+  const request = { op: body.op, agreementId: body.agreementId, fromStatus, actor, bodyHash: requestBodyHash(body), expiresAt };
+  const signature = await account.signTypedData(mitraRequestTypedData(request, 84532));
+  return { ...body, auth: { actor, signer: account.address, chainId: 84532, signature, expiresAt } };
+}
+
+/** `signAs` with the party's own test key. */
+export const signedTransition = (
+  actor: TestParty,
+  fromStatus: string,
+  body: { op: string; agreementId: string } & Record<string, unknown>,
+) => signAs(TEST_PARTIES[actor], actor, fromStatus, body);
+
 export async function prepareStore(): Promise<void> {
   __resetLedgerForTests();
   __resetStoreForTests();

@@ -22,6 +22,7 @@ import { toCoinbaseSmartAccount } from "viem/account-abstraction";
 import { RpcSignatureVerifier, isErc6492Signature } from "@/lib/evm/erc1271";
 import { SETTLEMENT_TYPES, settlementDigest, settlingDomain, verifyAuthorisation } from "@/lib/evm/eip712";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { bindTestParties, signedTransition } from "./fixtures";
 import type { Agreement, Mandate, Reservation, Space } from "@/lib/domain/types";
 import { CapitalLedger } from "@/lib/store/ledger";
 import { reconcileVault, settleCapital } from "@/lib/kernel/vault";
@@ -46,7 +47,9 @@ const VAULT_ADDRESS = "0x3333333333333333333333333333333333333333";
 const testVaults = seedVaults.map((v) => (v.vaultId === VAULT_ID ? { ...v, address: VAULT_ADDRESS } : v));
 const PAYEE = "0x1111111111111111111111111111111111111111";
 const CLIENT = "agent_buyer_07";
-const PROVIDER = "provider_alpha";
+// F55: a party must be a registered agent to instruct a transition, so the
+// provider is a seeded agent the tests can sign for.
+const PROVIDER = "agent_data_03";
 const PRICE = { asset: "USDC" as const, amount: 15 };
 
 class TestRepo extends InMemoryRepository {
@@ -136,6 +139,7 @@ beforeEach(async () => {
   repo.extraMandates.set("mandate_pay_base_v1", mandate());
   await repo.updateSpace(space);
   globalThis.__mitraStore = Promise.resolve({ repo, backend: "memory" as const, close: async () => {} });
+  await bindTestParties();
 });
 
 afterEach(() => {
@@ -187,10 +191,10 @@ describe("settlement caller — the happy path", () => {
       proposal: { capability: "research", amount: PRICE },
     });
     expect(open.status, JSON.stringify(await open.clone().json())).toBe(201);
-    for (const op of ["fund", "startExecution"]) {
-      expect((await post(agreementsPOST, { op, agreementId: "ag_e2e" })).status).toBe(200);
+    for (const [actor, from, op] of [[CLIENT, "OPEN", "fund"], [PROVIDER, "FUNDED", "startExecution"]] as const) {
+      expect((await post(agreementsPOST, await signedTransition(actor, from, { op, agreementId: "ag_e2e" }))).status).toBe(200);
     }
-    expect((await post(agreementsPOST, { op: "submitDeliverable", agreementId: "ag_e2e", contentHash: "sha256:x", artifactRefs: ["a"] })).status).toBe(200);
+    expect((await post(agreementsPOST, await signedTransition(PROVIDER, "EXECUTING", { op: "submitDeliverable", agreementId: "ag_e2e", contentHash: "sha256:x", artifactRefs: ["a"] }))).status).toBe(200);
 
     // Not yet ACCEPTED: refused, and nothing sent.
     const { body: early } = await reserveFor("ag_e2e");
@@ -199,7 +203,7 @@ describe("settlement caller — the happy path", () => {
     expect((await notDue.json()).error).toBe("SETTLEMENT_NOT_DUE");
     expect(rec.sends).toHaveLength(0);
 
-    expect((await post(agreementsPOST, { op: "acceptDeliverable", agreementId: "ag_e2e" })).status).toBe(200);
+    expect((await post(agreementsPOST, await signedTransition(CLIENT, "SUBMITTED", { op: "acceptDeliverable", agreementId: "ag_e2e" }))).status).toBe(200);
     const paid = await settle("ag_e2e", early.data.reservationId);
     expect(paid.status).toBe(200);
     expect(rec.sends).toHaveLength(1);

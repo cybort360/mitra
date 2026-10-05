@@ -15,11 +15,10 @@
  * `Record<McpToolName, …>` type makes a missing name a compile error:
  *
  * - **served** — backed by a real route and safe to hand to an external agent today.
- * - **withheld** — backed, but NOT safe yet. The API has no caller identity, so any
- *   caller could accept any deliverable — a provider agent could accept its own work,
- *   and since sprint item 1 an ACCEPTED agreement is one Mitra will pay. Accept,
- *   reject and fund stay off the surface until the API knows who is calling
- *   (decided 2026-10-04 by human:purple; flagged to the lead as a blocker).
+ * - **withheld** — backed, but NOT safe yet. None today. Fund, accept, reject and
+ *   register were withheld until F55 gave the API caller identity; they are served
+ *   now because each carries the agent's own EIP-712 signature, which the API checks
+ *   against the agent's registered wallets and its role (decision ctx_d236086bde9601ee).
  * - **unbacked** — no subsystem exists to serve it (no intent store). Serving a
  *   stub would be a fake success path.
  *
@@ -46,10 +45,6 @@ export type ToolStatus =
   | { status: "withheld"; reason: string }
   | { status: "unbacked"; reason: string };
 
-const NO_CALLER_IDENTITY =
-  "WITHHELD: the Mitra API has no caller identity yet, so this tool would let any agent act as any party " +
-  "(e.g. a provider accepting its own deliverable). Off the MCP surface until the API authenticates callers.";
-
 export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   mitra_get_obligations: { status: "served" },
   mitra_get_recovery: { status: "served" },
@@ -60,12 +55,12 @@ export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   mitra_create_agreement: { status: "served" },
   mitra_submit_deliverable: { status: "served" },
   mitra_request_clearing: { status: "served" },
-  mitra_fund_agreement: { status: "withheld", reason: NO_CALLER_IDENTITY },
-  mitra_accept_deliverable: { status: "withheld", reason: NO_CALLER_IDENTITY },
-  mitra_reject_deliverable: { status: "withheld", reason: NO_CALLER_IDENTITY },
-  // Agents have a read store (backlog #5); registering one needs to know who is
-  // registering, which the API cannot tell yet (F55).
-  mitra_register_agent: { status: "withheld", reason: NO_CALLER_IDENTITY },
+  // F55: these carry the agent's own EIP-712 signature, which the API verifies
+  // against the role and the agent's registered wallets. The server holds no keys.
+  mitra_fund_agreement: { status: "served" },
+  mitra_accept_deliverable: { status: "served" },
+  mitra_reject_deliverable: { status: "served" },
+  mitra_register_agent: { status: "served" },
   mitra_get_agent: { status: "served" },
   mitra_find_agents: { status: "served" },
   mitra_create_intent: { status: "unbacked", reason: "No intent store: intents are ids carried by runs and reservations." },
@@ -85,6 +80,23 @@ const qs = (params: Record<string, unknown>) => {
 };
 
 const Money = z.object({ asset: z.string().min(1), amount: z.number().positive() });
+
+/**
+ * The agent's signature over the exact request (F55), passed through unchanged.
+ * Build it with lib/identity/signed-request: sign `mitraRequestTypedData` for
+ * { op, agreementId, fromStatus, actor, bodyHash: requestBodyHash(body), expiresAt }.
+ */
+const Auth = z.object({
+  actor: z.string().min(1).describe("The agent id acting; it must hold a role this op allows."),
+  signer: z.string().regex(/^0x[0-9a-fA-F]{40}$/).describe("A wallet registered to the actor on this chain."),
+  chainId: z.number().int().positive(),
+  signature: z.string().regex(/^0x[0-9a-fA-F]*$/),
+  expiresAt: z.number().int().positive().describe("Unix seconds."),
+});
+
+/** A signed agreement transition: the body the agent signed, plus its signature. */
+const transition = (op: string) => (a: Record<string, unknown>): ApiRequest =>
+  ({ method: "POST", path: "/api/v1/agreements", body: { ...a, op } });
 
 export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
   mitra_get_obligations: {
@@ -165,8 +177,39 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
       agreementId: z.string().min(1),
       contentHash: z.string().min(1),
       artifactRefs: z.array(z.string().min(1)).min(1),
+      auth: Auth,
     },
-    toRequest: (a) => ({ method: "POST", path: "/api/v1/agreements", body: { op: "submitDeliverable", ...a } }),
+    toRequest: transition("submitDeliverable"),
+  },
+  mitra_fund_agreement: {
+    description: "Fund an OPEN agreement, encumbering its price. Signed by the client.",
+    inputSchema: { agreementId: z.string().min(1), capability: z.string().optional(), amount: Money.optional(), auth: Auth },
+    toRequest: transition("fund"),
+  },
+  mitra_accept_deliverable: {
+    description: "Accept a SUBMITTED deliverable, making the agreement due for settlement. Signed by the client or evaluator; never the provider.",
+    inputSchema: { agreementId: z.string().min(1), auth: Auth },
+    toRequest: transition("acceptDeliverable"),
+  },
+  mitra_reject_deliverable: {
+    description: "Reject a SUBMITTED deliverable, triggering recovery. Signed by the client or evaluator.",
+    inputSchema: { agreementId: z.string().min(1), failureReason: z.string().optional(), auth: Auth },
+    toRequest: transition("rejectDeliverable"),
+  },
+  mitra_register_agent: {
+    description:
+      "Register an agent. Every EVM wallet listed must sign the registration (proofs); an existing agentId is refused. " +
+      "Solana wallets cannot be proven yet.",
+    inputSchema: {
+      agent: z.object({
+        agentId: z.string().min(1), name: z.string().min(1), owner: z.string().min(1),
+        wallets: z.array(z.object({ chain: z.enum(["solana", "base", "tempo"]), address: z.string().min(1) })).min(1),
+        capabilities: z.array(z.string()).optional(), protocols: z.array(z.string()).optional(),
+      }),
+      expiresAt: z.number().int().positive(),
+      proofs: z.array(z.object({ signer: z.string(), chainId: z.number().int().positive(), signature: z.string() })),
+    },
+    toRequest: (a) => ({ method: "POST", path: "/api/v1/agents", body: a }),
   },
   mitra_request_clearing: {
     description:

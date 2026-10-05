@@ -138,6 +138,24 @@ export const AGREEMENT_OPS: Record<AgreementOp, string> = {
   refund: "REFUNDED",
 };
 
+/**
+ * Which party may instruct each operation (F55). The provider never decides
+ * that its own work is accepted, and only the party that pays may fund.
+ */
+export const AGREEMENT_OP_ROLES: Record<AgreementOp, readonly ("client" | "provider" | "evaluator")[]> = {
+  fund: ["client"],
+  startExecution: ["provider"],
+  submitDeliverable: ["provider"],
+  acceptDeliverable: ["client", "evaluator"],
+  rejectDeliverable: ["client", "evaluator"],
+  refund: ["client", "evaluator"],
+};
+
+/** Whether `actor` holds a role on this agreement that `op` allows. */
+export function mayInstruct(agreement: Agreement, op: AgreementOp, actor: string): boolean {
+  return AGREEMENT_OP_ROLES[op].some((role) => agreement[role] !== undefined && agreement[role] === actor);
+}
+
 /** Applies an operation, scoped to its Space, and returns the updated pair. */
 export function applyAgreementOp(
   space: Space,

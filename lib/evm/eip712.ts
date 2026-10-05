@@ -189,9 +189,28 @@ export async function verifyAuthorisation(input: {
     if (!d.ok) return { ok: false, reason: d.reason };
   }
 
+  return verifyDigestSignature({
+    digest, signature, expectedSigner, verifier,
+    recover: () => recoverSettlementSigner(domain, typed, signature),
+  });
+}
+
+/**
+ * The EOA-then-ERC-1271 check behind every Mitra authorisation, for any typed
+ * data: `recover` recovers the signer of the typed data whose hash is `digest`.
+ */
+export async function verifyDigestSignature(input: {
+  digest: `0x${string}`;
+  signature: `0x${string}`;
+  expectedSigner: `0x${string}`;
+  recover: () => Promise<`0x${string}`>;
+  verifier: SignatureVerifier;
+}): Promise<AuthorisationVerdict> {
+  const { digest, signature, expectedSigner, verifier } = input;
+
   let recovered: `0x${string}` | null = null;
   try {
-    recovered = await recoverSettlementSigner(domain, typed, signature);
+    recovered = await input.recover();
   } catch {
     // Deliberately FALLS THROUGH rather than returning. A contract wallet's
     // signature is also "malformed" to ECDSA recovery — it is not 65 bytes of

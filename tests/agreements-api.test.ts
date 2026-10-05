@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET, POST } from "@/app/api/v1/agreements/route";
-import { prepareStore } from "./fixtures";
+import { bindTestParties, prepareStore, signedTransition } from "./fixtures";
 
 beforeEach(async () => {
   await prepareStore();
+  await bindTestParties();
 });
 
 describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () => {
@@ -38,7 +39,8 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
           runId: "run_p1",
           intentId: "intent_p1",
           client: "agent_buyer_07",
-          provider: "mech-research-backup-04",
+          // F55: a party must be a registered agent to instruct a transition.
+          provider: "agent_data_03",
           evaluator: "agent_eval_02",
           price: { asset: "USDC", amount: 15 },
           deadline: "2027-01-01T00:00:00Z",
@@ -62,10 +64,10 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
     // 2. FUND agreement -> arms TALOS recovery saga
     const fundReq = new Request("http://localhost/api/v1/agreements", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(await signedTransition("agent_buyer_07", "OPEN", {
         op: "fund",
         agreementId: "ag_prometheus_1",
-      }),
+      })),
     });
 
     const fundRes = await POST(fundReq);
@@ -79,10 +81,10 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
     // 3. START EXECUTION -> saga advances to EXECUTING
     const execReq = new Request("http://localhost/api/v1/agreements", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(await signedTransition("agent_data_03", "FUNDED", {
         op: "startExecution",
         agreementId: "ag_prometheus_1",
-      }),
+      })),
     });
 
     const execRes = await POST(execReq);
@@ -94,12 +96,12 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
     // 4. SUBMIT DELIVERABLE
     const submitReq = new Request("http://localhost/api/v1/agreements", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(await signedTransition("agent_data_03", "EXECUTING", {
         op: "submitDeliverable",
         agreementId: "ag_prometheus_1",
         artifactRefs: ["ipfs://bad-inference-model"],
         contentHash: "sha256:0123456789abcdef",
-      }),
+      })),
     });
 
     const submitRes = await POST(submitReq);
@@ -111,11 +113,11 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
     const committedBefore = submitBody.data.space.committed.amount;
     const rejectReq = new Request("http://localhost/api/v1/agreements", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(await signedTransition("agent_eval_02", "SUBMITTED", {
         op: "rejectDeliverable",
         agreementId: "ag_prometheus_1",
         failureReason: "POISONED_OUTPUT",
-      }),
+      })),
     });
 
     const rejectRes = await POST(rejectReq);
@@ -147,7 +149,7 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
     const res = await POST(
       new Request("http://localhost/api/v1/agreements", {
         method: "POST",
-        body: JSON.stringify({ op: "fund", agreementId: "non_existent_ag" }),
+        body: JSON.stringify(await signedTransition("agent_buyer_07", "OPEN", { op: "fund", agreementId: "non_existent_ag" })),
       }),
     );
     expect(res.status).toBe(404);

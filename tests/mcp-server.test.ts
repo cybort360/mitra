@@ -12,7 +12,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createMitraMcpServer, MCP_TOOL_STATUS, servedToolNames, type MitraApi } from "@/lib/mcp/server";
 import { mcpTools, prohibitedDirectTools } from "@/lib/mcp/surface";
-import { prepareStore } from "./fixtures";
+import { TEST_PARTIES, bindTestParties, prepareStore, signedTransition } from "./fixtures";
+import { mitraRequestTypedData, registrationRequest } from "@/lib/identity/signed-request";
+import { privateKeyToAccount } from "viem/accounts";
 import * as agreements from "@/app/api/v1/agreements/route";
 import * as authorizations from "@/app/api/v1/authorizations/route";
 import * as obligations from "@/app/api/v1/obligations/route";
@@ -56,17 +58,21 @@ const textOf = (r: unknown) => JSON.parse((r as { content: Array<{ text: string 
 
 beforeEach(async () => {
   await prepareStore();
+  await bindTestParties();
   seen = [];
 });
 
 describe("what the MCP server exposes", () => {
-  it("lists exactly the served tools — never a withheld, unbacked or capital-moving one", async () => {
+  it("lists exactly the served tools — never an unbacked or capital-moving one", async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([...servedToolNames()].sort());
-    for (const withheld of ["mitra_fund_agreement", "mitra_accept_deliverable", "mitra_reject_deliverable", "mitra_register_agent"]) {
-      expect(names, `${withheld} must stay off the surface until the API identifies callers`).not.toContain(withheld);
+    // Withheld until F55; served now that each carries the agent's own signature
+    // and the API verifies it (decision ctx_d236086bde9601ee).
+    for (const signed of ["mitra_fund_agreement", "mitra_accept_deliverable", "mitra_reject_deliverable", "mitra_register_agent"]) {
+      expect(names, `${signed} is served behind a signed request`).toContain(signed);
     }
+    for (const unbacked of ["mitra_create_intent", "mitra_get_intent"]) expect(names).not.toContain(unbacked);
     for (const verb of prohibitedDirectTools) expect(names).not.toContain(verb);
   });
 
@@ -79,11 +85,88 @@ describe("what the MCP server exposes", () => {
     }
   });
 
-  it("calling a withheld tool is refused by the protocol, and nothing reaches the API", async () => {
+  it("calling a tool that is not served is refused by the protocol, and nothing reaches the API", async () => {
     const client = await connect();
-    const r = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: "agreement_77" } });
+    const r = await client.callTool({ name: "mitra_create_intent", arguments: { intentId: "intent_77" } });
     expect(r.isError).toBe(true);
     expect(JSON.stringify(r.content)).toMatch(/not found/i);
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("signed tools (F55): the agent's signature passes through, and the API decides", () => {
+  /** Open, fund, start and submit through the API, each signed by its role-holder. */
+  async function submitted(id: string) {
+    const post = (b: unknown) => agreements.POST(new Request("http://localhost/api/v1/agreements", { method: "POST", body: JSON.stringify(b) }));
+    expect((await post({ op: "open", spaceId: "space_research_1",
+      draft: { agreementId: id, runId: `run_${id}`, intentId: `intent_${id}`, client: "agent_buyer_07", provider: "agent_data_03",
+        evaluator: "agent_eval_02", price: { asset: "USDC", amount: 5 }, deadline: "2027-01-01T00:00:00Z" },
+      proposal: { capability: "research", amount: { asset: "USDC", amount: 5 } } })).status).toBe(201);
+    expect((await post(await signedTransition("agent_buyer_07", "OPEN", { op: "fund", agreementId: id }))).status).toBe(200);
+    expect((await post(await signedTransition("agent_data_03", "FUNDED", { op: "startExecution", agreementId: id }))).status).toBe(200);
+  }
+
+  it("mitra_submit_deliverable and mitra_accept_deliverable apply only for the party that signed", async () => {
+    await submitted("ag_mcp_signed");
+    const client = await connect();
+    const { auth: submitAuth } = await signedTransition("agent_data_03", "EXECUTING", {
+      op: "submitDeliverable", agreementId: "ag_mcp_signed", contentHash: "sha256:x", artifactRefs: ["ipfs://r"],
+    });
+    const submit = await client.callTool({ name: "mitra_submit_deliverable", arguments: {
+      agreementId: "ag_mcp_signed", contentHash: "sha256:x", artifactRefs: ["ipfs://r"], auth: submitAuth } });
+    expect(submit.isError, JSON.stringify(submit.content)).toBe(false);
+
+    // The provider signs validly as itself, but may not accept its own work.
+    const { auth: providerAuth } = await signedTransition("agent_data_03", "SUBMITTED", { op: "acceptDeliverable", agreementId: "ag_mcp_signed" });
+    const selfAccept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: "ag_mcp_signed", auth: providerAuth } });
+    expect(selfAccept.isError).toBe(true);
+    expect(textOf(selfAccept).error).toBe("ACTOR_NOT_PERMITTED");
+
+    const { auth } = await signedTransition("agent_eval_02", "SUBMITTED", { op: "acceptDeliverable", agreementId: "ag_mcp_signed" });
+    const accept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: "ag_mcp_signed", auth } });
+    expect(accept.isError, JSON.stringify(accept.content)).toBe(false);
+    expect(textOf(accept).data.agreement.status).toBe("ACCEPTED");
+    expect(seen.at(-1)?.body, "the signature reaches the API unchanged").toMatchObject({ op: "acceptDeliverable", auth });
+  });
+
+  it("mitra_fund_agreement and mitra_reject_deliverable forward their signatures", async () => {
+    const post = (b: unknown) => agreements.POST(new Request("http://localhost/api/v1/agreements", { method: "POST", body: JSON.stringify(b) }));
+    expect((await post({ op: "open", spaceId: "space_research_1",
+      draft: { agreementId: "ag_mcp_fr", runId: "run_fr", intentId: "intent_fr", client: "agent_buyer_07", provider: "agent_data_03",
+        evaluator: "agent_eval_02", price: { asset: "USDC", amount: 5 }, deadline: "2027-01-01T00:00:00Z" },
+      proposal: { capability: "research", amount: { asset: "USDC", amount: 5 } } })).status).toBe(201);
+    const client = await connect();
+    const fundBody = { op: "fund", agreementId: "ag_mcp_fr", capability: "research", amount: { asset: "USDC", amount: 5 } };
+    const { auth: fundAuth } = await signedTransition("agent_buyer_07", "OPEN", fundBody);
+    const fund = await client.callTool({ name: "mitra_fund_agreement", arguments: {
+      agreementId: "ag_mcp_fr", capability: "research", amount: { asset: "USDC", amount: 5 }, auth: fundAuth } });
+    expect(fund.isError, JSON.stringify(fund.content)).toBe(false);
+    expect(textOf(fund).data.agreement.status).toBe("FUNDED");
+
+    expect((await post(await signedTransition("agent_data_03", "FUNDED", { op: "startExecution", agreementId: "ag_mcp_fr" }))).status).toBe(200);
+    expect((await post(await signedTransition("agent_data_03", "EXECUTING", { op: "submitDeliverable", agreementId: "ag_mcp_fr", contentHash: "sha256:y", artifactRefs: ["a"] }))).status).toBe(200);
+    const { auth: rejectAuth } = await signedTransition("agent_eval_02", "SUBMITTED", { op: "rejectDeliverable", agreementId: "ag_mcp_fr", failureReason: "WRONG_OUTPUT" });
+    const reject = await client.callTool({ name: "mitra_reject_deliverable", arguments: { agreementId: "ag_mcp_fr", failureReason: "WRONG_OUTPUT", auth: rejectAuth } });
+    expect(reject.isError, JSON.stringify(reject.content)).toBe(false);
+    expect(textOf(reject).data.agreement.status).toBe("REJECTED");
+  });
+
+  it("mitra_register_agent registers an agent whose wallets signed", async () => {
+    const key = privateKeyToAccount(`0x${"f6".repeat(32)}`);
+    const agent = { agentId: "agent_mcp_new", name: "MCP Agent", owner: "Mitra Labs", wallets: [{ chain: "base", address: key.address }], capabilities: ["research"], protocols: ["mcp"] };
+    const expiresAt = Math.floor(Date.now() / 1000) + 300;
+    const signature = await key.signTypedData(mitraRequestTypedData(registrationRequest(agent, expiresAt), 84532));
+    const client = await connect();
+    const r = await client.callTool({ name: "mitra_register_agent", arguments: { agent, expiresAt, proofs: [{ signer: key.address, chainId: 84532, signature }] } });
+    expect(r.isError, JSON.stringify(r.content)).toBe(false);
+    expect(textOf(r).data.status).toBe("REGISTERED");
+  });
+
+  it("a signed tool called without a signature is refused before it reaches the API", async () => {
+    const client = await connect();
+    const r = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: "agreement_77" } })
+      .catch((e: Error) => ({ isError: true, content: e.message }));
+    expect(r.isError).toBe(true);
     expect(seen).toEqual([]);
   });
 });
@@ -200,7 +283,7 @@ describe("the stdio entry point", () => {
  *   MITRA_API_URL=http://localhost:3017 npx vitest run tests/mcp-server.test.ts -t "over HTTP"
  */
 describe.skipIf(!process.env.MITRA_API_URL)("over HTTP against a running Mitra (MITRA_API_URL)", () => {
-  it("an external MCP client opens an agreement, reads it back through the API, and cannot accept it", async () => {
+  it("an external MCP client opens an agreement, reads it back through the API, and cannot accept it unsigned", async () => {
     const transport = new StdioClientTransport({
       command: "npx", args: ["tsx", "scripts/mitra-mcp.ts"],
       env: { ...process.env } as Record<string, string>, stderr: "pipe",
@@ -230,7 +313,7 @@ describe.skipIf(!process.env.MITRA_API_URL)("over HTTP against a running Mitra (
       expect(exposure.isError).toBe(false);
 
       const accept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: id } });
-      expect(accept.isError, "accept is withheld from the MCP surface").toBe(true);
+      expect(accept.isError, "an unsigned accept is refused (F55)").toBe(true);
     } finally {
       await client.close();
     }
@@ -273,7 +356,7 @@ describe.skipIf(!process.env.MITRA_API_URL)("over HTTP against a running Mitra (
           console.log(`mcp over ${wire} (0.0.0.0:${port}, bearer): opened ${id}, API reads back ${back.data?.status} (backend ${back.backend})`);
           expect(back.data.status).toBe("OPEN");
           const accept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: id } });
-          expect(accept.isError, "accept is withheld over the network too").toBe(true);
+          expect(accept.isError, "an unsigned accept is refused over the network too (F55)").toBe(true);
         } finally {
           await client.close();
         }
@@ -331,7 +414,7 @@ function raw(url: string, path: string, opts: { method?: string; headers?: Recor
 
 for (const wire of ["sse", "streamable"] as const) {
   describe(`over the network (${wire})`, () => {
-    it("lists exactly the served tools, opens an agreement the store holds, and refuses a withheld tool without reaching the API", async () => {
+    it("lists exactly the served tools, opens an agreement the store holds, and refuses an unsigned accept without reaching the API", async () => {
       const s = await serve();
       const client = await connectOver(wire, s.url);
       try {
@@ -349,8 +432,8 @@ for (const wire of ["sse", "streamable"] as const) {
 
         const before = seen.length;
         const accept = await client.callTool({ name: "mitra_accept_deliverable", arguments: { agreementId: id } }).catch((e: Error) => ({ isError: true, content: e.message }));
-        expect(accept.isError, "accept is withheld").toBe(true);
-        expect(seen.length, "a withheld tool reaches no route").toBe(before);
+        expect(accept.isError, "an unsigned accept is refused (F55)").toBe(true);
+        expect(seen.length, "an unsigned call reaches no route").toBe(before);
       } finally {
         await client.close();
       }

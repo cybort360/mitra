@@ -106,7 +106,7 @@ export class InMemoryRepository implements EconomicRepository {
       settlements: this.settlementsMap.size,
       runs: runs.length,
       deliverables: deliverables.length,
-      agents: seedAgents.length,
+      agents: this.agentsMap.size,
       epochs: this.epochsMap.size,
     };
   }
@@ -382,13 +382,26 @@ export class InMemoryRepository implements EconomicRepository {
     this.epochsMap.set(epoch.epochId, { ...epoch });
   }
 
+  private readonly agentsMap = new Map<string, Agent>(seedAgents.map((a) => [a.agentId, { ...a }]));
+
   async listAgents(): Promise<Agent[]> {
-    return seedAgents.map((a) => ({ ...a }));
+    return [...this.agentsMap.values()].map((a) => ({ ...a }));
   }
 
   async getAgent(agentId: string): Promise<Agent | null> {
-    const a = seedAgents.find((x) => x.agentId === agentId);
+    const a = this.agentsMap.get(agentId);
     return a ? { ...a } : null;
+  }
+
+  async insertAgent(agent: Agent): Promise<boolean> {
+    if (this.agentsMap.has(agent.agentId)) return false;
+    this.agentsMap.set(agent.agentId, { ...agent });
+    return true;
+  }
+
+  /** Test setup only (tests/fixtures.ts bindTestWallet). No route reaches it. */
+  __putAgentForTests(agent: Agent): void {
+    this.agentsMap.set(agent.agentId, { ...agent });
   }
 }
 
@@ -426,6 +439,12 @@ async function openStore(): Promise<StoreHandle> {
   const repo = new PostgresRepository(pool);
   await repo.migrate();
   return { repo, backend: "postgres", close: async () => { await pool.end(); } };
+}
+
+export async function __putAgentForTests(agent: Agent): Promise<void> {
+  const { repo } = await getStore();
+  if (!(repo instanceof InMemoryRepository)) throw new Error("__putAgentForTests: memory backend only");
+  repo.__putAgentForTests(agent);
 }
 
 export function __resetStoreForTests(): void {

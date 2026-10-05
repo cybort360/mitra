@@ -252,9 +252,8 @@ export interface EconomicRepository {
   listMandates(): Promise<Mandate[]>;
 
   /**
-   * Agents (backlog #5). Read-only: registration has no write path yet, because the
-   * API cannot tell who is registering (F55) — anyone could register an agent under
-   * any name or wallet.
+   * Agents (backlog #5). Written only by `insertAgent`, behind a registration
+   * every listed wallet signed (F55).
    */
   listAgents(): Promise<Agent[]>;
 
@@ -268,4 +267,10 @@ export interface EconomicRepository {
   insertEpoch(epoch: ClearingEpoch): Promise<boolean>;
   saveEpoch(epoch: ClearingEpoch): Promise<void>;
   getAgent(agentId: string): Promise<Agent | null>;
+  /**
+   * Registration (F55). Refuses an agentId that exists, returning false: an
+   * agent is registered once, so a registration cannot take over another's id.
+   * The route admits a registration only when every EVM wallet it lists signed.
+   */
+  insertAgent(agent: Agent): Promise<boolean>;
 }

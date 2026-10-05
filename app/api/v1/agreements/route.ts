@@ -4,10 +4,13 @@ import { getStore } from "@/lib/store/provider";
 import {
   openAgreement,
   availableAgreementOps,
+  mayInstruct,
   type AgreementOp,
 } from "@/lib/kernel/commerce";
 import { applyAgreementOpWithSaga } from "@/lib/kernel/commerce-recovery";
 import { recordEvent } from "@/lib/store/events";
+import { requestBodyHash, verifySignedRequest } from "@/lib/identity/signed-request";
+import { signatureVerifierFor } from "@/lib/identity/verifier";
 import type { Agreement, Money, Space } from "@/lib/domain/types";
 
 /**
@@ -110,6 +113,14 @@ const TransitionAgreementSchema = z.object({
   contentHash: z.string().optional(),
   failureReason: z.string().optional(),
   onChainEscrow: OnChainEscrowSchema.optional(),
+  /** F55: who is acting, and their wallet's EIP-712 signature over this exact request. */
+  auth: z.object({
+    actor: z.string().min(1),
+    signer: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    chainId: z.number().int().positive(),
+    signature: z.string().regex(/^0x[0-9a-fA-F]*$/),
+    expiresAt: z.number().int().positive(),
+  }).optional(),
 });
 
 const AgreementPostSchema = z.discriminatedUnion("op", [
@@ -197,7 +208,12 @@ export async function POST(req: Request) {
     );
   }
 
-  // Lifecycle transition operations:
+  // Lifecycle transition operations. Each is an instruction from a party, so it
+  // must prove which party sent it (F55); the API never takes a caller's word.
+  if (!body.auth) {
+    return NextResponse.json({ error: "SIGNATURE_REQUIRED", backend }, { status: 401 });
+  }
+
   const agreement = repo.getAgreement
     ? await repo.getAgreement(body.agreementId)
     : (await repo.listAgreements()).find((a) => a.agreementId === body.agreementId) ?? null;
@@ -207,6 +223,29 @@ export async function POST(req: Request) {
       { error: "AGREEMENT_NOT_FOUND", agreementId: body.agreementId, backend },
       { status: 404 },
     );
+  }
+
+  const { auth, ...signedFields } = body;
+  if (!mayInstruct(agreement, body.op as AgreementOp, auth.actor)) {
+    return NextResponse.json({ error: "ACTOR_NOT_PERMITTED", op: body.op, actor: auth.actor, backend }, { status: 403 });
+  }
+  const actor = await repo.getAgent(auth.actor);
+  if (!actor) {
+    return NextResponse.json({ error: "ACTOR_NOT_REGISTERED", actor: auth.actor, backend }, { status: 401 });
+  }
+  // The hash covers the PARSED body, so what was signed is exactly what is applied.
+  const verdict = await verifySignedRequest({
+    request: {
+      op: body.op, agreementId: agreement.agreementId, fromStatus: agreement.status, actor: auth.actor,
+      bodyHash: requestBodyHash(signedFields), expiresAt: auth.expiresAt,
+    },
+    auth: { signer: auth.signer as `0x${string}`, chainId: auth.chainId, signature: auth.signature as `0x${string}` },
+    agent: actor,
+    now: Math.floor(Date.now() / 1000),
+    verifier: signatureVerifierFor(auth.chainId),
+  });
+  if (!verdict.ok) {
+    return NextResponse.json({ error: verdict.reason, backend }, { status: 401 });
   }
 
   const spaceId = body.spaceId ?? agreement.spaceIds?.[0];

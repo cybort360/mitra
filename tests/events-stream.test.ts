@@ -7,14 +7,14 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { getStore } from "@/lib/store/provider";
-import { prepareStore } from "./fixtures";
+import { bindTestParties, prepareStore, signedTransition } from "./fixtures";
 import { recordEvent } from "@/lib/store/events";
 import { GET as eventsGET } from "@/app/api/v1/events/route";
 import { GET as streamGET } from "@/app/api/v1/events/stream/route";
 import { POST as agreementsPOST } from "@/app/api/v1/agreements/route";
 import { POST as reservationsPOST } from "@/app/api/v1/reservations/route";
 
-beforeEach(async () => { await prepareStore(); });
+beforeEach(async () => { await prepareStore(); await bindTestParties(); });
 
 const post = (h: (r: Request) => Promise<Response>, body: unknown) =>
   h(new Request("http://localhost/x", { method: "POST", body: JSON.stringify(body) }));
@@ -58,7 +58,8 @@ describe("routes write what happened, including refusals", () => {
       evaluator: "agent_eval_02", price: { asset: "USDC", amount: 5 }, deadline: "2027-01-01T00:00:00Z",
     };
     expect((await post(agreementsPOST, { op: "open", spaceId: "space_research_1", draft, proposal: { capability: "research", amount: { asset: "USDC", amount: 5 } } })).status).toBe(201);
-    expect((await post(agreementsPOST, { op: "acceptDeliverable", agreementId: "ag_ev" })).status).toBe(400);
+    // Signed by a party allowed to accept, so the KERNEL is what refuses it (the agreement is only OPEN).
+    expect((await post(agreementsPOST, await signedTransition("agent_eval_02", "OPEN", { op: "acceptDeliverable", agreementId: "ag_ev" }))).status).toBe(400);
     const body = await (await eventsGET(new Request("http://localhost/api/v1/events?runId=run_ev"))).json();
     expect(body.data.map((e: { title: string; status: string }) => [e.title, e.status])).toEqual([
       ["Agreement opened", "SUCCESS"],

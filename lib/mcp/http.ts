@@ -10,12 +10,14 @@
  *
  * Every session gets its own `McpServer` (an SDK server binds one transport), and
  * every one is the thin client of the Mitra API that stdio serves: the network adds
- * reach, never authority. Withheld tools stay withheld.
+ * reach, never authority. A tool that moves an agreement still needs the agent's
+ * own signature (F55); the bearer token only decides who may connect.
  *
  * ## Who can connect
  *
- * The API has no caller identity yet (F55), so whoever reaches this port can do what
- * the served tools do — e.g. open an agreement naming any client. Over stdio that is
+ * Transitions and registration need the agent's own signature (F55), but opening an
+ * agreement and the read tools do not, so whoever reaches this port can do those —
+ * e.g. open an agreement naming any client. Over stdio that is
  * the local user; over a network it is whoever can connect. Hence:
  *
  * - it binds `127.0.0.1` unless told otherwise;
@@ -26,7 +28,8 @@
  * - a request carrying `Origin` (i.e. from a browser) is refused unless that origin
  *   is allowed explicitly.
  *
- * A token says "may connect". It is not "is agent X" — that is F55, still open.
+ * A token says "may connect". It is not "is agent X": that is the per-request
+ * signature F55 requires, verified by the API.
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
@@ -106,7 +109,7 @@ export async function startMcpHttpServer(opts: McpHttpOptions): Promise<McpHttpS
   if (!loopback && !opts.token) {
     throw new Error(
       `MCP_TOKEN_REQUIRED_OFF_LOOPBACK: refusing to serve MCP on ${host} without a bearer token — ` +
-      "the API has no caller identity (F55), so anyone who can connect could act as any party",
+      "unsigned tools (opening agreements, reads) would be open to anyone who can connect",
     );
   }
   const tokenDigest = opts.token ? digest(opts.token) : null;
