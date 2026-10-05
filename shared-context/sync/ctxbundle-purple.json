@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 86,
+  "highSeq": 88,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1762,6 +1762,54 @@
         "c5d446442436bb03813a1744220fe301ad1ed2787967abfc1e4370328b973ffb"
       ],
       "hash": "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435"
+    },
+    {
+      "entryId": "ctx_d236086bde9601ee",
+      "seq": 87,
+      "kind": "decision",
+      "title": "F55: every agreement transition and agent registration is an EIP-712 signed request bound to the agreement's current status; no nonce store",
+      "body": "DECIDED by human:purple, 2026-10-05. Refines ctx_c21fe7e7baa87ab8; the model and the rejected options are unchanged.\n\nSIGNED MESSAGE: MitraRequest { op, agreementId, fromStatus, actor, bodyHash, expiresAt } under the domain { name: \"Mitra API\", version: \"1\", chainId }. Verification goes through the existing path: EOA recovery, then ERC-1271, then ERC-6492. The signer must be an EVM wallet registered to `actor`, and `actor` must hold a role the op allows.\n\nREPLAY: no nonce store. The agreement machine (lib/kernel/machines.ts) is acyclic: OPEN, FUNDED, EXECUTING, SUBMITTED, ACCEPTED or REJECTED, then REFUNDED. A signature commits to fromStatus, so the transition it authorises makes it stale. expiresAt bounds how long it stays usable. A concurrent double-submit of the same op is a separate, pre-existing race: updateAgreement is not compare-and-swap. Identity does not fix that.\n\nSCOPE: every transition on POST /api/v1/agreements, not only the three withheld tools.\n- fund: client\n- startExecution: provider\n- submitDeliverable: provider\n- acceptDeliverable: client or evaluator\n- rejectDeliverable: client or evaluator\n- refund: client or evaluator\nToday's unsigned submit_deliverable stops working. Tests and scripts that drive transitions are updated to sign, and their assertions are not weakened.\n\nREGISTRATION: POST /api/v1/agents requires a signature from every EVM wallet listed, and refuses an existing agentId (no takeover). Solana wallets are refused until an ed25519 path exists.\n\nTest seams: (A) lib/identity request signing; (B) POST /api/v1/agreements; (C) POST /api/v1/agents; (D) the MCP server, where the four withheld tools move to served and forward the signature. Out of scope: who may OPEN an agreement. Funding still needs the named client's signature.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "api",
+        "eip-712",
+        "erc-1271",
+        "identity",
+        "mcp"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T16:08:18.645Z",
+      "parents": [
+        "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435",
+        "f673979a34b02b2627249e3fa361cac1e5e87ffc2aec30328c8f754164278585"
+      ],
+      "hash": "cd60a611a861c41f427044960d5f7f8d5a3c0284c4c545ae0f903fedbbfaf8ae",
+      "supersedesId": "ctx_c21fe7e7baa87ab8"
+    },
+    {
+      "entryId": "ctx_cac9c01a00fc331e",
+      "seq": 88,
+      "kind": "handoff",
+      "title": "F55 fixed on feat/backlog-on-v2 (uncommitted): signed transitions and registration, MCP tools served; tested in memory only, Postgres and live not run",
+      "body": "DONE, as of 2026-10-05, in the working tree and not yet committed. Built test-first at the four seams agreed with human:purple, per decision ctx_d236086bde9601ee.\n\n- lib/identity/signed-request.ts: MitraRequest typed data, requestBodyHash, registrationRequest, verifySignedRequest, signsFor.\n- lib/identity/verifier.ts: an ERC-1271 verifier per chain, read from BASE_RPC_URL / TEMPO_RPC_URL. EOAs need no RPC.\n- lib/evm/eip712.ts: verifyDigestSignature is extracted from verifyAuthorisation, which delegates to it with identical behaviour.\n- lib/kernel/commerce.ts: AGREEMENT_OP_ROLES and mayInstruct.\n- POST /api/v1/agreements: every transition must carry `auth`. Error order: SIGNATURE_REQUIRED (401), ACTOR_NOT_PERMITTED (403), ACTOR_NOT_REGISTERED, then the signature verdict (401).\n- POST /api/v1/agents (new): every EVM wallet must sign. It refuses AGENT_EXISTS (409) and Solana wallets (400). The repo gains insertAgent on memory and Postgres.\n- MCP: fund, accept, reject and register_agent are served. submit_deliverable now requires auth. No tool is withheld.\n\nTESTS: 46 in the four seam files. mcp-server tests that encoded \"withheld\" were inverted openly; existing agreement and settlement tests now sign, with no assertions changed. tsc is clean. vitest: 825 pass and 0 fail on the in-memory backend. Mutation: 11 of 11 killed.\n\nNOT DONE:\n(1) The Postgres suite. No database was reachable from this WSL machine, so PostgresRepository.insertAgent and the SQL branch of tests/fixtures.ts bindTestWallet have never run.\n(2) ERC-1271 against a real chain. It is covered only by the seam test's stub verifier.\n(3) A live external agent completing a signed loop against a running Mitra.\n\nBREAKING for callers: unsigned transitions now return 401. A party that is not a registered agent, such as the seeded provider mech-research-backup-04, cannot act until it registers.\n\nNEXT: commit and push once human:purple approves. Then run Postgres with --no-file-parallelism, then the Phase 7 epoch runner through the guarded settlement path (ctx_77b1884dc8534f70).",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "handoff",
+        "identity",
+        "mcp"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T16:26:46.198Z",
+      "parents": [
+        "cd60a611a861c41f427044960d5f7f8d5a3c0284c4c545ae0f903fedbbfaf8ae",
+        "f2cea1859b94cdcf5d6355670a02ad6f70fa5e6385a8e6380128c6b4d1dcee24"
+      ],
+      "hash": "89f045562e7e8deb0b80ce51febbd40b017cdf9c87fa6aac85f6ce57a1b0a5c5",
+      "supersedesId": "ctx_871aeabc10febca9"
     }
   ],
   "actors": [
@@ -1799,5 +1847,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435"
+  "tipHash": "89f045562e7e8deb0b80ce51febbd40b017cdf9c87fa6aac85f6ce57a1b0a5c5"
 }
