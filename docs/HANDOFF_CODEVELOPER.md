@@ -5,8 +5,21 @@
 
 ### Scope & Division of Labor
 
+> [!IMPORTANT]
+> **Resolution & Convergence (2026-10-05):**
+> Both collaborative tasks completed by PurpleDNA (`feat/backlog-on-v2`, PR #32 merged into `feat/mitra-vault-v2-reseed`):
+> 1. **F55 Signed Requests:** Implemented with EIP-712 typed data committing to `(op, agreementId, fromStatus, actor, bodyHash, expiresAt)`. All 4 MCP tools (`fund_agreement`, `accept_deliverable`, `reject_deliverable`, `register_agent`) un-withheld and verified.
+> 2. **F63 Vault Redeploy:** Canonical `MitraVault` v2 redeployed with byte-verified F61 runtime code:
+>    - Base Sepolia: `0x92dcee6acbfcf50f32a3e9c689d7f2ceef9ee489`
+>    - Tempo Moderato: `0x85409dfc30fa0671b06f98cc56c5b04eb921b568`
+> 3. **F64 Clearing Redeploy:** Canonical `MitraClearing` redeployed following PRD §14.4 challenge lifecycle and on-chain net conservation check:
+>    - Base Sepolia: `0xaacba512ba6dc726cb6cafdc2799198dbddb1c4c`
+>    - Tempo Moderato: `0xd03d91c3ae594c6b1163d89a5cee622c3c1f8688`
+>    - Pre-F64 instances (`0x2179bf05...` and `0x6ca633a0...`) moved to `clearingSuperseded`.
+> 4. **Phase 7 Live Clearing:** Epoch netted off-chain, committed to `MitraClearing`, finalized, residuals settled through execution guard and `MitraVault`, receipts anchored on-chain (`tests/clearing-live.test.ts`). Evidence: `LIVE_DEMONSTRATED`.
+
 > [!NOTE]
-> **Baseline Status:**
+> **Historical Baseline Status:**
 > - Multi-rail EVM Canonical Vault v2 with F61 token-scoped mandates (`[principal][holder][token]`) deployed and verified on:
 >   - **Base Sepolia** (`84532`): `0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b` (tx `0xd9c986723f7cf055349c5754be128a8a169dd5c1191d8ad78cdd076c5e941445`, block `47687892`)
 >   - **Tempo Moderato** (`42431`): `0x81798c6f4ff1257b53b0be512c979f2656269329` (tx `0x35a545fdd3d5e6021054f70c2195cdec98c5d09bb4f41d81d3e5bd4ae5181c77`, block `38179538`)

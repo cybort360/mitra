@@ -1,6 +1,6 @@
 {
-  "fromNodeId": "lead",
-  "highSeq": 86,
+  "fromNodeId": "n_6i20ahhr",
+  "highSeq": 101,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -1439,7 +1439,7 @@
       "kind": "blocker",
       "title": "The API has no caller identity: any caller can accept any deliverable, and since item 1 an ACCEPTED agreement gets paid (F55). Accept, reject and fund are withheld from MCP until this is fixed",
       "body": "NEEDS LEAD. No route in app/api authenticates its caller. There is no middleware, no header check and no actor binding. So /api/v1/agreements applies acceptDeliverable for anyone, including the agreement's own provider. Since sprint item 1, POST /api/v1/settlements pays an ACCEPTED agreement. A provider that can reach the API can therefore approve its own payout.\n\nCURRENT CONTAINMENT (this is not authorization): settlement pays only the agreement's payTo term, from a reservation that policy approved for that provider and price. The x402 gateway pays only the payee bound into a reservation's digest. A caller can trigger these payments but cannot redirect them.\n\nDECISION (human:purple, 2026-10-04): the live MCP server withholds mitra_fund_agreement, mitra_accept_deliverable and mitra_reject_deliverable until the API identifies callers.\n\nPROPOSED FIX, which is the lead's call:\n- A caller identity on the API: per-agent credentials, or signed requests. verifyAuthorisation plus RpcSignatureVerifier now verify EOA, ERC-1271 and ERC-6492 signatures on chain.\n- Kernel role checks: only the client or evaluator may accept or reject, only the provider may submit, only the client may fund.\n\nAfter that, the three tools move from withheld to served in lib/mcp/server.ts MCP_TOOL_STATUS.",
-      "status": "active",
+      "status": "superseded",
       "scope": "security",
       "tags": [
         "F55",
@@ -1745,6 +1745,339 @@
         "c5dee479ff2f3e39a3641fa787247f5e117fa5763837326a55ce406107842453"
       ],
       "hash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
+    },
+    {
+      "entryId": "ctx_c21fe7e7baa87ab8",
+      "seq": 87,
+      "kind": "decision",
+      "title": "F55 caller identity is signed requests (EIP-712, verified for EOA/ERC-1271/ERC-6492), not API keys and not a bare X-Mitra-Actor-Id header",
+      "body": "DECIDED by human:purple, 2026-10-05. This resolves the model choice left open in the F55 blocker ctx_871aeabc10febca9 and in seq 81/82. The blocker stays open until the code ships.\n\nMODEL: every call to fund, accept, reject and register_agent carries an EIP-712 signature over the exact instruction: action, agreement id, amount/terms where present, nonce, expiry and chain/domain. The API recovers the signer and verifies it through the existing verifyAuthorisation + RpcSignatureVerifier (EOA, ERC-1271, ERC-6492). It binds the signer to the actor's address, then runs kernel role checks: only the client funds; only the client or evaluator accepts or rejects; only the provider submits. An X-Mitra-Actor-Id header may name the claimed actor, but it is only a lookup hint. The signature is the proof. A nonce store blocks replays and an expiry bounds them.\n\nREJECTED:\n- A bare X-Mitra-Actor-Id header, as written in lead handoff seq 83. The caller writes it themselves, so anyone could act as any party. That is F55 itself, not a fix.\n- API keys (bearer secrets). A leaked key means full impersonation, the server holds secrets that can forge, and a key does not tie approval to an exact instruction. Keys would also be a second identity system beside the mandate addresses ([principal][holder][token]).\n- HMAC-signed keys. They are tamper-evident, but the secret is shared, so the server can still forge.\n\nWHY: the API now asks the same question the execution guard asks on-chain: may this exact instruction move capital? This is no substitute for the guard, which still runs.\n\nOPEN (not decided): Solana-native actors need an ed25519 signed-request path beside EIP-712. Until that exists, they cannot use the four tools.\n\nThe MCP bearer token (MITRA_MCP_TOKEN) is still connection gating, not identity. Purple builds F55 against this model.",
+      "status": "superseded",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "api",
+        "eip-712",
+        "erc-1271",
+        "identity",
+        "mcp"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T15:45:08.744Z",
+      "parents": [
+        "57454f7453beda2c20fbcbc06592b05917e6e256b1bd1193fbe08ddf5c3be185"
+      ],
+      "hash": "f673979a34b02b2627249e3fa361cac1e5e87ffc2aec30328c8f754164278585"
+    },
+    {
+      "entryId": "ctx_c506c519a38357f7",
+      "seq": 88,
+      "kind": "decision",
+      "title": "Audit break at seq 29 is a sync bug: exportBundle publishes read-time \"superseded\" status, merge stores it unverified, so late receivers fail ENTRY_ID_MISMATCH",
+      "body": "FINDING: the content of ctx_42aa4a63e2d0bb0d (lead, seq 29 locally) is intact. With status \"active\" it reproduces its id and hash, and all 84 local rows then verify. Cause: exportBundle() builds entries with since(), which applies withDerivedStatus, so bundles carry \"superseded\". merge() inserts incoming.status as received and never checks entryId or hash. Any node that first receives an entry after it was superseded stores the wrong status and fails audit. 9 of the 10 bundles on disk that carry this entry show it as \"superseded\".\n\nFIX (purple, in progress, test-first in shared-context-mcp):\n1. exportBundle publishes stored status, not derived.\n2. merge verifies entryId and hash before insert. If an incoming \"superseded\" entry only verifies under another EntryStatus, it is stored with that status, because bundles already in the wild carry the leak. An entry that verifies under no status is refused and reported, not inserted.\n3. On open, rows already stored with a leaked status are restored to the status their id commits to. The id and hash prove the correct value, so this restores content rather than rewriting it.\nREJECTED: editing the row by hand, which fixes only us and leaves every peer to hit it again.",
+      "status": "active",
+      "scope": "shared-context",
+      "tags": [
+        "audit",
+        "integrity",
+        "shared-context-mcp",
+        "sync"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T15:47:59.008Z",
+      "parents": [
+        "4451258676cb84a6ad6e802d00524fc805b98ea938685369592559c6ff9ddba8"
+      ],
+      "hash": "c5d446442436bb03813a1744220fe301ad1ed2787967abfc1e4370328b973ffb"
+    },
+    {
+      "entryId": "ctx_77b1884dc8534f70",
+      "seq": 89,
+      "kind": "finding",
+      "title": "Calling BaseSettlementAdapter/TempoSettlementAdapter.settle() directly bypasses the execution guard; the Phase 7 epoch runner must settle residuals through the guarded path",
+      "body": "The lead's handoff (docs/HANDOFF_CODEVELOPER.md, Live Harness step) says the runner \"settles residual obligations via BaseSettlementAdapter / TempoSettlementAdapter\". adapter.settle() validates only the target (address, amount, asset) and re-derives the commitment hash. It has no mandate, policy or guard check. The guard is above it: validateExecutionBinding in lib/kernel/settlement.ts:123, plus the single-use nonce consumption in lib/settlement/settle-agreement.ts. A runner that calls the adapter directly moves value on an ALLOW it never re-derived. That is the bypass AGENTS.md names as no guarantee at all.\n\nSo each net residual must settle through the guarded path: a reservation that policy approved, then the execution guard, then the adapter or the vault rail (an engine-signed MitraVault permit). This is the same chain POST /api/v1/settlements uses. Committing the epoch on-chain (commitEpoch, recordSettlement) is operator-only bookkeeping and moves no value, so the guard concern does not apply to it.\n\nAlso, 2026-10-05: forge/PROOF_LEDGER.md row 7 was LIVE_DEMONSTRATED + PARTIAL. That breaks coherence rule 1, and nothing had run live. It is now TESTED + PARTIAL. The deployment was re-checked by eth_call operator() on both chains; the remaining items are named in the row.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "clearing",
+        "execution-guard",
+        "invariant",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T15:51:36.639Z",
+      "parents": [
+        "c5d446442436bb03813a1744220fe301ad1ed2787967abfc1e4370328b973ffb"
+      ],
+      "hash": "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435"
+    },
+    {
+      "entryId": "ctx_d236086bde9601ee",
+      "seq": 90,
+      "kind": "decision",
+      "title": "F55: every agreement transition and agent registration is an EIP-712 signed request bound to the agreement's current status; no nonce store",
+      "body": "DECIDED by human:purple, 2026-10-05. Refines ctx_c21fe7e7baa87ab8; the model and the rejected options are unchanged.\n\nSIGNED MESSAGE: MitraRequest { op, agreementId, fromStatus, actor, bodyHash, expiresAt } under the domain { name: \"Mitra API\", version: \"1\", chainId }. Verification goes through the existing path: EOA recovery, then ERC-1271, then ERC-6492. The signer must be an EVM wallet registered to `actor`, and `actor` must hold a role the op allows.\n\nREPLAY: no nonce store. The agreement machine (lib/kernel/machines.ts) is acyclic: OPEN, FUNDED, EXECUTING, SUBMITTED, ACCEPTED or REJECTED, then REFUNDED. A signature commits to fromStatus, so the transition it authorises makes it stale. expiresAt bounds how long it stays usable. A concurrent double-submit of the same op is a separate, pre-existing race: updateAgreement is not compare-and-swap. Identity does not fix that.\n\nSCOPE: every transition on POST /api/v1/agreements, not only the three withheld tools.\n- fund: client\n- startExecution: provider\n- submitDeliverable: provider\n- acceptDeliverable: client or evaluator\n- rejectDeliverable: client or evaluator\n- refund: client or evaluator\nToday's unsigned submit_deliverable stops working. Tests and scripts that drive transitions are updated to sign, and their assertions are not weakened.\n\nREGISTRATION: POST /api/v1/agents requires a signature from every EVM wallet listed, and refuses an existing agentId (no takeover). Solana wallets are refused until an ed25519 path exists.\n\nTest seams: (A) lib/identity request signing; (B) POST /api/v1/agreements; (C) POST /api/v1/agents; (D) the MCP server, where the four withheld tools move to served and forward the signature. Out of scope: who may OPEN an agreement. Funding still needs the named client's signature.",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "api",
+        "eip-712",
+        "erc-1271",
+        "identity",
+        "mcp"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T16:08:18.645Z",
+      "parents": [
+        "ba678796a6e1354ac68ac1978e7de97a20a4b2084e8f6164acc23a27f48a4435",
+        "f673979a34b02b2627249e3fa361cac1e5e87ffc2aec30328c8f754164278585"
+      ],
+      "hash": "cd60a611a861c41f427044960d5f7f8d5a3c0284c4c545ae0f903fedbbfaf8ae",
+      "supersedesId": "ctx_c21fe7e7baa87ab8"
+    },
+    {
+      "entryId": "ctx_cac9c01a00fc331e",
+      "seq": 91,
+      "kind": "handoff",
+      "title": "F55 fixed on feat/backlog-on-v2 (uncommitted): signed transitions and registration, MCP tools served; tested in memory only, Postgres and live not run",
+      "body": "DONE, as of 2026-10-05, in the working tree and not yet committed. Built test-first at the four seams agreed with human:purple, per decision ctx_d236086bde9601ee.\n\n- lib/identity/signed-request.ts: MitraRequest typed data, requestBodyHash, registrationRequest, verifySignedRequest, signsFor.\n- lib/identity/verifier.ts: an ERC-1271 verifier per chain, read from BASE_RPC_URL / TEMPO_RPC_URL. EOAs need no RPC.\n- lib/evm/eip712.ts: verifyDigestSignature is extracted from verifyAuthorisation, which delegates to it with identical behaviour.\n- lib/kernel/commerce.ts: AGREEMENT_OP_ROLES and mayInstruct.\n- POST /api/v1/agreements: every transition must carry `auth`. Error order: SIGNATURE_REQUIRED (401), ACTOR_NOT_PERMITTED (403), ACTOR_NOT_REGISTERED, then the signature verdict (401).\n- POST /api/v1/agents (new): every EVM wallet must sign. It refuses AGENT_EXISTS (409) and Solana wallets (400). The repo gains insertAgent on memory and Postgres.\n- MCP: fund, accept, reject and register_agent are served. submit_deliverable now requires auth. No tool is withheld.\n\nTESTS: 46 in the four seam files. mcp-server tests that encoded \"withheld\" were inverted openly; existing agreement and settlement tests now sign, with no assertions changed. tsc is clean. vitest: 825 pass and 0 fail on the in-memory backend. Mutation: 11 of 11 killed.\n\nNOT DONE:\n(1) The Postgres suite. No database was reachable from this WSL machine, so PostgresRepository.insertAgent and the SQL branch of tests/fixtures.ts bindTestWallet have never run.\n(2) ERC-1271 against a real chain. It is covered only by the seam test's stub verifier.\n(3) A live external agent completing a signed loop against a running Mitra.\n\nBREAKING for callers: unsigned transitions now return 401. A party that is not a registered agent, such as the seeded provider mech-research-backup-04, cannot act until it registers.\n\nNEXT: commit and push once human:purple approves. Then run Postgres with --no-file-parallelism, then the Phase 7 epoch runner through the guarded settlement path (ctx_77b1884dc8534f70).",
+      "status": "superseded",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "handoff",
+        "identity",
+        "mcp"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T16:26:46.198Z",
+      "parents": [
+        "cd60a611a861c41f427044960d5f7f8d5a3c0284c4c545ae0f903fedbbfaf8ae",
+        "f2cea1859b94cdcf5d6355670a02ad6f70fa5e6385a8e6380128c6b4d1dcee24"
+      ],
+      "hash": "89f045562e7e8deb0b80ce51febbd40b017cdf9c87fa6aac85f6ce57a1b0a5c5",
+      "supersedesId": "ctx_871aeabc10febca9"
+    },
+    {
+      "entryId": "ctx_442ac5837a29a7fc",
+      "seq": 92,
+      "kind": "handoff",
+      "title": "F55 is committed and pushed on feat/backlog-on-v2 (6c65730, docs 75938bb) and verified on Postgres 874/874 twice; live external-agent run still open",
+      "body": "The content is unchanged from ctx_cac9c01a00fc331e. Signed transitions and registration are as decided in ctx_d236086bde9601ee, and the four MCP tools are served.\n\nNOW VERIFIED, 2026-10-05, on Postgres (postgres:16-alpine, PostgreSQL 16.15, local Docker Desktop):\n- `DATABASE_URL=… npx vitest run --no-file-parallelism` gave 874 passed and 0 failed, twice in a row on one database.\n- All seven F55-related test files ran on the Postgres backend.\n- Mutating PostgresRepository.insertAgent to overwrite on conflict is caught by the takeover test.\n\nSTILL OPEN:\n(1) ERC-1271 against a real chain. It is covered only by the stub verifier.\n(2) A live external agent completing a signed loop against a running Mitra.\n\nBREAKING for callers: unsigned transitions return 401. A party that is not a registered agent cannot act until it registers.\n\nNEXT for purple: the Phase 7 epoch runner, settling through the guarded path (ctx_77b1884dc8534f70).",
+      "status": "active",
+      "scope": "security",
+      "tags": [
+        "F55",
+        "handoff",
+        "identity",
+        "postgres"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T17:14:31.898Z",
+      "parents": [
+        "89f045562e7e8deb0b80ce51febbd40b017cdf9c87fa6aac85f6ce57a1b0a5c5"
+      ],
+      "hash": "03731aceb47e818fd18e93f28d439618c7e7c665cf4c6be9d4714cae28a8c119",
+      "supersedesId": "ctx_cac9c01a00fc331e"
+    },
+    {
+      "entryId": "ctx_38c77fddc6e979b5",
+      "seq": 93,
+      "kind": "finding",
+      "title": "F62 (claimed by purple): deployed MitraClearing.sol has no challenge outcome; a challenged epoch finalizes, FROZEN accepts obligations, and a late result swap finalizes without a fresh window",
+      "body": "Reproduced 2026-10-05 in contracts/test/MitraClearingChallenge.t.sol. It is uncommitted, and all 3 tests fail against the contract deployed at Base Sepolia 0x2179bf05… and Tempo 0xbd78e40b…:\n1. finalizeEpoch refuses only Finalized, Settled and an open window. A Challenged epoch therefore finalizes normally after the window, and the challenge has no outcome. That breaks PRD §14.8 (\"challenge outcome\") and the contract's own header, which says challenge exists so the operator \"cannot unilaterally settle a challenged epoch\".\n2. recordObligation accepts Frozen, against PRD §14.5 (\"FROZEN: new obligations are excluded\") and its own comment (\"Only while OPEN\"). Obligations are never checked against the committed inputsRoot, so the root binds nothing on-chain.\n3. recordSettlement can replace transfers and resultHash at any point in the window without restarting it. The operator can swap the result one second before close, and it finalizes one second later.\n\nAlso: no function reaches Settled, so the PRD's SETTLING/SETTLED stage, where settlement receipts are attached, does not exist. openEpoch and commitEpoch cannot both run on one epoch, because commit requires None. The lead's 4/4 Foundry tests do not exercise any of these paths.\n\nThe kernel's model, in lib/kernel/clearing.ts resolveChallenges, is that a challenge excludes the challenged obligation, keeps it visible with its reason, and the result is recomputed before finalize. The contract has an unused `excluded` field per obligation.\n\nThe operator of the deployed contracts is 0xAeA8… (the lead's key), not purple's 0x7823…. A live Phase 7 runner on these contracts would demonstrate a challenge path that does nothing, so the runner waits until this is decided.",
+      "status": "superseded",
+      "scope": "clearing",
+      "tags": [
+        "F62",
+        "clearing",
+        "contract",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T17:25:32.276Z",
+      "parents": [
+        "03731aceb47e818fd18e93f28d439618c7e7c665cf4c6be9d4714cae28a8c119"
+      ],
+      "hash": "c0b9400bee13b1ed7816b328bd5fc6b45f0912a38b56ae4eb05bda8798e47d02"
+    },
+    {
+      "entryId": "ctx_79718f2aadabac9b",
+      "seq": 94,
+      "kind": "decision",
+      "title": "F62 fix: MitraClearing follows PRD §14.4 with party-only obligation challenges and an on-chain conservation check; purple redeploys with its own operator key",
+      "body": "DECIDED by human:purple, 2026-10-05.\n\n(1) Purple fixes contracts/MitraClearing.sol test-first. It redeploys new instances on Base Sepolia and Tempo Moderato with purple's dev key 0x7823… as operator, keeps the lead's 0x2179bf05… and 0xbd78e40b… as superseded entries in deployments.json, then builds and runs the live epoch runner.\n\n(2) Challenge semantics follow the kernel's resolveChallenges. Only the debtor or creditor of an obligation may challenge it. The leg is excluded and stays visible with its reason hash. The result is invalidated, the operator must re-propose without the leg, and the window restarts. Rejected: anyone excluding any leg, which lets anyone strip every epoch for free; and a challenge discarding the whole epoch, which throws away every other leg over one dispute.\n\nLIFECYCLE (PRD §14.4):\nopenEpoch(id, window) → recordObligation only while Open → freezeEpoch, which takes inputsRoot from an on-chain rolling hash of the obligations, not from the operator → proposeResult(net, resultHash), which starts or restarts the window → challengeObligation (party only, inside the window) → re-propose → finalizeEpoch (permissionless, after the window, refused while a challenge is unanswered) → recordReceipt per residual transfer → SETTLED once every transfer has a receipt.\n\nADDED BY PURPLE: proposeResult checks on-chain that the transfers conserve every address's net position over the included obligations. A result that pays anyone what the obligations do not net to reverts, and is not merely left open to challenge. Epoch size is capped so the check stays bounded.\n\nThe API changes: commitEpoch is gone. Nothing in lib/ calls the contract ABI.",
+      "status": "active",
+      "scope": "clearing",
+      "tags": [
+        "F62",
+        "clearing",
+        "contract",
+        "decision",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T17:28:22.151Z",
+      "parents": [
+        "c0b9400bee13b1ed7816b328bd5fc6b45f0912a38b56ae4eb05bda8798e47d02"
+      ],
+      "hash": "9ca7a70285a68139ea1e00772b7ec384ca72b7d97c5bfbdcc9e36fc1c1500def"
+    },
+    {
+      "entryId": "ctx_c890a04fb87d7187",
+      "seq": 95,
+      "kind": "handoff",
+      "title": "F62 fixed and redeployed: MitraClearing on Base Sepolia 0xaacba512… and Tempo 0xd03d91c3…, operator purple 0x7823…; the lead's instances are superseded",
+      "body": "Pushed on feat/backlog-on-v2: 965695c (the contract), 3f6f4bd (docs), then the deployment commit.\n\nNew MitraClearing, revision F62, operator 0x7823d6bEA51cC21C5d8588C7ff72E33130848116:\n- Base Sepolia 0xaacba512ba6dc726cb6cafdc2799198dbddb1c4c (tx 0x061615d2…, block 47728854)\n- Tempo Moderato 0xd03d91c3ae594c6b1163d89a5cee622c3c1f8688 (tx 0x46791629…, block 38316051)\nOn both chains the runtime code equals the artifact and MAX_OBLIGATIONS() returns 64. The lead's 0x2179bf05… and 0xbd78e40b… are in deployments.json under clearingSuperseded, with the reason.\n\nTHE API CHANGED. commitEpoch and recordSettlement are gone. The calls are now openEpoch(id, window), recordObligation (OPEN only), freezeEpoch, proposeResult (conservation is checked and the window restarts), challengeObligation (party only), finalizeEpoch, and recordReceipt. Anything written against the old ABI must move, including docs/HANDOFF_CODEVELOPER.md §3's runner sketch.\n\nTests: forge contracts/test 50/50; mutation 12/12.\n\nNEXT (purple): the guarded residual settlement. planResidualSettlement in the kernel binds a policy-approved reservation to (epochId, transferIndex, payee, amount), under the same guard as agreement payments (ctx_77b1884dc8534f70). After that comes scripts/run-live-clearing-epoch.mjs.",
+      "status": "superseded",
+      "scope": "clearing",
+      "tags": [
+        "F62",
+        "clearing",
+        "deployment",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T18:47:12.709Z",
+      "parents": [
+        "9ca7a70285a68139ea1e00772b7ec384ca72b7d97c5bfbdcc9e36fc1c1500def"
+      ],
+      "hash": "0489d7a829665e291bc51c8c2418b6edbf815f4914e9f728af4e45dd89100b43"
+    },
+    {
+      "entryId": "ctx_9b9e7a8c3172e71b",
+      "seq": 96,
+      "kind": "decision",
+      "title": "Clearing residuals settle only through a reservation bound to (epochId#index) under capability clearing_residual, the execution guard, and an on-chain check that MitraClearing finalized that exact transfer",
+      "body": "DECIDED by human:purple, 2026-10-05. This implements finding ctx_77b1884dc8534f70.\n\n- actionDigestFor gains an optional residualRef (\"<epochId>#<index>\"). It is omitted from the hash when absent, so existing digests do not change.\n- planResidualSettlement, in the kernel, refuses unless all of these hold:\n  - the stored epoch is FINALIZED and the index exists;\n  - the reservation's residualRef matches;\n  - the mandate is held by the transfer's FROM party;\n  - the vault and chain equal the epoch's settlement domain;\n  - the mandate is ACTIVE and unexpired, and the vault is not frozen;\n  - validateExecutionBinding passes.\n- The payee is the TO party's registered wallet on that chain, never the caller's. The settlement id is derived from (epochId, index), so it can be paid once.\n- Before broadcasting, the API reads MitraClearing and refuses unless the epoch is Finalized or Settling and transfersOf(epoch)[index] equals the transfer being paid. The payment is then bound to the challengeable on-chain result.\n\nSeams, built test-first:\n(A) the kernel plan;\n(B) POST /reservations with residualRef, whose terms must match the transfer;\n(C) POST /settlements op settleResidual, paid once through the guard on a stub rail;\n(D) a CLEARING_LIVE=1-gated live test that runs a whole epoch on-chain and pays the residuals through MitraVault v2.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "clearing",
+        "decision",
+        "execution-guard",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T18:57:12.687Z",
+      "parents": [
+        "0489d7a829665e291bc51c8c2418b6edbf815f4914e9f728af4e45dd89100b43"
+      ],
+      "hash": "bbe82c9903c56ffc565de26aa9fd5820534bc59071102bdc091b85ec95f6e273"
+    },
+    {
+      "entryId": "ctx_4ea5c4be3b1d4e50",
+      "seq": 97,
+      "kind": "finding",
+      "title": "F63 (claimed by purple): the \"F61\" MitraVault deployments run pre-F61 bytecode, so token-scoped mandates are not live on Base or Tempo",
+      "body": "Checked 2026-10-05 against lib/evm/deployments.json's canonical vaults, which commit bfbe8a6 recorded as the F61 deployment: Base Sepolia 0xbd78e40b109bc7e47415ba544710ef1d6b9bbe8b and Tempo Moderato 0x81798c6f4ff1257b53b0be512c979f2656269329.\n\nWhat the chain shows:\n- Both runtimes are 8701 bytes. That is exactly the size the ledger recorded for the PREVIOUS v2 vault. The repo's MitraVault.sol compiles to 8816 bytes, and the code does not match on either chain.\n- Selectors on-chain: mandates(address,address) and openMandate(address,uint64,uint64,uint64,address) are present. The F61 forms, mandates(address,address,address) and openMandate(address,address,uint64,uint64,uint64,address), are absent.\n- An eth_call to the 3-key mandates reverts on Base. The 2-key form answers.\n\nSo PROOF_LEDGER's \"v2 CONTRACT (with F61 token-scoped mandates) — CURRENT figures\" is not true of the bytecode. F61 (raw units in any token; a leaked engine key with a USD-sized ceiling can take any token) is still open live.\n\nSide effect: our TS vault transport (lib/adapters/evm-vault-transport.ts) still uses the 2-key mandates, which matches what is deployed. It does not match the repo source, so it would break the day a real F61 vault is deployed.\n\nLikely cause, not verified: the deploy used a stale out/ artifact, or the addresses were recorded from a run of the old code. The lead's sagas, which use lockEscrow and refundEscrow, would pass on either version.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F61",
+        "F63",
+        "deployment",
+        "evidence",
+        "vault"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T19:12:37.911Z",
+      "parents": [
+        "bbe82c9903c56ffc565de26aa9fd5820534bc59071102bdc091b85ec95f6e273"
+      ],
+      "hash": "52aafd6c8f5cfb9d6d112d4309b3568c8bc06c02170a59b8c982bbfd1c2cdbb1"
+    },
+    {
+      "entryId": "ctx_0c8226e672997299",
+      "seq": 98,
+      "kind": "decision",
+      "title": "F63 resolution: purple redeploys the repo's F61 MitraVault (runtime code verified against the artifact) and moves the TS vault rail to token-keyed mandates before the Phase 7 live run",
+      "body": "DECIDED by human:purple, 2026-10-05.\n\nOrder of work:\n(1) Test-first, lib/adapters/evm-vault-transport.ts reads mandates(principal, holder, token).\n(2) Deploy contracts/MitraVault.sol on Base Sepolia and Tempo Moderato with purple's dev key. The deploy must assert that the runtime code equals out/MitraVault.sol/MitraVault.json. The stale entries 0xbd78e40b… (Base) and 0x81798c6f… (Tempo) are kept as superseded, labelled F63.\n(3) Move the live vault tests' provisioning to openMandate and amendMandate with a token, then re-prove the vault rail live.\n(4) Run the Phase 7 live epoch on the new vault.\n\nThe PROOF_LEDGER F61 rows get corrected, not deleted.",
+      "status": "active",
+      "scope": "settlement",
+      "tags": [
+        "F61",
+        "F63",
+        "decision",
+        "vault"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T19:12:50.752Z",
+      "parents": [
+        "52aafd6c8f5cfb9d6d112d4309b3568c8bc06c02170a59b8c982bbfd1c2cdbb1"
+      ],
+      "hash": "b83ea470bbf51eb321ba60307ea19aa120a6407a995cfb75ae2fd28cd0266640"
+    },
+    {
+      "entryId": "ctx_070ff86320e90547",
+      "seq": 99,
+      "kind": "handoff",
+      "title": "Phase 7 LIVE_DEMONSTRATED on Base Sepolia and Tempo: epochs netted, finalized on MitraClearing, residuals paid through the guard and MitraVault (pushed, 4890a16)",
+      "body": "Pushed on feat/backlog-on-v2 (9f60cf5..4890a16): 67d647e residual settlement, e6e0154 F63 vault fix, 4890a16 live run.\n\nWHAT IS LIVE, 2026-10-05:\n- Epoch flow: a 3-party cycle (0.055 gross) is netted by the kernel. On F62 MitraClearing it is opened, recorded, frozen, proposed and finalized; the on-chain inputsRoot equals the local recomputation.\n- Residuals: buyer→eval 0.015 and buyer→data 0.01. Each is reserved under clearing_residual, planned by planResidualSettlement, checked against transfersOf, and paid through MitraVault spendAuthorized. Its payment hash is attached on-chain with recordReceipt, and the epoch reaches Settled.\n- Before finalization, the API refused with RESIDUAL_NOT_FINALIZED_ON_CHAIN.\n- Every hash is in PROOF_LEDGER's live-clearing row. Command: CLEARING_LIVE=base|tempo npx vitest run tests/clearing-live.test.ts.\n\nCHANGES THE LEAD MUST KNOW:\n(1) F62. The deployed MitraClearing had no challenge outcome. It is replaced at Base 0xaacba512… and Tempo 0xd03d91c3…, operator purple 0x7823…, with a new ABI (openEpoch(id, window) … recordReceipt).\n(2) F63. The vaults recorded as F61 (0xbd78e40b…, 0x81798c6f…) ran pre-F61 bytecode. The F61 vaults are now Base 0x92dcee6a… and Tempo 0x85409dfc…. deploy-evm-vault.mjs verifies the runtime code (immutables masked) and the F61 selector. The TS vault rail reads token-keyed mandates.\n(3) Residual settlement API. POST /reservations accepts { residual: { epochId, transferIndex } }. POST /settlements accepts op settleResidual. A residual is paid only when MitraClearing agrees.\n\nNOT LIVE: a challenge, which is covered in Foundry only. The payees are derived addresses with no agent keys. The operator is one EOA.\n\nSTATE: vitest is 860 in memory and 908 on Postgres with 0 failures; forge contracts/test is 50/50. The Docker container mitra-pg-test is still running locally.\n\nNEXT CANDIDATES: a live challenge round with keyed parties; ERC-1271 identity against a real chain; a live external agent completing a signed F55 loop.",
+      "status": "active",
+      "scope": "clearing",
+      "tags": [
+        "F62",
+        "F63",
+        "clearing",
+        "handoff",
+        "live",
+        "phase-7"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T19:25:04.216Z",
+      "parents": [
+        "b83ea470bbf51eb321ba60307ea19aa120a6407a995cfb75ae2fd28cd0266640",
+        "0489d7a829665e291bc51c8c2418b6edbf815f4914e9f728af4e45dd89100b43"
+      ],
+      "hash": "4d7c17014427f8737b7240bc64d5e710fdea1c81f02e8c505faf3a1d3fe89159",
+      "supersedesId": "ctx_c890a04fb87d7187"
+    },
+    {
+      "entryId": "ctx_f192e7e59b8d7778",
+      "seq": 100,
+      "kind": "finding",
+      "title": "RENUMBERED F62 → F64: \"MitraClearing had no challenge outcome\" is F64; F62 stays the lead's cross-chain CREATE collision",
+      "body": "The lead recorded F62 (cross-chain CREATE address collision, commit eecc573, 2026-10-05 09:57 UTC) before purple claimed F62 for the clearing challenge flaw (seq 90). Purple's finding is now F64 everywhere except one place: the header comment of contracts/MitraClearing.sol still says \"fixed in F62\". Editing it would change the metadata hash and the bytecode, and the repo source must stay byte-identical to the deployed instances at Base 0xaacba512… and Tempo 0xd03d91c3…. Both match the artifact as of 2026-10-05.\n\nThe lead's F62 redeploy of the clearing contract on Tempo (0x6ca633a0…) runs the pre-F64 code, which has no challenge outcome. It is recorded under clearingSuperseded.\n\nF-numbers in use: lead F58, F59, F62; purple F57, F60, F61, F63, F64. The next free number is F65; claim it in shared context first.",
+      "status": "active",
+      "scope": "clearing",
+      "tags": [
+        "F62",
+        "F64",
+        "clearing",
+        "numbering"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-05T19:36:56.733Z",
+      "parents": [
+        "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47",
+        "c0b9400bee13b1ed7816b328bd5fc6b45f0912a38b56ae4eb05bda8798e47d02"
+      ],
+      "hash": "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae",
+      "supersedesId": "ctx_38c77fddc6e979b5"
+    },
+    {
+      "entryId": "ctx_d667f04b2e458a6c",
+      "seq": 101,
+      "kind": "decision",
+      "title": "PR #32 Merged: F55 caller identity, F63/F64 redeployments, Phase 7 live clearing confirmed",
+      "body": "The lead reviewed and merged PR #32 (feat/backlog-on-v2) into feat/mitra-vault-v2-reseed. Confirmations: (1) F62 CREATE collision stands; clearing challenge flaw is F64; next free number is F65. (2) F63 MitraVault redeployed with verified runtime code and token-keyed mandates on Base (0x92dcee6a) and Tempo (0x85409dfc). (3) F64 MitraClearing redeployed following PRD 14.4 challenge lifecycle and net position conservation on Base (0xaacba512) and Tempo (0xd03d91c3). (4) F55 caller identity with EIP-712 signed transitions and MCP un-withholding verified. (5) Phase 7 clearing LIVE_DEMONSTRATED on Base Sepolia and Tempo Moderato with residual settlement through execution guard. All gates pass: forge test 50/50, vitest 891 pass, verify:saga-events pass, typecheck 0 errors.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "clearing",
+        "evidence",
+        "identity",
+        "merge",
+        "vault"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-05T22:24:56.744Z",
+      "parents": [
+        "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae"
+      ],
+      "hash": "0732bd19605ac25162d78d1681a949945f881c870755dda22250f8706137f00a"
     }
   ],
   "actors": [
@@ -1782,5 +2115,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "78602d732b4c4c5f48435b234ec61c913d14b464790f5d25b887e3826496ac47"
+  "tipHash": "0732bd19605ac25162d78d1681a949945f881c870755dda22250f8706137f00a"
 }
