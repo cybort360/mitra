@@ -232,6 +232,16 @@ export class PostgresRepository implements EconomicRepository {
    * written — the next request read the seed state back. Same class as F36: the
    * in-memory backend worked, so the suite was green whenever DATABASE_URL was unset.
    */
+  async createSpace(space: Space): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.spaces (space_id, owner, status, document)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (space_id) DO UPDATE
+         SET document = $4::jsonb, status = $3, owner = $2`,
+      [space.spaceId, space.owner, space.status, JSON.stringify(space)],
+    );
+  }
+
   async getSpace(spaceId: string): Promise<Space | null> {
     const { rows } = await this.pool.query("SELECT document FROM mitra.spaces WHERE space_id = $1", [spaceId]);
     return rows[0] ? (rows[0].document as Space) : null;

@@ -113,6 +113,15 @@ export interface EconomicRepository {
    * lifecycle be exercised in a unit test and, later, against Solana.
    */
   listSpaces(): Promise<Space[]>;
+  /**
+   * Create or replace a Space (PRD §13.1, PK1).
+   *
+   * Idempotent on `spaceId` via upsert, so a retried POST does not fail on the
+   * primary key. That is deliberate: a Space is a named commercial context, and
+   * a duplicate create arriving after a network timeout should converge rather
+   * than wedge the caller.
+   */
+  createSpace?(space: Space): Promise<void>;
   getSpace?(spaceId: string): Promise<Space | null>;
   updateSpace?(space: Space): Promise<void>;
   /**

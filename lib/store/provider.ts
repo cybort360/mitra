@@ -143,6 +143,10 @@ export class InMemoryRepository implements EconomicRepository {
     return [...this.spacesMap.values()].map((s) => ({ ...s }));
   }
 
+  async createSpace(space: Space): Promise<void> {
+    this.spacesMap.set(space.spaceId, { ...space });
+  }
+
   async getSpace(spaceId: string): Promise<Space | null> {
     const s = this.spacesMap.get(spaceId);
     return s ? { ...s } : null;
