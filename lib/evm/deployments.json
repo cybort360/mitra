@@ -99,7 +99,7 @@
       "deployTx": "0xb94e8879abfe177dfa81440408b84dad0d7788f4dfb9d97bd6bbfe491e9e622c",
       "deployBlock": 38263099,
       "supersededAt": "2026-10-05T20:30:00.000Z",
-      "reason": "The lead's F62 redeploy (cross-chain CREATE collision) of the pre-F64 contract: no challenge outcome; superseded by the F64 instance at 0xd03d91c3\u2026"
+      "reason": "The lead's F62 redeploy (cross-chain CREATE collision) of the pre-F64 contract: no challenge outcome; superseded by the F64 instance at 0xd03d91c3…"
     }
   ],
   "vaultSuperseded": [
@@ -125,5 +125,27 @@
       "reason": "F63: runtime code was pre-F61 (2-key mandates); see forge/FAILURES.md",
       "caip10": "eip155:42431:0x81798c6f4ff1257b53b0be512c979f2656269329"
     }
-  ]
+  ],
+  "jobEscrow": {
+    "baseSepolia": {
+      "address": "0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6",
+      "caip10": "eip155:84532:0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6",
+      "chainId": 84532,
+      "deployer": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
+      "deployTx": "0xa83fd6fc0d1401f7b791df1efc9ab06c6996362a41268553160cb01c3491bc9f",
+      "deployBlock": 47740801,
+      "revision": "F64",
+      "runtimeCodeMatchesArtifact": true
+    },
+    "moderato": {
+      "address": "0x95ca2170d1021cb9b5ce6809066f094e00c0a583",
+      "caip10": "eip155:42431:0x95ca2170d1021cb9b5ce6809066f094e00c0a583",
+      "chainId": 42431,
+      "deployer": "0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D",
+      "deployTx": "0xa463ee7ee34dd3556d0d153fec215c0d5639c2b56739d9ac3cd8531336f208bd",
+      "deployBlock": 38355996,
+      "revision": "F64",
+      "runtimeCodeMatchesArtifact": true
+    }
+  }
 }
