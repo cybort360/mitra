@@ -62,11 +62,26 @@ describe("intent lifecycle", () => {
     expect((await createIntent(req({ ...body, intentId: "i1", expiresAt: "2020-01-01T00:00:00Z" }))).status).toBe(400);
   });
 
-  it("is idempotent on intentId", async () => {
+  it("is idempotent on intentId for identical body", async () => {
     expect((await createIntent(req(body))).status).toBe(201);
-    expect((await createIntent(req(body))).status).toBe(201);
+    const replay = await createIntent(req(body));
+    expect(replay.status).toBe(200);
     const list = await listIntents(new Request("http://x?principal=Mitra+Labs"));
     const matches = (await list.json()).data.filter((i: { intentId: string }) => i.intentId === "intent_pk1_1");
     expect(matches).toHaveLength(1);
+  });
+
+  it("refuses to overwrite an existing intent with a different body (F65)", async () => {
+    expect((await createIntent(req(body))).status).toBe(201);
+    const overwriting = await createIntent(
+      req({ ...body, objective: "A completely different objective that must not overwrite" }),
+    );
+    expect(overwriting.status).toBe(409);
+    expect((await overwriting.json()).error).toBe("INTENT_EXISTS");
+
+    // The original intent survives untouched
+    const got = await getIntent(new Request("http://x"), { params: Promise.resolve({ id: "intent_pk1_1" }) });
+    expect(got.status).toBe(200);
+    expect((await got.json()).data.objective).toBe(body.objective);
   });
 });

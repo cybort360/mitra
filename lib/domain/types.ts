@@ -72,6 +72,9 @@ export interface ExternalIdentityRef {
   url?: string;
 }
 
+/** A reference to an external job or offering: either a structured ref or a namespaced URN string (F68). */
+export type ExternalJobRef = ExternalIdentityRef | string;
+
 export interface Agent {
   agentId: string;
   name: string;
@@ -348,7 +351,7 @@ export interface Agreement {
   client: string;
   provider: string;
   evaluator?: string;
-  externalJobRefs: ExternalIdentityRef[];
+  externalJobRefs: ExternalJobRef[];
   price: Money;
   deadline: string;
   acceptanceCriteria: string[];

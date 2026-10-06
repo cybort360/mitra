@@ -52,6 +52,28 @@ export async function POST(req: Request) {
   if (Date.parse(b.expiresAt) <= Date.now()) {
     return NextResponse.json({ error: "INVALID_INTENT", reason: "EXPIRES_AT_IN_PAST" }, { status: 400 });
   }
+  if (b.intentId && repo.getIntent) {
+    const existing = await repo.getIntent(b.intentId);
+    if (existing) {
+      const isIdentical =
+        existing.runId === b.runId &&
+        existing.principal === b.principal &&
+        existing.initiatingAgentId === b.initiatingAgentId &&
+        existing.mandateId === b.mandateId &&
+        existing.objective === b.objective &&
+        existing.budget.asset === b.budget.asset &&
+        existing.budget.amount === b.budget.amount &&
+        JSON.stringify(existing.constraints) === JSON.stringify(b.constraints) &&
+        existing.expiresAt === b.expiresAt;
+      if (isIdentical) {
+        return NextResponse.json({ data: existing, backend, evidenceLevel: "LOCAL_PASS" }, { status: 200 });
+      }
+      return NextResponse.json(
+        { error: "INTENT_EXISTS", reason: "An intent with this id already exists with different parameters" },
+        { status: 409 },
+      );
+    }
+  }
   const intent: Intent = {
     intentId: b.intentId ?? `intent_${Math.random().toString(36).slice(2, 10)}`,
     runId: b.runId,

@@ -133,6 +133,10 @@ export class InMemoryRepository implements EconomicRepository {
    * backend label says nothing about whether a claim was re-verified.
    */
   async createIntent(intent: Intent): Promise<Intent> {
+    const existing = this.intentsMap.get(intent.intentId);
+    if (existing) {
+      return { ...existing };
+    }
     // Intent maps are module-scoped like the other in-memory state; clone on
     // write so a caller holding the old object cannot mutate stored state.
     this.intentsMap.set(intent.intentId, { ...intent });

@@ -213,11 +213,14 @@ export class PostgresRepository implements EconomicRepository {
    * The searchable fields are columns; everything else lives only in `data`.
    */
   async createIntent(intent: Intent): Promise<Intent> {
+    const existing = await this.getIntent(intent.intentId);
+    if (existing) {
+      return existing;
+    }
     await this.pool.query(
       `INSERT INTO mitra.intents (intent_id, principal, agent_id, data)
        VALUES ($1, $2, $3, $4::jsonb)
-       ON CONFLICT (intent_id) DO UPDATE
-         SET principal = $2, agent_id = $3, data = $4::jsonb`,
+       ON CONFLICT (intent_id) DO NOTHING`,
       [intent.intentId, intent.principal, intent.initiatingAgentId, JSON.stringify(intent)],
     );
     return intent;

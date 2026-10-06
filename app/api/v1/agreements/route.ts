@@ -73,7 +73,14 @@ const OpenAgreementSchema = z.object({
     client: z.string().min(1),
     provider: z.string().min(1),
     evaluator: z.string().min(1),
-    externalJobRefs: z.array(z.string()).default([]),
+    externalJobRefs: z
+      .array(
+        z.union([
+          z.string(),
+          z.object({ system: z.string(), id: z.string(), url: z.string().optional() }),
+        ]),
+      )
+      .default([]),
     price: MoneySchema,
     deadline: z.string().min(1),
     acceptanceCriteria: z.array(z.string()).default([]),
