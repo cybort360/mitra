@@ -2998,3 +2998,160 @@ and was true by accident before.
 **RULE ADDED:** (20) when a feature moves value out of an account, every invariant that counted
 that value *in that account* is a bug until re-derived. Write the composition test (new feature ×
 old invariant) before the feature ships, not after the old suite stays green.
+
+## F71 — the Arcium cluster echoes `nonce + 1`, so a nonce must never be a counter
+
+**Status:** open (upstream: Arcium 0.15.0). Worked around, measured and asserted;
+**not** "fixed", because the behaviour is in a third-party runtime.
+**Found:** 2026-10-06, LP-5, first live `evaluate_mandate` run.
+
+`evaluate_mandate` queues a `plaintext_u128` nonce and the callback emits
+`SignedComputationOutputs.nonce` in the `MandateDecisionEvent`. The value that comes
+back is the value that was sent **plus one**. Measured on a live cluster across three
+probes, every magnitude:
+
+| queued (u128)                  | on-chain nonce                  |
+|--------------------------------|---------------------------------|
+| `1`                            | `2`                             |
+| `18446744073709551616` (2^64)  | `18446744073709551617`          |
+| `0x59932e7ccc141ad…` (random)  | `0x5a932e7ccc141ad…`            |
+
+Not a client-side encoding artifact: `deserializeLE(nonce) → BN → toArrayLike('le',16)`
+was verified to be byte-identical in isolation for every top-byte value, so the
+`+1` is introduced on the Arcium side. The Anchor program's `nonce: u128`
+deserializes correctly (`@anchor-lang/borsh`'s `BNLayout.encode` is
+`src.toArrayLike(Buffer, "le", 16)`), and the client sends what it intends.
+
+**Why it matters.** The nonce is meant to identify the request that produced a
+decision. Under this transform **adjacent counters collide**: the decision for `n`
+can be presented as the decision for `n+1`. Anything that keys on the nonce —
+idempotency, replay rejection, an audit trail — must use a value with no close
+neighbours.
+
+**Fix applied:** the live suite uses a random 16-byte nonce per computation and
+asserts the *exact* transform rather than raw equality (`echoedNonce` in
+`tests/probe.ts`), because asserting equality with what was queued asserts something
+false about a third-party runtime, and asserting nothing drops the check that ties an
+on-chain decision to the request that produced it. **A 128-bit random nonce is
+unaffected**; the transform costs binding precision, not correctness — the circuit's
+input is the encrypted struct and the caller decrypts with its own Rescue-CTR nonce,
+so no decision is affected.
+
+**RULE ADDED:** (21) when integrating a third-party runtime, measure the values it
+*echoes back*, not the values it is documented to accept. An echoed identifier is the
+one an integration actually depends on, and it is the one nothing tests.
+
+## F72 — a 2-node Arcium localnet submits every callback twice
+
+**Status:** worked around; recorded, not fixed (upstream cluster behaviour).
+**Found:** 2026-10-06, LP-5.
+
+On the localnet, the cluster submits the callback **twice in the same slot**: one
+attempt succeeds and runs `evaluate_mandate_callback`, the other loses the race and
+fails with `AlreadyCallbackedComputation` (6204). Observed on every single
+computation:
+
+```
+3VJCk7QKQBeDG9FtR4At…  slot 1114  err=none                     ← ran the handler, emitted the event
+48SEJR7aPAjCD1rbgpJ…  slot 1114  InstructionError [2, 6204]   ← AlreadyCallbackedComputation
+```
+
+**Why it matters.** `@arcium-hq/client`'s `awaitComputationFinalization` returns
+whichever finalization signature it saw first, which here is regularly the *losing*
+one. So the first draft of the live suite reported a failed callback for
+computations that had in fact produced a decision, and a cluster run looked broken
+when the cluster was working.
+
+**Fix applied:** `awaitWinningCallback` in `tests/probe.ts` does not use
+`awaitComputationFinalization` at all. It polls the program's signatures for a
+transaction that **(a) names this computation's account**, **(b) has `meta.err ===
+null`**, and **(c) carries the event**. Matching on the computation *account address*
+rather than on a log string is what stops a neighbouring test's decision being picked
+up.
+
+**A signature is not evidence that a computation finished.** The same rule the
+repository already applies to EVM receipts, arriving from a different direction.
+
+## F73 — the Arcium integration test was still the `add_together` TEMPLATE
+
+**Status:** fixed (lead, 2026-10-06, LP-5). 13/13 live against a real cluster.
+**Found:** 2026-10-06, before attempting the cluster run.
+
+`tests/probe.ts` was byte-for-byte Arcium's `arcium init` output: it called
+`addTogether`, `initAddTogetherCompDef`, awaited `sumEvent`, and uploaded
+`build/add_together.arcis`. `programs/probe/src/lib.rs` had been rewritten for
+`evaluate_mandate` by F44. **So the one artifact that would have caught the
+half-migration was the artifact left behind**, and `arcium build` compiles the
+encrypted instruction and exits green either way.
+
+This is F44's shape stated plainly: a partially-migrated project looks finished,
+because the build is green and the only test is the template's. `FR-VAULT-008` and
+`FR-VAULT-009` were `UNTESTED` while `tests/arcium-circuit.test.ts` passed 14/14 —
+the hermetic mirror was green and the circuit had never been executed by anything.
+
+Three further defects in that template's shape were found only by running it:
+
+- **`getCompDefAccAddress` takes a `number`**, not the 4-byte offset the template
+  passed. Passing bytes derives a **different PDA** and the instruction then fails on
+  an account constraint, with an address that looks entirely plausible.
+- **`awaitComputationFinalization` is not usable here** — see F72.
+- **A `Connection` built by `AnchorProvider.env()` is `processed`**, and
+  `getTransaction` refuses anything below `confirmed`. Every "read the evidence
+  back" step failed with a commitment error that reads like a cluster fault.
+
+**Also fixed here:** the callback key must come from the *same* x25519 secret as the
+shared one. Deriving it from a throwaway (as a first draft did) produces a
+computation that finalizes perfectly and whose output nobody can read — a fully green
+cluster run proving nothing.
+
+**RULE ADDED:** (22) after rewriting an integration to a new protocol vocabulary, grep
+the integration for the old vocabulary. A renamed method, account or event leaves a
+template's call sites behind; they compile, they wait forever, and they never throw.
+
+## F74 — the confidential policy circuit, its Anchor program and its live suite live outside the repository
+
+**Status:** partially fixed (lead, 2026-10-06). Circuit source committed; the rest open.
+**Found:** 2026-10-06, LP-5, while recording where the evidence came from.
+
+The whole Arcium implementation is at `/home/ubuntu/arcium-probe/probe/`, untracked:
+
+- `encrypted-ixs/src/lib.rs` — **the circuit**
+- `programs/probe/src/lib.rs` — the Anchor program that queues computations
+- `tests/probe.ts` — the only integration test that has ever executed it
+- `build/evaluate_mandate.arcis` — the compiled artifact the cluster runs
+
+Consequences, in order of severity:
+
+1. **The hermetic mirror could not be audited.** `tests/arcium-circuit.test.ts` says
+   it is "kept line-for-line with the circuit's structure" — of a file that is not in
+   version control. A transcription of an invisible source can only be wrong in one
+   direction: nobody reviewing Mitra can read the thing it mirrors.
+2. **The live evidence is not reproducible from the repository.** Every claim in
+   `forge/PROOF_LEDGER.md` about Arcium traces to a checkout that a `git clean` on a
+   different machine cannot produce.
+3. **The program ID and cluster offsets are untracked.** The circuit is bound to
+   `7ZAm4faeREU54yDKWBKqfvRjSucgxBT5zaMWyJvYcU29`; nothing in the repository records
+   it.
+
+**Fixed now:** the circuit is committed at
+`programs/arcium-policy-circuit/encrypted-ixs/src/lib.rs` **and so is the Anchor
+program** at `programs/arcium-policy-circuit/anchor-program/src/lib.rs`, so both halves
+of the computation are reviewable here. `tests/arcium-policy-circuit.test.ts`
+(11 tests, mutation audit 7/7) asserts the hermetic mirror still matches the circuit — reason numbering, `is_nonzero`'s form, the absence
+of `when_allowed`, every `reason` write guarded, the six inputs in queue order, the
+five gates in order, no timestamp, an encrypted return, and none of the six binding
+fields. The direction of the copy is stated in that directory's README: the working
+tree is re-synced **from** the repository, never edited alongside it.
+
+**Still open:** `tests/probe.ts` — the only integration test that has ever executed
+the circuit — is **not** committed, and neither is the compiled `.arcis` artifact. The
+test imports `../target/types/probe`, which exists only after a build in the working
+tree, so committing it would place a file in the repository that looks runnable and is
+not. The localnet runbook and both host prerequisites (the validator bind address, and
+the `ufw` rules on 8899 *and* 8900) are recorded in the committed README, so the run is
+documented here even though the script is not. **Until that closes, the evidence for
+`FR-VAULT-008` is real but the script that produced it is not under version control.**
+
+**RULE ADDED:** (23) a mirror must live next to its source. A hand-written mirror whose
+original is untracked is not a test of the original, and it cannot be repaired by
+anyone who finds it wrong.

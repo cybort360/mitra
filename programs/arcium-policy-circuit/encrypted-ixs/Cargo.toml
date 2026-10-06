@@ -1,0 +1,11 @@
+[package]
+# cargo-build-sbf resolves platform-tools from HERE, not from Anchor.toml.
+# The Anchor.toml pin is silently ignored; without this the build resolves its
+# own default and fails with "Platform tools v1.52 is incompatible with SBPFv3".
+platform-tools = "v1.57"
+name = "encrypted-ixs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arcis = "0.15.0"

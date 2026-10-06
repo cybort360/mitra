@@ -73,6 +73,32 @@ node scripts/escrow-devnet.mjs sweep       # find and refund every open escrow t
 also settle). The `timeout` mode waits ~12 s for the job's deadline, because a
 3,600-second wait is a check that never runs.
 
+**LP-5, the confidential policy circuit.** The hermetic mirror is only a mirror, and
+this pins it to the committed source:
+
+```bash
+npx vitest run tests/arcium-circuit.test.ts tests/arcium-policy-circuit.test.ts
+```
+
+The **live** suite needs a cluster and lives in the Arcium working tree until F74 is
+closed. It is not runnable from CI, by design:
+
+```bash
+cd <arcium working tree>
+cargo build --release --manifest-path encrypted-ixs/Cargo.toml
+(cd programs/probe && cargo-build-sbf --tools-version v1.57 --arch v1)
+arcium localnet --skip-build          # `arcium build` cannot work; see its BUILD-SBF.md
+ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=~/.config/solana/id.json \
+ARCIUM_CLUSTER_OFFSET=0 npx ts-mocha -p ./tsconfig.json -t 1000000 "tests/**/*.ts"
+```
+
+Two host prerequisites that are **not** in any Arcium doc and cost most of the
+session: the validator must bind `172.17.0.1` (not `0.0.0.0`, which Agave 4.3.0
+panics on with `UnspecifiedIpAddr`), and `ufw` must allow the docker subnets to
+reach the validator on **both 8899 and 8900**. Without 8900 the nodes never connect
+pub/sub, never run `MxeKeygen`, and the MXE public keys stay unset — which surfaces
+as `getMXEPublicKey` returning null and reads as a broken client.
+
 `T4` is skipped without `DATABASE_URL` and says so on stderr. That is deliberate:
 a vacuous pass is worse than an absent one.
 
@@ -223,6 +249,11 @@ node scripts/phase2-readiness.mjs   # preconditions as commands
 Program `GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY` · vault
 `5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T` ·
 [explorer](https://explorer.solana.com/address/5gCCCyxoLfsUfNxHswHiUaPS9E1bgHyNyxh1nbwdxA9T?cluster=devnet)
+
+| **Arcium confidential policy — MPC cluster run (LP-5)** | `LIVE_DEMONSTRATED` | **The first decision this circuit has ever computed.** 2026-10-06, a 4-node Arcium MPC localnet (2 primary + 2 backup, `Cerberus` backend, `arcium` CLI 0.15.0) with `evaluate_mandate` queued as a real Arcis computation. **9 policy cases + 2 confidentiality cases, 13/13 passing**, each with its queue and callback signature and slot. ALLOW inside every bound: queue `48f4oZ5gGHwL9J5JYu3Zme38kPktcysQHXjeSQAQtobUk4HArrNkBEp8CPhDgmZnzcDcGd4QAu2fYPLjjpBJZSsg` (slot 1695) → callback `5WXhnFju2a6KWS3EDs1NcC3CaA94WaGKp9Zjxdpr1G5qHqbwVdwtffQGmnnWNm8ptPrawJezwxqaaroavgyjzGK9` (slot 1700), decision `allowed=1 reason=0`. **Both F43 regressions re-proven on the compiled circuit**, which the hermetic mirror could never do: a zero amount is REFUSED with `reason=3` (`28EgnXF2X6sQjS…` slot 1702 → `xjibkbs7LRvfsDv…` slot 1706), and a dead mandate outranks a breached `max_transaction` with `reason=1` (`4ZfZtjZZsXdgCmB…` slot 1707 → `K3djJSx1JDM7mDe…` slot 1711). `reason=4/5/6/2` and both inclusive boundaries also reproduced (`3FvxQaYCz1scmg4h…` slot 1733 → `52qbGdEDrx9PEiEc…` slot 1737 for `amount == max_transaction` → ALLOW). **The decision is decrypted by the caller and read back from the callback's raw `Program data:` logs**, 88 bytes, discriminator `797dbb63f67c02a5`, asserted against `sha256("event:MandateDecisionEvent")[..8]` |
+| **Arcium confidentiality — the mandate's limits are not on chain** | `LIVE_DEMONSTRATED` | PRD §11.12. With `max_transaction = 0x5eed123456789abc` and `budget = 0xfeed0bad0c0d0e0f`, the **entire serialized queue transaction** is searched for both secrets in **both endiannesses**; neither appears. The stronger, complementary check: the callback emits two 32-byte **ciphertexts**, not a verdict — asserted against a bare `u64` 1 and against 32 zero bytes, so "the inputs were secret but the ALLOW was published" cannot pass |
+| **Arcium circuit is now auditable in this repository** | `TESTED` | The circuit source lived at `/home/ubuntu/arcium-probe/probe/encrypted-ixs/src/lib.rs`, **outside this repository**, so `tests/arcium-circuit.test.ts` was a transcription of a file no reviewer of Mitra could read — F74. It is now committed at `programs/arcium-policy-circuit/encrypted-ixs/src/lib.rs` with `tests/arcium-policy-circuit.test.ts` (11 tests) asserting the mirror still matches it: reason-code numbering, `is_nonzero`'s form, the absence of `when_allowed`, **every `reason` write guarded by `is_zero(reason)`**, the six input fields in queue order, the five multiplicative gates in order, the absence of any timestamp, the encrypted return type, and the absence of the six binding fields. **Mutation audit 7/7 killed**: each of the F43 bugs, a renumbered reason code, an added `expires_at`, an `action_hash` moved into the circuit, and a dropped gate each turn it red |
+| **Arcium live suite (13 tests)** | `TESTED` | `tests/probe.ts` in the Arcium working tree — **rewritten**, see F73. It had been Arcium's `add_together` template since before F44. Not committed here (F74): the Anchor program and the localnet harness are still in the working tree, so the suite that produced this evidence is not yet version-controlled |
 
 | **Solana job escrow — lock** | `LIVE_DEMONSTRATED` | `lock_escrow` on devnet (LP-4, 2026-10-06), tx `2mXh5ejmr9H8ikydogRuoygSjKq6vz8upTPznxKBdmbeGaLEyAyDfCvBtnwTULqnr4E98Xz4rExDTS6QQGpYr8bV`, slot 508042268. 750,000 lamports committed to one job; read back from the RPC: the escrow PDA is 154 B, program-owned, with the payee and a non-zero `refund_route_hash`; `completed = refunded = 0`. **The claim a `reserve` cannot make:** the lamports are no longer in the vault (`available` −750,000, `escrowed` +750,000, `total` unchanged at 11,093,706) and the escrow account's own balance holds them |
 | **Solana job escrow — client release** | `LIVE_DEMONSTRATED` | `release_escrow`, tx `5YZKU4XaxmXhgPgyBCpdVa4B5EFSmb81aZVR5LyZtrPMw72tWijxBpAZmLmNSxgRjnvR1wW5r7XPFGonSeaYC6rk`, slot 508042354. The payee's balance rose by **exactly** 750,000 (measured from the RPC, not from the transaction's success), `total` fell to 10,343,706, `escrowed` back to 0. A replayed `release_escrow` was rejected with `0x1785` (6021 ESCROW_ALREADY_SETTLED) and the payee's balance did not move — the terminal flag, not an arithmetic accident |
