@@ -9,9 +9,19 @@
  *
  * Delivery is at-least-once: the cursor advances after each event's outcome is
  * recorded, so a worker that dies mid-delivery resends that event. Receivers
- * drop duplicates by `X-Mitra-Event-Id`. Run ONE worker per deployment; two
- * would deliver everything twice (still correct for a deduping receiver, but
- * wasteful).
+ * drop duplicates by `X-Mitra-Event-Id`.
+ *
+ * **Two concurrent drainers would deliver everything twice.** This used to be
+ * handled by a sentence — "run ONE worker per deployment" — which is a control
+ * with no mechanism: a second replica, an overlapping `systemd` restart, or a
+ * `kubectl scale` during an incident all produce exactly the duplication the
+ * sentence warns about, and none of them is an operator's mistake. `drain` now
+ * expects its caller to hold the single-writer lease
+ * (`tryAcquireWorkerLease` in `lib/store/postgres.ts`), and `scripts/webhook-worker.ts`
+ * stands down when it cannot take it. The `drain` function itself is unchanged and
+ * remains safe to call directly from a test: the lease is a deployment-level
+ * concern, and putting it *inside* `drain` would mean a per-subscription lock
+ * acquired and released once per subscription per pass.
  *
  * Retry policy: at most `maxAttempts` (3), waiting `backoffMs[i]` before retry
  * i+1 (1s, then 5s). A 5xx, 408, 429, timeout or network failure is retried; any

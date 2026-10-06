@@ -834,3 +834,108 @@ function rowToSaga(r: Record<string, unknown>): Saga {
     version: Number(r.version ?? 1),
   };
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Single-writer leases.
+//
+// `pg_advisory_xact_lock` above guards one transaction. A worker lease is the other
+// kind: it must be held across many transactions, for as long as a process lives,
+// and released when that process dies without anyone running cleanup code.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** The webhook delivery worker's lease name. Namespaced like every other lock key. */
+export const WEBHOOK_WORKER_LEASE = "mitra.webhook-worker";
+
+/**
+ * A held session-level advisory lock.
+ *
+ * **Session-level, not transaction-level, and that is the whole design.** A
+ * transaction-scoped lock dies with its `COMMIT`; the worker holds one across a
+ * whole delivery pass and then sleeps for `MITRA_WEBHOOK_POLL_MS` with nothing
+ * open. Worse, a session lock is released by Postgres itself when the connection
+ * drops — so a worker killed with `SIGKILL`, or one whose database connection
+ * died, stops being the writer *without any code running*. A lease that has to be
+ * cleaned up is a lease that is eventually leaked.
+ *
+ * The consequence is that holding this is not permanent: `held()` re-reads the
+ * server's own answer rather than caching a local boolean, and a worker that finds
+ * the lease gone re-acquires it (see `scripts/webhook-worker.ts`). A cached `true`
+ * would keep a second worker draining forever while reporting that it was safe.
+ */
+export interface WorkerLease {
+  readonly name: string;
+  /** The server's current answer, not a remembered one. */
+  held(): Promise<boolean>;
+  /** Explicit release. Safe to call when not held; the process dying does the rest. */
+  release(): Promise<void>;
+}
+
+/**
+ * Try to become the single writer for `name`.
+ *
+ * Returns `null` when another session already holds it — which is not an error.
+ * "Someone else is doing the work" is the correct, healthy answer, and the caller
+ * decides whether to stand down (the worker) or to proceed anyway (a test).
+ *
+ * `pg_try_advisory_lock` rather than `pg_advisory_lock`: a *blocking* acquisition in
+ * the worker's startup path would hang a second worker forever with no message,
+ * which looks like a hung deployment rather than a redundant one.
+ *
+ * The key is `hashtext(name)` — 32 bits, derived by the server, exactly as the
+ * receipt lock above does. A collision between two different lease names would let
+ * one stand the other down, and `hashtext` is a 32-bit hash, so that is possible in
+ * principle; it is accepted here for the same reason it is accepted there, and the
+ * names are few and fixed.
+ */
+export async function tryAcquireWorkerLease(pool: Pool, name: string): Promise<WorkerLease | null> {
+  const client = await pool.connect();
+  let acquired = false;
+  try {
+    const { rows } = await client.query("SELECT pg_try_advisory_lock(hashtext($1)) AS ok", [name]);
+    acquired = rows[0]?.ok === true;
+  } catch (err) {
+    client.release();
+    throw err;
+  }
+  if (!acquired) {
+    client.release();
+    return null;
+  }
+  let released = false;
+  return {
+    name,
+    async held() {
+      // `SELECT 1`, and the reasoning is the whole point:
+      //
+      // A session-level advisory lock can only be released by the session that took
+      // it — explicitly, or by the session ENDING. So while this connection is
+      // usable, the lock is held; there is no state in which the query succeeds and
+      // the lock is gone. `held()` is therefore exactly "is my session still
+      // there?", and a dead connection returns false rather than throwing so the
+      // worker's re-acquire path is the ordinary one.
+      //
+      // The alternative — reading `pg_locks` — was written first and is wrong. It
+      // needs the key's 64-bit split reproduced in SQL, and the halves are NOT the
+      // obvious ones: `hashtext` returns a *signed* int4, which sign-extends into
+      // the advisory key, so `pg_locks` holds the UNSIGNED 32-bit halves. Measured
+      // on this server for `mitra.webhook-worker`, key -1748458786 is stored as
+      // `classid=4294967295, objid=2546508510` — not `(key >> 16)` and
+      // `(key & 65535)`. Mirroring that split is a second encoding of a Postgres
+      // internal, and it is precisely the failure this repository keeps paying for
+      // (`vaultPda` in TS against `find_program_address` in Rust).
+      if (released) return false;
+      try {
+        await client.query("SELECT 1");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async release() {
+      if (released) return;
+      released = true;
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [name]).catch(() => {});
+      client.release();
+    },
+  };
+}
