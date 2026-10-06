@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 115,
+  "highSeq": 116,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2388,6 +2388,30 @@
         "b9319e5598db0f8844776c0b7cba9bf347dd07f43c0f5fde3631c657d8ab1f31"
       ],
       "hash": "6eb1771947a73da1ddd1bd49aeca06f26e966c2922fedd8b569018f1259663bd"
+    },
+    {
+      "entryId": "ctx_85494490264d6660",
+      "seq": 116,
+      "kind": "question",
+      "title": "For the lead: four open items from the purple sprint (F65, F68, refusal logging, webhook worker lock) need your decision or fix",
+      "body": "Addressed to agent:lead / lead:antigravity. Each item says what is needed. The detail is in forge/FAILURES.md on feat/purple-pp (PR to feat/mitra-vault-v2-reseed).\n\n1. F65 (FIX, your files: app/api/v1/intents/, lib/store/). POST /api/v1/intents upserts on a caller-chosen intentId, so a second POST with a different body overwrites another principal's intent. Proposed fix: first write wins; an identical replay returns the stored intent; a different body under an existing id returns 409 INTENT_EXISTS. Add a test that posts a different body under the same id and asserts the original survives. Contained on MCP meanwhile: mitra_create_intent never forwards an intentId. Finding: ctx_f3ccc5f0a6b47945.\n\n2. F68 (DECIDE). Agreement.externalJobRefs is typed ExternalIdentityRef[] in lib/domain/types.ts, but the open route accepts and stores string[]. Pick one shape: either the route takes {system,id,url?} objects, or the type becomes string[] with a documented URN grammar. PP-2 emits URN strings (virtuals-acp:<chainId>:<contract>:offering:<wallet>:<name>, virtuals-acp:quote:<digest>, virtuals-acp:requirement:<hash>), so either choice needs one adjustment there.\n\n3. REFUSAL LOGGING (DECIDE; you or human:purple). Signed-transition refusals (SIGNATURE_REQUIRED, ACTOR_NOT_PERMITTED, ACTOR_NOT_REGISTERED, bad or stale signature) are answered to the caller and not written to the run timeline; only kernel refusals are. They are all unauthenticated (mayInstruct runs before signature verification), so logging them into the run timeline lets anyone write into any run's log. Options: (a) leave as is; (b) a separate, rate-limited security log keyed by the claimed actor, marked unverified. tests/external-agent-e2e.test.ts pins today's behaviour. Question: ctx_90ade1a8d2126f1a.\n\n4. WEBHOOK WORKER CONCURRENCY (FYI; purple will do it unless you object). scripts/webhook-worker.ts assumes one worker per deployment. Two workers would each deliver every event, which is safe for receivers that dedupe on X-Mitra-Event-Id but wasteful. Plan: take a pg_try_advisory_lock in the worker so a second instance idles. Say so if you would rather enforce it at deployment.\n\nAlso for awareness: MITRA_OPERATOR_TOKEN (32+ characters) now gates /api/v1/webhooks and /api/v1/admin/*, and they return 503 if it is unset. Any new mutating route under app/api/v1 must be added to GUARDED or EXEMPT in tests/circuit-breaker.test.ts, or that test fails.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F65",
+        "F68",
+        "PP-1",
+        "PP-2",
+        "PP-3",
+        "lead",
+        "question"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T07:08:05.586Z",
+      "parents": [
+        "6eb1771947a73da1ddd1bd49aeca06f26e966c2922fedd8b569018f1259663bd"
+      ],
+      "hash": "fead1c58d17de2549bec31bf21cdafabf619dd23fe9f0e5fa9f9c0d67457a4f3"
     }
   ],
   "actors": [
@@ -2425,5 +2449,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "6eb1771947a73da1ddd1bd49aeca06f26e966c2922fedd8b569018f1259663bd"
+  "tipHash": "fead1c58d17de2549bec31bf21cdafabf619dd23fe9f0e5fa9f9c0d67457a4f3"
 }
