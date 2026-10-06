@@ -1,6 +1,6 @@
 {
   "fromNodeId": "lead",
-  "highSeq": 104,
+  "highSeq": 105,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2147,6 +2147,30 @@
         "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
       ],
       "hash": "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
+    },
+    {
+      "entryId": "ctx_a6c619f0e81f2290",
+      "seq": 105,
+      "kind": "handoff",
+      "title": "Handoff: LP-2 Wire Live Verified on Base + Tempo; Next Active: LP-3 Tempo Caller Wiring",
+      "body": "STATUS: LP-1 Intent persistence and LP-2 MitraJobEscrow deployed and verified. LP-2 Wire complete: ERC8183Transport (lib/adapters/erc8183-transport.ts) and tests/commerce-escrow-live.test.ts passing 6/6 live on Base Sepolia (0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6) and Tempo Moderato (0x95ca2170d1021cb9b5ce6809066f094e00c0a583). Both chains funded: Base Sepolia has 20 USDC, Tempo has PathUSD. Offline tests pass 19/19, typecheck 0 errors. All pushed to feat/mitra-vault-v2-reseed. NEXT FOR INCOMING AGENT: Task 2 (LP-3 Tempo Settlement Parity & Caller Wiring). Wire POST /api/v1/settlements to accept agreements with payTo.chain = 'tempo' (asset PathUSD), drive full route in tests/settlement-tempo-caller.test.ts, verify execution guard digest re-derivation, nonce consumption, and on-chain TIP-20 settlement with actionHash in memo under TEMPO_LIVE=1. Followed by Task 3 (LP-4 Solana Escrow) and Task 4 (LP-5 Arcium MPC). Keys: .dev-keys/evm-testnet.key (0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D).",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "base",
+        "escrow",
+        "handoff",
+        "lp2",
+        "lp3",
+        "settlement",
+        "tempo"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T02:16:35.659Z",
+      "parents": [
+        "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
+      ],
+      "hash": "b331dfafd948013bbc25054a6480cc94fc59fd6cfe8919a44d78e4cfb7733c04"
     }
   ],
   "actors": [
@@ -2184,5 +2208,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
+  "tipHash": "b331dfafd948013bbc25054a6480cc94fc59fd6cfe8919a44d78e4cfb7733c04"
 }
