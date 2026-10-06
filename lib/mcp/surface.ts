@@ -43,6 +43,10 @@ export const mcpTools = [
   "mitra_request_authorization",
   "mitra_create_agreement",
   "mitra_fund_agreement",
+  // Not in PRD §10.2's initial list, but the kernel's FUNDED -> EXECUTING edge is
+  // provider-signed and has no other route: without it an external provider
+  // cannot reach submit (F66).
+  "mitra_start_execution",
   "mitra_submit_deliverable",
   "mitra_accept_deliverable",
   "mitra_reject_deliverable",

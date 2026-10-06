@@ -26,12 +26,19 @@ import * as accounting from "@/app/api/v1/accounting/route";
 import * as clearing from "@/app/api/v1/clearing/route";
 import * as events from "@/app/api/v1/events/route";
 import * as agents from "@/app/api/v1/agents/route";
+import * as intents from "@/app/api/v1/intents/route";
+import * as intentById from "@/app/api/v1/intents/[id]/route";
 
 type Handler = { GET?: (r: Request) => Promise<Response>; POST?: (r: Request) => Promise<Response> };
 const ROUTES: Record<string, Handler> = {
   "/api/v1/agreements": agreements, "/api/v1/authorizations": authorizations, "/api/v1/obligations": obligations as Handler,
   "/api/v1/sagas": sagas, "/api/v1/settlements": settlements, "/api/v1/settlements/evidence": evidence,
   "/api/v1/receipts": receipts, "/api/v1/accounting": accounting, "/api/v1/clearing": clearing, "/api/v1/events": events, "/api/v1/agents": agents,
+  "/api/v1/intents": intents,
+};
+/** Dynamic routes, matched by prefix: `/api/v1/intents/{id}`. */
+const BY_ID: Record<string, { GET: (r: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response> }> = {
+  "/api/v1/intents/": intentById,
 };
 
 /** Every request the server made, so tests can assert what reached the API. */
@@ -39,6 +46,11 @@ let seen: Array<{ method: string; path: string; body?: unknown }>;
 const inProcessApi: MitraApi = async ({ method, path, body }) => {
   seen.push({ method, path, body });
   const pathname = path.split("?")[0];
+  const prefix = Object.keys(BY_ID).find((p) => pathname.startsWith(p) && pathname.length > p.length);
+  if (prefix && method === "GET") {
+    const res = await BY_ID[prefix].GET(new Request(`http://localhost${path}`), { params: Promise.resolve({ id: decodeURIComponent(pathname.slice(prefix.length)) }) });
+    return { status: res.status, body: await res.json() };
+  }
   const handler = ROUTES[pathname]?.[method];
   if (!handler) return { status: 404, body: { error: "NO_ROUTE", path } };
   const res = await (handler as (r: Request) => Promise<Response>)(new Request(`http://localhost${path}`, {
@@ -63,7 +75,7 @@ beforeEach(async () => {
 });
 
 describe("what the MCP server exposes", () => {
-  it("lists exactly the served tools — never an unbacked or capital-moving one", async () => {
+  it("lists exactly the served tools — every surface tool, and never a capital-moving one", async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([...servedToolNames()].sort());
@@ -72,7 +84,10 @@ describe("what the MCP server exposes", () => {
     for (const signed of ["mitra_fund_agreement", "mitra_accept_deliverable", "mitra_reject_deliverable", "mitra_register_agent"]) {
       expect(names, `${signed} is served behind a signed request`).toContain(signed);
     }
-    for (const unbacked of ["mitra_create_intent", "mitra_get_intent"]) expect(names).not.toContain(unbacked);
+    // Unbacked until LP-1 gave intents a store and routes (PP-1).
+    expect(names).toContain("mitra_create_intent");
+    expect(names).toContain("mitra_get_intent");
+    expect(names, "no surface tool is left unbacked or withheld").toEqual([...mcpTools].sort());
     for (const verb of prohibitedDirectTools) expect(names).not.toContain(verb);
   });
 
@@ -87,7 +102,7 @@ describe("what the MCP server exposes", () => {
 
   it("calling a tool that is not served is refused by the protocol, and nothing reaches the API", async () => {
     const client = await connect();
-    const r = await client.callTool({ name: "mitra_create_intent", arguments: { intentId: "intent_77" } });
+    const r = await client.callTool({ name: "raw_arbitrary_transfer", arguments: { to: "0xdead", amount: 1 } });
     expect(r.isError).toBe(true);
     expect(JSON.stringify(r.content)).toMatch(/not found/i);
     expect(seen).toEqual([]);
@@ -237,6 +252,54 @@ describe("served tools go through the real routes", () => {
     expect(req.body).toEqual({ action: "net" });
   });
 
+  it("mitra_create_intent records an intent under a Mitra-assigned id, and mitra_get_intent reads it back", async () => {
+    const client = await connect();
+    const r = await client.callTool({ name: "mitra_create_intent", arguments: {
+      runId: "run_mcp_intent", principal: "Mitra Labs", initiatingAgentId: "agent_buyer_07", mandateId: "mandate_research_public_v7",
+      objective: "Find three data vendors", budget: { asset: "USDC", amount: 25 }, constraints: ["no PII"], expiresAt: "2027-01-01T00:00:00Z",
+    } });
+    expect(r.isError, JSON.stringify(r.content)).toBe(false);
+    const { intentId } = textOf(r).data;
+    expect(intentId).toMatch(/^intent_/);
+    const got = await client.callTool({ name: "mitra_get_intent", arguments: { intentId } });
+    expect(got.isError, JSON.stringify(got.content)).toBe(false);
+    expect(textOf(got).data).toMatchObject({ intentId, objective: "Find three data vendors", budget: { asset: "USDC", amount: 25 } });
+  });
+
+  it("mitra_create_intent never forwards a caller-chosen intentId (F65: the route upserts on it)", async () => {
+    const client = await connect();
+    const args = { runId: "run_victim", principal: "Mitra Labs", initiatingAgentId: "agent_buyer_07", mandateId: "m",
+      objective: "original", budget: { asset: "USDC", amount: 10 }, constraints: [], expiresAt: "2027-01-01T00:00:00Z" };
+    const first = textOf(await client.callTool({ name: "mitra_create_intent", arguments: args })).data.intentId;
+    // An agent that names the victim's id gets its own new intent; the victim's is untouched.
+    const second = await client.callTool({ name: "mitra_create_intent", arguments: { ...args, intentId: first, objective: "hijacked" } as never });
+    expect(second.isError, JSON.stringify(second.content)).toBe(false);
+    expect(textOf(second).data.intentId).not.toBe(first);
+    expect((seen.at(-1)?.body as Record<string, unknown>).intentId).toBeUndefined();
+    const { SERVED_TOOLS } = await import("@/lib/mcp/server");
+    expect((SERVED_TOOLS.mitra_create_intent!.toRequest({ ...args, intentId: first }).body as Record<string, unknown>).intentId).toBeUndefined();
+    const victim = await client.callTool({ name: "mitra_get_intent", arguments: { intentId: first } });
+    expect(textOf(victim).data.objective).toBe("original");
+  });
+
+  it("mitra_get_intent on an unknown id is a tool error with the API's reason", async () => {
+    const client = await connect();
+    const r = await client.callTool({ name: "mitra_get_intent", arguments: { intentId: "intent_nope/../x" } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r).error).toBe("INTENT_NOT_FOUND");
+    expect(seen.at(-1)?.path).toBe("/api/v1/intents/intent_nope%2F..%2Fx");
+  });
+
+  it("an intent the API refuses (past expiry) comes back as a tool error", async () => {
+    const client = await connect();
+    const r = await client.callTool({ name: "mitra_create_intent", arguments: {
+      runId: "r", principal: "p", initiatingAgentId: "a", mandateId: "m", objective: "o",
+      budget: { asset: "USDC", amount: 1 }, constraints: [], expiresAt: "2020-01-01T00:00:00Z",
+    } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r).reason).toBe("EXPIRES_AT_IN_PAST");
+  });
+
   it("read tools reach their routes", async () => {
     const client = await connect();
     for (const [name, args, path] of [
@@ -249,6 +312,7 @@ describe("served tools go through the real routes", () => {
       ["mitra_get_timeline", { runId: "run_501" }, "/api/v1/events?runId=run_501"],
       ["mitra_get_agent", { agentId: "agent_buyer_07" }, "/api/v1/agents?agentId=agent_buyer_07"],
       ["mitra_find_agents", { capability: "market_research", chain: "solana" }, "/api/v1/agents?capability=market_research&chain=solana"],
+      ["mitra_get_intent", { intentId: "intent_1" }, "/api/v1/intents/intent_1"],
     ] as const) {
       seen = [];
       await client.callTool({ name, arguments: args });

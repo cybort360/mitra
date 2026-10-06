@@ -59,7 +59,7 @@ describe("the surface cannot move capital", () => {
     // Without this, "no transfer verbs" could be satisfied by exposing nothing.
     const needed = [
       "mitra_register_agent", "mitra_create_intent", "mitra_request_authorization",
-      "mitra_create_agreement", "mitra_fund_agreement", "mitra_submit_deliverable",
+      "mitra_create_agreement", "mitra_fund_agreement", "mitra_start_execution", "mitra_submit_deliverable",
       "mitra_accept_deliverable", "mitra_reject_deliverable", "mitra_request_clearing",
     ];
     for (const t of needed) expect(mcpTools, t).toContain(t);

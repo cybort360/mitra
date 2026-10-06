@@ -19,8 +19,9 @@
  *   register were withheld until F55 gave the API caller identity; they are served
  *   now because each carries the agent's own EIP-712 signature, which the API checks
  *   against the agent's registered wallets and its role (decision ctx_d236086bde9601ee).
- * - **unbacked** — no subsystem exists to serve it (no intent store). Serving a
- *   stub would be a fake success path.
+ * - **unbacked** — no subsystem exists to serve it. None today: the intent tools
+ *   were unbacked until LP-1 gave intents a store and routes. Serving a stub would
+ *   be a fake success path.
  *
  * `assertServedMatchesStatus` runs at module load: a served status without a
  * definition, or a definition for a tool not marked served, throws on import.
@@ -58,13 +59,14 @@ export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   // F55: these carry the agent's own EIP-712 signature, which the API verifies
   // against the role and the agent's registered wallets. The server holds no keys.
   mitra_fund_agreement: { status: "served" },
+  mitra_start_execution: { status: "served" },
   mitra_accept_deliverable: { status: "served" },
   mitra_reject_deliverable: { status: "served" },
   mitra_register_agent: { status: "served" },
   mitra_get_agent: { status: "served" },
   mitra_find_agents: { status: "served" },
-  mitra_create_intent: { status: "unbacked", reason: "No intent store: intents are ids carried by runs and reservations." },
-  mitra_get_intent: { status: "unbacked", reason: "No intent store." },
+  mitra_create_intent: { status: "served" },
+  mitra_get_intent: { status: "served" },
   mitra_get_timeline: { status: "served" },
 };
 
@@ -143,6 +145,29 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
     inputSchema: { asOf: z.string().datetime().optional() },
     toRequest: (a) => ({ method: "GET", path: `/api/v1/accounting${qs({ asOf: a.asOf })}` }),
   },
+  mitra_create_intent: {
+    description:
+      "Record a principal's commercial intent: the objective, budget and constraints an agent acts under. " +
+      "An intent is a statement, not an authorization: it reserves and pays nothing. Mitra assigns the intentId; " +
+      "use it in mitra_create_agreement.",
+    // No intentId: the route assigns one. The route upserts on a caller-chosen id,
+    // so letting an external agent pick it would let it overwrite another
+    // principal's intent (F65).
+    inputSchema: {
+      runId: z.string().min(1), principal: z.string().min(1), initiatingAgentId: z.string().min(1),
+      mandateId: z.string().min(1), objective: z.string().min(1), budget: Money,
+      constraints: z.array(z.string()), expiresAt: z.string().datetime(),
+    },
+    toRequest: (a) => {
+      const { intentId: _dropped, ...body } = a;
+      return { method: "POST", path: "/api/v1/intents", body };
+    },
+  },
+  mitra_get_intent: {
+    description: "One intent by intentId: what was asked, under which mandate, with what budget and expiry.",
+    inputSchema: { intentId: z.string().min(1) },
+    toRequest: (a) => ({ method: "GET", path: `/api/v1/intents/${encodeURIComponent(String(a.intentId))}` }),
+  },
   mitra_request_authorization: {
     description:
       "Ask whether a proposed spend is within a mandate. Returns ALLOW, DENY or REVIEW with reason codes. " +
@@ -185,6 +210,11 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
     description: "Fund an OPEN agreement, encumbering its price. Signed by the client.",
     inputSchema: { agreementId: z.string().min(1), capability: z.string().optional(), amount: Money.optional(), auth: Auth },
     toRequest: transition("fund"),
+  },
+  mitra_start_execution: {
+    description: "Start work on a FUNDED agreement, moving it to EXECUTING so a deliverable can be submitted. Signed by the provider.",
+    inputSchema: { agreementId: z.string().min(1), auth: Auth },
+    toRequest: transition("startExecution"),
   },
   mitra_accept_deliverable: {
     description: "Accept a SUBMITTED deliverable, making the agreement due for settlement. Signed by the client or evaluator; never the provider.",
@@ -252,8 +282,7 @@ export function serverInstructions(): string {
   return [
     "Mitra governs agent commerce: every tool here is a verb on intent, never on capital.",
     "No tool moves value. Authorization is not permission to pay; payment happens only through Mitra's execution guard.",
-    "Not available on this server:",
-    ...lines,
+    ...(lines.length ? ["Not available on this server:", ...lines] : []),
   ].join("\n");
 }
 

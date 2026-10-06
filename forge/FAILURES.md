@@ -2840,3 +2840,45 @@ present. New vaults: Base `0x92dcee6acbfcf50f32a3e9c689d7f2ceef9ee489`, Tempo
 
 **RULE ADDED:** (18) a deployment is not evidence until the code at the address is shown
 to be the code in the repository. Record the runtime-code check with the address.
+
+## F65 — `POST /api/v1/intents` overwrites an existing intent under the same id
+
+**Status:** open. The fix belongs to the lead (`app/api/v1/intents/`, `lib/store/` are lead-owned);
+contained on the MCP surface by purple, 2026-10-06 (decision `ctx_6341370a88640c6e`).
+**Found:** 2026-10-06, wiring `mitra_create_intent` (PP-1).
+
+The route accepts a caller-chosen `intentId`, and both backends upsert on it: Postgres
+`ON CONFLICT (intent_id) DO UPDATE`, in-memory `Map.set`. A second POST with the same id and a
+different body therefore replaces the first intent's principal, objective, budget and mandate.
+The route's own header says an intent is never mutated in place ("changing it is a new
+intent, not a row mutation"), and `tests/intent-persistence.test.ts` "is idempotent on
+intentId" only replays the *same* body, so it cannot tell idempotency from overwrite. The API
+has no caller identity on this route, so anyone who can reach it can rewrite anyone's intent.
+
+**Containment (not the fix):** `mitra_create_intent` does not take an `intentId`, and its
+`toRequest` drops one if a caller smuggles it in, so the route assigns the id. Pinned by
+`tests/mcp-server.test.ts` "never forwards a caller-chosen intentId (F65 …)", which is killed by
+the mutation that forwards it.
+
+**Suggested fix:** first write wins. Replaying an identical body returns the stored intent;
+a different body under an existing id returns `409 INTENT_EXISTS`. Add a test that posts a
+different body under the same id and asserts the original survives.
+
+## F66 — PRD §10.2's tool list had no way for a provider to start work
+
+**Status:** fixed (purple, 2026-10-06).
+**Found:** 2026-10-06, building the external-agent E2E (PP-1).
+
+The kernel's lifecycle is `OPEN → FUNDED → EXECUTING → SUBMITTED → ACCEPTED`, and
+`startExecution` (FUNDED → EXECUTING) may be instructed only by the provider. PRD §10.2's
+initial MCP tools, which `lib/mcp/surface.ts` copied, have no tool for it. So an external
+provider could fund-wait but never reach `mitra_submit_deliverable` over MCP. The existing
+tests did not show the gap because they drove `startExecution` through the route directly.
+`tests/participation.test.ts` "the whole lifecycle IS expressible" listed the needed tools
+without that edge, so it passed while the claim was false.
+
+**Fix:** `mitra_start_execution` (provider-signed, the same pass-through as the other
+transitions) is on the surface and served. Added to the participation test's needed list.
+`tests/external-agent-e2e.test.ts` reaches EXECUTING only through it, and refuses the
+client's own signed attempt (`ACTOR_NOT_PERMITTED`). PRD §10.2 calls its list "initial"; the
+extra tool is recorded here, not in the PRD.
