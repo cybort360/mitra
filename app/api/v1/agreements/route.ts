@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { refuseIfPaused } from "@/lib/admin/incident";
 import { z } from "zod";
 import { getStore } from "@/lib/store/provider";
 import {
@@ -144,6 +145,11 @@ export async function POST(req: Request) {
   }
 
   const body = parsed.data;
+  // Incident controls (PP-4): opening and funding stop under a pause; refunds,
+  // rejections and the other transitions do not (lib/admin/incident.ts).
+  const pauseScope = body.op === "open" ? "agreements" : body.op === "fund" ? "funding" : null;
+  const paused = pauseScope ? await refuseIfPaused(pauseScope) : null;
+  if (paused) return paused;
   const { repo, backend } = await getStore();
 
   // These writes used to be skipped with `if (repo.saveAgreement)`, so a store

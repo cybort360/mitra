@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { refuseIfPaused } from "@/lib/admin/incident";
 import { z } from "zod";
 import { evaluateProposal } from "@/lib/kernel/authorization";
 import { getStore } from "@/lib/store/provider";
@@ -53,6 +54,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "INVALID_REQUEST", issues: parsed.error.issues }, { status: 400 });
   }
   const body = parsed.data;
+  // A reservation encumbers capital: stopped by a `funding` pause (PP-4).
+  const paused = await refuseIfPaused("funding");
+  if (paused) return paused;
   const { repo, backend } = await getStore();
 
   const mandate = await repo.getMandate(body.mandateId);

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { refuseIfPaused } from "@/lib/admin/incident";
 import { z } from "zod";
 import { getStore } from "@/lib/store/provider";
 import { getRails } from "@/lib/settlement/rails";
@@ -55,6 +56,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "INVALID_REQUEST", issues: parsed.error.issues }, { status: 400 });
   }
   const body = parsed.data;
+  // Incident controls (PP-4): paying is stopped; `confirm` is not, because it
+  // records a payment that has already happened on chain.
+  if (body.op !== "confirm") {
+    const paused = await refuseIfPaused("execution");
+    if (paused) return paused;
+  }
   const { repo, backend } = await getStore();
   const now = body.now ? new Date(body.now) : new Date();
 

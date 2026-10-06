@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { NextResponse } from "next/server";
+import { refuseIfPaused } from "@/lib/admin/incident";
 import { z } from "zod";
 import { http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -33,6 +34,8 @@ export async function POST(req: Request) {
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "INVALID_REQUEST", issues: parsed.error.issues }, { status: 400 });
   const body = parsed.data;
+  const paused = await refuseIfPaused("execution"); // PP-4
+  if (paused) return paused;
 
   const allowed = (process.env.MITRA_X402_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!allowed.includes(new URL(body.url).origin)) {
