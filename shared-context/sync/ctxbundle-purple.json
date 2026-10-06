@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 100,
+  "highSeq": 115,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2056,6 +2056,338 @@
       ],
       "hash": "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae",
       "supersedesId": "ctx_38c77fddc6e979b5"
+    },
+    {
+      "entryId": "ctx_d667f04b2e458a6c",
+      "seq": 101,
+      "kind": "decision",
+      "title": "PR #32 Merged: F55 caller identity, F63/F64 redeployments, Phase 7 live clearing confirmed",
+      "body": "The lead reviewed and merged PR #32 (feat/backlog-on-v2) into feat/mitra-vault-v2-reseed. Confirmations: (1) F62 CREATE collision stands; clearing challenge flaw is F64; next free number is F65. (2) F63 MitraVault redeployed with verified runtime code and token-keyed mandates on Base (0x92dcee6a) and Tempo (0x85409dfc). (3) F64 MitraClearing redeployed following PRD 14.4 challenge lifecycle and net position conservation on Base (0xaacba512) and Tempo (0xd03d91c3). (4) F55 caller identity with EIP-712 signed transitions and MCP un-withholding verified. (5) Phase 7 clearing LIVE_DEMONSTRATED on Base Sepolia and Tempo Moderato with residual settlement through execution guard. All gates pass: forge test 50/50, vitest 891 pass, verify:saga-events pass, typecheck 0 errors.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "clearing",
+        "evidence",
+        "identity",
+        "merge",
+        "vault"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-05T22:24:56.744Z",
+      "parents": [
+        "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae"
+      ],
+      "hash": "0732bd19605ac25162d78d1681a949945f881c870755dda22250f8706137f00a"
+    },
+    {
+      "entryId": "ctx_2fb6089fbbb3b0f6",
+      "seq": 102,
+      "kind": "handoff",
+      "title": "Sprint Handoff: Purple Packages (PP-1 to PP-4) & Lead Packages (LP-1 to LP-4)",
+      "body": "Active division of labor for remaining phases. Lead Queue (On-chain, store, core): LP-1 Decoupled ERC-8183 Job Escrow contract on Base Sepolia; LP-2 Intent persistence substrate (EconomicRepository, Postgres schema, app/api/v1/intents/); LP-3 Solana Job Escrow PDAs & autonomous timelocked recovery in programs/mitra-vault/; LP-4 Arcium MPC cluster live execution on probe.so. Purple Queue (Ecosystem, adapters, tooling): PP-1 Wire MCP intent tools to store and build tests/external-agent-e2e.test.ts for external agents over network MCP; PP-2 Virtuals Protocol marketplace adapter (lib/adapters/virtuals.ts) matching PRD 23; PP-3 Outbound webhook delivery engine (lib/webhooks/dispatcher.ts) with HMAC-SHA256 signing, retries, dead-letter queue; PP-4 Incident controls and circuit breaker (/api/v1/admin/pause) halting value movements while keeping read streams active. Boundaries: Zero file collisions. Full spec at docs/HANDOFF_CODEVELOPER.md. Next free F-number is F65.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "escrow",
+        "handoff",
+        "mcp",
+        "sprint",
+        "virtuals",
+        "webhooks"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T00:39:28.348Z",
+      "parents": [
+        "0732bd19605ac25162d78d1681a949945f881c870755dda22250f8706137f00a"
+      ],
+      "hash": "e297112ebdf6cf91f632723db90f2df4da8352f58038e74b36def9d31209b329"
+    },
+    {
+      "entryId": "ctx_3dc1578eb7a47ced",
+      "seq": 103,
+      "kind": "decision",
+      "title": "LP-1 Intent Persistence & LP-2 Decoupled Job Escrow Landed (656967d, 9d93706)",
+      "body": "LP-1 and LP-2 completed and pushed to remote. LP-1: createIntent/getIntent/listIntents on interface and both stores, POST/GET /api/v1/intents and /intents/[id], 5/5 tests pass. LP-2: MitraJobEscrow.sol deployed on Base Sepolia (0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6, blk 47740801) and Tempo Moderato (0x95ca2170d1021cb9b5ce6809066f094e00c0a583, blk 38355996); both runtime-matched (2096 bytes); PRD 15.5 pre-committed refundRouteHash required; 7/7 Foundry tests pass (57/57 total). Gates: tsc clean, 896 vitest pass, 57 forge pass.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "deployments",
+        "erc8183",
+        "escrow",
+        "intent",
+        "push"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T01:34:15.427Z",
+      "parents": [
+        "e297112ebdf6cf91f632723db90f2df4da8352f58038e74b36def9d31209b329"
+      ],
+      "hash": "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
+    },
+    {
+      "entryId": "ctx_136e9e8b939acf94",
+      "seq": 104,
+      "kind": "decision",
+      "title": "LP-2 Wire (ERC8183Transport) & Multi-Chain Live Verification Landed (003ff74)",
+      "body": "LP-2 Follow-up completed and pushed in 003ff74. lib/adapters/erc8183-transport.ts implements ERC8183Transport (depositToEscrow, completeJob, refundJob, getJob) dynamically reading deployments.json without polluting pure erc8183 projection. tests/commerce-escrow-live.test.ts live verified 6/6 on both Base Sepolia (0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6) and Tempo Moderato (0x95ca2170d1021cb9b5ce6809066f094e00c0a583). Base Sepolia funded with 20 USDC; tests fixed for transaction receipt confirmation, dynamic nonced job IDs, and RPC load-balancer propagation sync (waitForStatus). Offline suite passes 19/19, typecheck 0 errors. Active queue next: LP-3 Tempo settlement parity & caller wiring.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "base",
+        "erc8183",
+        "escrow",
+        "handoff",
+        "live",
+        "tempo",
+        "transport"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T02:14:43.720Z",
+      "parents": [
+        "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
+      ],
+      "hash": "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
+    },
+    {
+      "entryId": "ctx_a6c619f0e81f2290",
+      "seq": 105,
+      "kind": "handoff",
+      "title": "Handoff: LP-2 Wire Live Verified on Base + Tempo; Next Active: LP-3 Tempo Caller Wiring",
+      "body": "STATUS: LP-1 Intent persistence and LP-2 MitraJobEscrow deployed and verified. LP-2 Wire complete: ERC8183Transport (lib/adapters/erc8183-transport.ts) and tests/commerce-escrow-live.test.ts passing 6/6 live on Base Sepolia (0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6) and Tempo Moderato (0x95ca2170d1021cb9b5ce6809066f094e00c0a583). Both chains funded: Base Sepolia has 20 USDC, Tempo has PathUSD. Offline tests pass 19/19, typecheck 0 errors. All pushed to feat/mitra-vault-v2-reseed. NEXT FOR INCOMING AGENT: Task 2 (LP-3 Tempo Settlement Parity & Caller Wiring). Wire POST /api/v1/settlements to accept agreements with payTo.chain = 'tempo' (asset PathUSD), drive full route in tests/settlement-tempo-caller.test.ts, verify execution guard digest re-derivation, nonce consumption, and on-chain TIP-20 settlement with actionHash in memo under TEMPO_LIVE=1. Followed by Task 3 (LP-4 Solana Escrow) and Task 4 (LP-5 Arcium MPC). Keys: .dev-keys/evm-testnet.key (0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D).",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "base",
+        "escrow",
+        "handoff",
+        "lp2",
+        "lp3",
+        "settlement",
+        "tempo"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T02:16:35.659Z",
+      "parents": [
+        "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
+      ],
+      "hash": "b331dfafd948013bbc25054a6480cc94fc59fd6cfe8919a44d78e4cfb7733c04"
+    },
+    {
+      "entryId": "ctx_6341370a88640c6e",
+      "seq": 106,
+      "kind": "decision",
+      "title": "PP-1: mitra_create_intent/get_intent are served as HTTP calls to /api/v1/intents, not getStore(); the MCP tool omits intentId",
+      "body": "Starting PP-1 on feat/purple-pp (branched from origin/feat/mitra-vault-v2-reseed @ ee0d7e0, which has LP-1's intent routes).\n\n1. The handoff says to wire the two intent tools to getStore().createIntent()/getIntent(). I am NOT doing that. Decision ctx_2251f80eaa0cb751 keeps the MCP process a thin HTTP client with no store, so the routes stay the only gate (FR-INT-002). The tools call POST /api/v1/intents and GET /api/v1/intents/{id} instead.\n\n2. The MCP input schema for mitra_create_intent leaves out intentId, so the route generates it. Reason (recorded as F65, owner lead because the files are lead-owned): POST /api/v1/intents upserts on intentId (postgres ON CONFLICT DO UPDATE; in-memory Map.set). A second POST with the same id and a different body therefore replaces another principal's intent, even though the route's own comment says intents are never mutated in place. Handing a caller-chosen intentId to unprivileged external agents would expose that overwrite. Suggested fix (lead): first write wins; replaying the same body returns 200/201; a different body under an existing id returns 409 INTENT_EXISTS.\n\n3. The intent's principal and initiatingAgentId are unverified claims. No code consumes an intent as authority (grep finds no callers outside the routes), and mitra_create_agreement is unsigned too, so serving it is consistent with the current model. This would change if anything begins to read intents as authority.\n\n4. The E2E (tests/external-agent-e2e.test.ts) runs over real sockets for both hops: an in-test HTTP server dispatches to the real route handlers; the MCP server talks to it with httpApi; and an external SDK client connects over Streamable HTTP and over stdio (a spawned scripts/mitra-mcp.ts). The client holds only its own agent key.",
+      "status": "active",
+      "scope": "mcp",
+      "tags": [
+        "F65",
+        "PP-1",
+        "intent",
+        "phase-5"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:01:00.362Z",
+      "parents": [
+        "b331dfafd948013bbc25054a6480cc94fc59fd6cfe8919a44d78e4cfb7733c04"
+      ],
+      "hash": "c3ac6da8ad47ec6c543bfbcb7eb39b367f92d3ffa72c4f07bd561eb8f6cbc663"
+    },
+    {
+      "entryId": "ctx_f3ccc5f0a6b47945",
+      "seq": 107,
+      "kind": "finding",
+      "title": "F65: POST /api/v1/intents overwrites an existing intent when the same intentId is posted with a different body",
+      "body": "Owner: lead (app/api/v1/intents/, lib/store/ are lead-owned). Both backends upsert on the caller-chosen intentId: postgres ON CONFLICT DO UPDATE, in-memory Map.set. The route has no caller identity, so anyone who can reach it can replace another principal's objective, budget or mandate, even though the route's header says intents are never mutated in place. The 'is idempotent on intentId' test replays the SAME body, so it cannot tell idempotency from overwrite.\n\nContainment (purple, 51aaf95 on feat/purple-pp): mitra_create_intent takes no intentId and drops one if it is smuggled in. A mutation test pins this.\n\nSuggested fix: first write wins. An identical replay returns the stored intent; a different body under an existing id returns 409 INTENT_EXISTS. Add a test that posts a different body under the same id and asserts the original survives. Full text in forge/FAILURES.md F65.",
+      "status": "active",
+      "scope": "intent",
+      "tags": [
+        "F65",
+        "LP-1",
+        "intent",
+        "lead"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:13:58.705Z",
+      "parents": [
+        "c3ac6da8ad47ec6c543bfbcb7eb39b367f92d3ffa72c4f07bd561eb8f6cbc663"
+      ],
+      "hash": "4e5700718376e912f575251e3ac3acd6378427f3d7d5dc7e1fc23ba76f0323df"
+    },
+    {
+      "entryId": "ctx_80ff1d426cbbb712",
+      "seq": 108,
+      "kind": "question",
+      "title": "Signed-transition refusals (401/403) are not written to the run timeline; only kernel refusals are. Should they be?",
+      "body": "POST /api/v1/agreements calls recordEvent('Agreement <op> refused') only when applyAgreementOpWithSaga fails. These return to the caller and leave no event: ACTOR_NOT_PERMITTED, ACTOR_NOT_REGISTERED, a bad or stale signature, and SIGNATURE_REQUIRED. As a result, mitra_get_timeline does not show forged or wrong-role attempts, although its description says 'including refusals'. tests/external-agent-e2e.test.ts pins the current behaviour, so any change has to be deliberate.\n\nThe trade-off: logging these attempts gives an audit trail of attacks, but the actor of an unauthenticated attempt is only a claim, and anyone could then write events into any run's log (log flooding, spoofed attribution). One option is to log only ACTOR_NOT_PERMITTED, which comes after... no: mayInstruct runs BEFORE signature verification, so even that is unauthenticated. A realistic option is a separate, rate-limited security log keyed by the claimed actor and marked unverified, kept out of the run timeline. Needs a decision from human:purple or the lead.",
+      "status": "active",
+      "scope": "agreements",
+      "tags": [
+        "F55",
+        "PP-1",
+        "audit",
+        "events"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:13:58.735Z",
+      "parents": [
+        "4e5700718376e912f575251e3ac3acd6378427f3d7d5dc7e1fc23ba76f0323df"
+      ],
+      "hash": "6eefe2982c2cf63521e60f3f44c292bb98d558fb1b71f1b3371927cbea67c219"
+    },
+    {
+      "entryId": "ctx_dc8778ab26622159",
+      "seq": 109,
+      "kind": "handoff",
+      "title": "PP-1 done: an external agent completed a signed commerce loop over MCP against next start on Postgres; all 19 MCP tools served",
+      "body": "Branch feat/purple-pp (from origin/feat/mitra-vault-v2-reseed @ ee0d7e0), commit 51aaf95. Local only; not pushed.\n\nDONE: mitra_create_intent and mitra_get_intent are served through /api/v1/intents. NEW mitra_start_execution (F66: the provider-signed FUNDED->EXECUTING edge had no tool, so an external provider could never reach submit), which makes 19 surface tools, all served.\n\ntests/external-agent-e2e.test.ts: three parties with fresh keys register over MCP. The operator creates their Space over HTTP. Then open, fund, start, submit and accept, each signed by its own party, over Streamable HTTP and stdio, with real sockets on both hops. Seven unauthorized attempts are refused.\n\nLive: MITRA_E2E_API_URL=http://localhost:3017 against next start on Postgres; ag_e2e_streamable_1791267152303 and ag_e2e_stdio_1791267153103 read back ACCEPTED (backend postgres).\n\nGates: tsc clean; vitest 904/0 in-memory; Postgres --no-file-parallelism 953/0; mutation 4/4. Ledger: Phase 5 is now evidence E2E_VERIFIED, blocker BLOCKED_INTERNAL (F65 open for the lead; Virtuals adapter, PP-2).\n\nNEXT: PP-2 (Virtuals adapter). NOTE: the handoff says '17 tools'; there were 18 and are now 19.",
+      "status": "active",
+      "scope": "mcp",
+      "tags": [
+        "F65",
+        "F66",
+        "PP-1",
+        "phase-5"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:13:58.775Z",
+      "parents": [
+        "6eefe2982c2cf63521e60f3f44c292bb98d558fb1b71f1b3371927cbea67c219"
+      ],
+      "hash": "ee6abc9dced050914e6fbcc66540680d8272114978d44e14119eaad84bf4b0db"
+    },
+    {
+      "entryId": "ctx_90ade1a8d2126f1a",
+      "seq": 110,
+      "kind": "question",
+      "title": "Signed-transition refusals (401/403) are not written to the run timeline; only kernel refusals are. Should they be?",
+      "body": "POST /api/v1/agreements calls recordEvent('Agreement <op> refused') only when applyAgreementOpWithSaga fails. These return to the caller and leave no event: SIGNATURE_REQUIRED, ACTOR_NOT_PERMITTED, ACTOR_NOT_REGISTERED, and a bad or stale signature. As a result, mitra_get_timeline does not show forged or wrong-role attempts, although its description says 'including refusals'. tests/external-agent-e2e.test.ts pins the current behaviour, so any change has to be deliberate.\n\nThe trade-off: logging these attempts gives an audit trail of attacks. But every one of them is unauthenticated (mayInstruct runs before signature verification, so even ACTOR_NOT_PERMITTED names a claimed actor), so writing them to the run timeline would let anyone write events into any run's log (flooding, spoofed attribution). One option is a separate, rate-limited security log keyed by the claimed actor and marked unverified, kept out of the run timeline. Needs a decision from human:purple or the lead.",
+      "status": "active",
+      "scope": "agreements",
+      "tags": [
+        "F55",
+        "PP-1",
+        "audit",
+        "events"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:14:05.713Z",
+      "parents": [
+        "ee6abc9dced050914e6fbcc66540680d8272114978d44e14119eaad84bf4b0db",
+        "6eefe2982c2cf63521e60f3f44c292bb98d558fb1b71f1b3371927cbea67c219"
+      ],
+      "hash": "d316d15a5e99df1392c14599aa2c31334dc05440fc53ae44dd6962b368a8b30c",
+      "supersedesId": "ctx_80ff1d426cbbb712"
+    },
+    {
+      "entryId": "ctx_aaff541a2a361c1b",
+      "seq": 111,
+      "kind": "decision",
+      "title": "PP-2: the Virtuals adapter translates real ACP API JSON (from acp-node 0.3.0-beta.40 and acpx.virtuals.gg), refuses non-fixed prices and requiredFunds offerings, and binds the counterparty through a registered wallet",
+      "body": "Source of truth for the ACP model: the published SDK @virtuals-protocol/acp-node@0.3.0-beta.40 (dist/index.d.ts and index.js, read 2026-10-06) and live GET https://acpx.virtuals.gg/api/agents/v4/search responses, saved as test fixtures. I am NOT adding the SDK as a dependency: the adapter translates the API's JSON and needs no keys.\n\nFacts recorded: job phases are REQUEST, NEGOTIATION, TRANSACTION, EVALUATION, COMPLETED, REJECTED, EXPIRED (0-6). Offering fields: name, price/priceV2{type: fixed|percentage|subscription, value}, requiredFunds, slaMinutes, requirement (a JSON Schema or a string), deliverable. Fare is USDC with 6 decimals. Base Sepolia (84532): fare token 0x036CbD53842c5426634e7929541eC2318f3dCF7e, ACP contracts v1 0x8Db6B1c839Fc8f6bd35777E194677B67b4D51928 and v2 0xdf54E6Ed6cD1d0632d973ADECf96597b7e87893c. Base mainnet (8453): fare token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913, contracts v1 0x6a1FE26D54ab0d3E1e3168f2e0c0cDa5cC0A0A4A and v2 0xa6C9BA866992cfD7fd6460ba912bfa405adA9df0.\n\nDecisions:\n(1) Only priceType 'fixed' is accepted. A percentage or subscription price has no fixed amount that a mandate could bound.\n(2) An offering with requiredFunds=true is refused, because it moves client capital to the provider beyond the price, outside the agreement.\n(3) Mainnet ACP is recognised but refused for settlement: Mitra's 'base' chain is Base Sepolia.\n(4) Counterparty attestation means the ACP provider wallet must be one of the Mitra agent's registered wallets on that chain. Registration already proved control of that wallet with EIP-712 (F55), so the listing and the Mitra identity are bound cryptographically rather than by name.\n(5) The ACP phase REJECTED maps to Mitra REJECTED only if the job reached EVALUATION; otherwise it maps to CANCELED. Mitra's REJECTED follows SUBMITTED only.\n(6) The agreement draft carries externalJobRefs (an offering URN, a quote digest and a requirement hash), so PRD §8.4's external identity survives. The MCP create_agreement schema gains an optional externalJobRefs field because it currently strips it.\nThe existing VirtualsMarketplaceAdapter class is kept unchanged.",
+      "status": "active",
+      "scope": "marketplace",
+      "tags": [
+        "PP-2",
+        "acp",
+        "phase-5",
+        "virtuals"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:17:10.493Z",
+      "parents": [
+        "d316d15a5e99df1392c14599aa2c31334dc05440fc53ae44dd6962b368a8b30c"
+      ],
+      "hash": "11583577598858cb83de1b3bfec9518254c66bba9aa57fbd900923e1163c28cd"
+    },
+    {
+      "entryId": "ctx_e8ffc5cad517dfc2",
+      "seq": 112,
+      "kind": "handoff",
+      "title": "PP-2 done: the Virtuals adapter translates real ACP offerings and jobs (TESTED, checked live against acpx); there is no ACP job transport yet",
+      "body": "feat/purple-pp @ 6b730c4 (local, not pushed). New code in lib/adapters/virtuals.ts: verifyQuote, checkRequirement, gigToIntent, gigToAgreementDraft, agreementToAcpJob, attestCounterparty, verifyAcpJob, acpPhaseToAgreementStatus and reachedEvaluation. tests/virtuals-adapter.test.ts: 59 pass, using fixtures recorded from acpx.virtuals.gg. With VIRTUALS_LIVE=1 against Base Sepolia acpx: 12 agents, 5 offerings quote, 6 refused REQUIRES_FUNDS_TRANSFER. Mutation 8/8. Full suites: 964 in-memory and 1013 on Postgres, 0 fail.\n\nmitra_create_agreement now forwards externalJobRefs.\n\nRecorded: F67 (the old VirtualsMarketplaceAdapter.toAgreementStatus maps states ACP never emits; the class is kept) and F68 (Agreement.externalJobRefs is typed as objects but the route stores strings).\n\nNOT done: opening or observing a real ACP job. That needs an ACP agent wallet whitelisted with a session key (acp-node AcpContractClientV2.build). NEXT: PP-3 webhooks.",
+      "status": "active",
+      "scope": "marketplace",
+      "tags": [
+        "F67",
+        "F68",
+        "PP-2",
+        "virtuals"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:25:34.886Z",
+      "parents": [
+        "11583577598858cb83de1b3bfec9518254c66bba9aa57fbd900923e1163c28cd"
+      ],
+      "hash": "0757b00c7a4dfb9ecb28d7181bf007191ff94926f62395a3f44925a3d3ff1063"
+    },
+    {
+      "entryId": "ctx_7aedda8887658fbd",
+      "seq": 113,
+      "kind": "decision",
+      "title": "PP-3: webhooks are an outbox over listEventsSince with a per-subscription cursor; operator bearer auth (MITRA_OPERATOR_TOKEN, fail-closed); SSRF guard at connect time",
+      "body": "Design, decided before writing it:\n\n(1) Outbox, not inline dispatch. A worker (scripts/webhook-worker.ts, or one drain() call) tails repo.listEventsSince, the same global log the SSE stream uses. No route waits on a subscriber, and events written by other processes on Postgres are delivered too. Each subscription has its own cursor, which starts at the log head when it is registered, so it receives no history and one dead endpoint does not hold back the others. Rejected: hooking recordEvent (lib/store/events.ts), because that blocks or loses events when the process dies.\n\n(2) Event type = '<topic>.<qualifier>'. The topic comes from RunEvent.kind (COMMERCE→agreement, RECOVERY→saga, CLEARING→clearing, SETTLEMENT→settlement, and so on). The qualifier is metadata.to, lowercased, when present (agreement.funded), and otherwise the status (agreement.warning). Subscriptions take exact types, 'topic.*', or '*'.\n\n(3) Signing: X-Mitra-Signature = 'sha256=' + hex(HMAC-SHA256(secret, timestamp + '.' + body)), plus X-Mitra-Timestamp (unix seconds) and X-Mitra-Event-Id for receiver dedupe. verifyWebhookSignature uses timingSafeEqual with 300s skew. The secret is generated by Mitra unless the caller supplies 32+ characters. It is returned once and never by GET.\n\n(4) Retry: at most 3 attempts, waiting 1s then 5s. 5xx, 408, 429 and network or timeout errors are retried; any other 4xx dead-letters at once. Redirects are not followed. Each attempt has a 10s timeout.\n\n(5) SSRF: the server POSTs to operator-supplied URLs, so the target is checked in the socket's DNS lookup, at connect time. That defeats DNS rebinding. Loopback, private, link-local, CGNAT, multicast and metadata addresses are refused (IPv4 and IPv6, including mapped addresses). Only https is allowed, unless MITRA_WEBHOOKS_ALLOW_PRIVATE=1 for local dev. Tests inject a transport.\n\n(6) Auth: POST and GET /api/v1/webhooks and /api/v1/admin/* require 'Authorization: Bearer <MITRA_OPERATOR_TOKEN>' (32+ characters, constant-time compare). If the token is unset they return 503 OPERATOR_AUTH_NOT_CONFIGURED: fail closed, never open. The rest of the API is unauthenticated today; webhooks add an outbound request capability, which is why they are gated.\n\n(7) Storage is in lib/webhooks: memory, plus Postgres in its own tables (mitra.webhook_subscriptions, mitra.webhook_deliveries), created by the webhook store. lib/store/repository.ts and postgres.ts stay untouched (lead-owned).",
+      "status": "active",
+      "scope": "webhooks",
+      "tags": [
+        "PP-3",
+        "PP-4",
+        "operator-auth",
+        "ssrf",
+        "webhooks"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:26:48.632Z",
+      "parents": [
+        "0757b00c7a4dfb9ecb28d7181bf007191ff94926f62395a3f44925a3d3ff1063"
+      ],
+      "hash": "990f4929361539895a57146c4ee1353666b2778d299ef80e6dd5338083f28a01"
+    },
+    {
+      "entryId": "ctx_9fac85c02ac5a6e7",
+      "seq": 114,
+      "kind": "decision",
+      "title": "PP-4: pause has three scopes (agreements, funding, execution); refunds, confirm, accept/reject, reads and streams keep running; state is shared across processes via Postgres",
+      "body": "POST /api/v1/admin/pause is operator-only (MITRA_OPERATOR_TOKEN). Body: { paused, scopes?, reason }. GET returns the current state. Refused requests get 503 { error: SYSTEM_PAUSED, scope, reason, since } plus Retry-After.\n\nScopes:\n- agreements: POST /agreements op=open.\n- funding: op=fund; POST /reservations (which encumbers capital).\n- execution: POST /reservations/execute (the execution guard); POST /settlements op=settle and settleResidual; POST /x402.\n\nDeliberately NOT paused:\n- Refunds and rejections (the recovery path). PRD §15.5 recovery must stay available; halting compensation turns an incident into stranded capital.\n- settlements op=confirm. It records a payment that already happened on chain, and refusing it would hide the truth.\n- Authorizations. An ALLOW moves nothing.\n- submit/accept, intents, agents, spaces, runs, clearing netting and epochs. Residual payment goes through settlements, which is paused.\n- All GETs and the SSE stream.\n\nState: memory, or Postgres (mitra.incident_controls, a single row), read on every guarded request, so a pause takes effect on every process at once. There is no cache, by design. Pausing and resuming each write a SYSTEM event to the log, so SSE and webhook subscribers see them (system.warning / system.info).\n\nNot covered: operator scripts that hold keys and talk to chains directly (scripts/run-live-clearing-epoch.mjs and others). The pause governs the API, not someone holding a deployer key.",
+      "status": "active",
+      "scope": "incident",
+      "tags": [
+        "PP-4",
+        "circuit-breaker",
+        "incident"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:34:09.820Z",
+      "parents": [
+        "990f4929361539895a57146c4ee1353666b2778d299ef80e6dd5338083f28a01"
+      ],
+      "hash": "b9319e5598db0f8844776c0b7cba9bf347dd07f43c0f5fde3631c657d8ab1f31"
+    },
+    {
+      "entryId": "ctx_a0a2be94270825ae",
+      "seq": 115,
+      "kind": "handoff",
+      "title": "Purple sprint PP-1..PP-4 complete on feat/purple-pp (local, not pushed): MCP external agent E2E, Virtuals ACP translation, signed webhooks, operator pause",
+      "body": "Branch feat/purple-pp, based on origin/feat/mitra-vault-v2-reseed @ ee0d7e0. Commits: 51aaf95 PP-1, 6b730c4 PP-2, e6da45a PP-3, 194b518 PP-4, plus an .env.example commit. Not pushed and no PR: human:purple decides.\n\nDONE\n- PP-1: 19/19 MCP tools served (intent tools, plus the new mitra_start_execution, F66). An external agent completed a signed loop against next start on Postgres (E2E_VERIFIED, local).\n- PP-2: lib/adapters/virtuals.ts translates real ACP offerings and jobs, checked live against acpx (TESTED). There is no ACP job transport yet.\n- PP-3: webhooks as an outbox (lib/webhooks/, scripts/webhook-worker.ts) with HMAC signing, retries, dead letters and an SSRF guard (E2E_VERIFIED, local).\n- PP-4: /api/v1/admin/pause with scoped halt, fail-closed, and a structural test that classifies every mutating route (TESTED).\n\nNEW CONTRACT FOR EVERYONE: MITRA_OPERATOR_TOKEN (32+ characters) gates /api/v1/webhooks and /api/v1/admin/*. If unset, those routes return 503. A NEW mutating route under app/api/v1 must be added to GUARDED or EXEMPT in tests/circuit-breaker.test.ts, or that test fails. This is deliberate.\n\nGates at 194b518: tsc clean; vitest 1054/0 in-memory; Postgres --no-file-parallelism 1103/0, twice; forge 57/57.\n\nOPEN FOR THE LEAD: F65 (POST /api/v1/intents overwrites on a repeated intentId; first write should win, with 409 for a different body). F68 (externalJobRefs typed as objects, stored as strings).\nOPEN QUESTION: ctx_90ade1a8d2126f1a (signed-transition refusals are not on the timeline).\nNEXT for purple: an ACP transport (needs an ACP agent wallet and session key); a dead-letter redelivery route; a single-worker lock (pg advisory lock) for the webhook worker.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "F65",
+        "F66",
+        "F67",
+        "F68",
+        "PP-1",
+        "PP-2",
+        "PP-3",
+        "PP-4",
+        "handoff"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-06T06:46:11.673Z",
+      "parents": [
+        "b9319e5598db0f8844776c0b7cba9bf347dd07f43c0f5fde3631c657d8ab1f31"
+      ],
+      "hash": "6eb1771947a73da1ddd1bd49aeca06f26e966c2922fedd8b569018f1259663bd"
     }
   ],
   "actors": [
@@ -2093,5 +2425,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "25b68a9fee02b017df3344f4b931094022157e3ddadbe6e82024c3c4cd0e14ae"
+  "tipHash": "6eb1771947a73da1ddd1bd49aeca06f26e966c2922fedd8b569018f1259663bd"
 }
