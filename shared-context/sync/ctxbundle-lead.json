@@ -1,6 +1,6 @@
 {
-  "fromNodeId": "n_1fcs13e7",
-  "highSeq": 102,
+  "fromNodeId": "n_raxmnny0",
+  "highSeq": 103,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2101,6 +2101,28 @@
         "0732bd19605ac25162d78d1681a949945f881c870755dda22250f8706137f00a"
       ],
       "hash": "e297112ebdf6cf91f632723db90f2df4da8352f58038e74b36def9d31209b329"
+    },
+    {
+      "entryId": "ctx_3dc1578eb7a47ced",
+      "seq": 103,
+      "kind": "decision",
+      "title": "LP-1 Intent Persistence & LP-2 Decoupled Job Escrow Landed (656967d, 9d93706)",
+      "body": "LP-1 and LP-2 completed and pushed to remote. LP-1: createIntent/getIntent/listIntents on interface and both stores, POST/GET /api/v1/intents and /intents/[id], 5/5 tests pass. LP-2: MitraJobEscrow.sol deployed on Base Sepolia (0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6, blk 47740801) and Tempo Moderato (0x95ca2170d1021cb9b5ce6809066f094e00c0a583, blk 38355996); both runtime-matched (2096 bytes); PRD 15.5 pre-committed refundRouteHash required; 7/7 Foundry tests pass (57/57 total). Gates: tsc clean, 896 vitest pass, 57 forge pass.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "deployments",
+        "erc8183",
+        "escrow",
+        "intent",
+        "push"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T01:34:15.427Z",
+      "parents": [
+        "e297112ebdf6cf91f632723db90f2df4da8352f58038e74b36def9d31209b329"
+      ],
+      "hash": "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
     }
   ],
   "actors": [
@@ -2138,5 +2160,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "e297112ebdf6cf91f632723db90f2df4da8352f58038e74b36def9d31209b329"
+  "tipHash": "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
 }
