@@ -8,7 +8,7 @@
 
 ---
 
-### Executive State: LP-1 & LP-2 Complete & Pushed ✅
+### Executive State: LP-1, LP-2 & LP-2 Wire Complete ✅
 
 1. **LP-1 Intent Persistence Substrate** landed in `656967d`:
    - `createIntent`/`getIntent`/`listIntents` on `EconomicRepository`, Postgres, and Memory.
@@ -20,6 +20,16 @@
      - **Tempo Moderato (42431)**: `0x95ca2170d1021cb9b5ce6809066f094e00c0a583` (Block `38355996`)
    - 7/7 Foundry tests pass (57/57 total).
    - Solved: Refund pays client directly (avoids `deposit()` self-credit trap); zero callback into vault; PRD §15.5 `refundRouteHash` pre-commitment enforced.
+3. **LP-2 Wire (Transport & Live Parity Verification)** ✅:
+   - `lib/adapters/erc8183-transport.ts`: `ERC8183Transport` with `depositToEscrow`, `completeJob`, `refundJob`, `getJob`. Clean separation preserving `erc8183.ts` pure offline projection.
+   - `tests/commerce-escrow-live.test.ts`: Live gated suite (`JOB_ESCROW_LIVE=1`).
+   - Verified on **Base Sepolia (84532)**:
+     - Complete: Funded `0x294ea38fca81c9dff3a3c40156d485b26fd2753d1c36ba9ca0cd73bc6acb8c07`, Settled `0x8ff9c6d03f2b50bb0d61ef05c5d13ca3940066fcf90c7b8cd50cc4101c1079c9`
+     - Refund: Funded, Refunded `0x5ae3a080470aeed0b9d546610e1f3bf2af2952f15f649844e69be75cf686a975`
+   - Verified on **Tempo Moderato (42431)**:
+     - Complete: Funded `0x2ebe2afebcddcce59e47aaf3a63290949b79956907954f884a32e919f6904650`, Settled `0x22060610c9e22318d3ef66ecf3d2a19c4b099caf9538a7110fbe5dff3a8774dd`
+     - Refund: Funded, Refunded `0x324779cd52eb0919bad820627dc3f9f6ff1f5eb7ba012817fba240c8f790765f`
+   - Gates: 6/6 live tests passed, 19/19 offline tests passed, 0 typecheck errors.
 
 ---
 
@@ -40,21 +50,12 @@
 
 ### Lead Active Work Packages
 
-#### 📦 Task 1: LP-2 Follow-up — ERC-8183 Live Transport & Wiring
-**Context:** `lib/adapters/erc8183.ts` is currently a pure data projection. It needs an on-chain transport interacting with the deployed `jobEscrow` contracts without making offline tests fragile.
-
-**Tasks:**
-1. In `lib/adapters/erc8183.ts` (or `lib/adapters/erc8183-transport.ts`), add `ERC8183Transport`:
-   - Methods: `depositToEscrow(job)`, `completeJob(jobId)`, `refundJob(jobId)`.
-   - Reads contract addresses from `lib/evm/deployments.json` under `jobEscrow.baseSepolia` and `jobEscrow.moderato`.
-2. Add opt-in live test suite `tests/commerce-escrow-live.test.ts` (gated by `JOB_ESCROW_LIVE=base|tempo|1`):
-   - Fund a job on Base Sepolia (`0xc49c...`) and Tempo Moderato (`0x95ca...`).
-   - Demonstrate `completeJob` (release to provider) and `refundJob` (return to client after simulated or actual timeout).
-   - Verify `tests/commerce-lifecycle.test.ts` continues to pass 100% offline.
+#### 📦 Task 1: LP-2 Follow-up — ERC-8183 Live Transport & Wiring ✅ COMPLETED
+*(See Executive State above for test gates and transaction proof)*
 
 ---
 
-#### 📦 Task 2: LP-3 — Tempo Settlement Parity & Caller Wiring (Phase 9)
+#### 📦 Task 2: LP-3 — Tempo Settlement Parity & Caller Wiring (Phase 9) [ACTIVE NEXT]
 **Context:** `POST /api/v1/settlements` settles agreements on Base Sepolia, but Tempo settlement has only been exercised from adapter unit tests. It must be accessible through the common API route with full execution guard verification.
 
 **Tasks:**
@@ -105,7 +106,7 @@
 ### Recommended Execution Flow
 
 ```
-[Task 1: LP-2 Wire] ──► [Task 2: LP-3 Tempo Caller] ──► [Task 3: LP-4 Solana Escrow] ──► [Task 4: LP-5 Arcium]
+[Task 1: LP-2 Wire ✅] ──► [Task 2: LP-3 Tempo Caller (ACTIVE)] ──► [Task 3: LP-4 Solana Escrow] ──► [Task 4: LP-5 Arcium]
 ```
 
 All gates must remain green at each step (`npm run typecheck`, `forge test`, `npm test`).
