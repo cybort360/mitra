@@ -11,7 +11,15 @@
     "ceiling": 50000,
     "expiresAt": 1010000,
     "amount": 2500,
-    "deposit": 10000
+    "deposit": 10000,
+    "provider": "6k78AbasGMFFrhG95Pj6jQbqkVt7FQMhVgemxJovWKR6",
+    "keeper": "7tj9biW3KRJ7EEWmVUGigHiouCTXhV2dzcyvwma7Cyu7",
+    "jobId": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a",
+    "jobIdB": "9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b",
+    "jobAmount": 3000,
+    "jobAmountB": 2000,
+    "jobTimeout": 1003600,
+    "refundRoute": "7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f"
   },
   "discriminators": {
     "initialize_vault": "30bfa32c47813fa4",
@@ -22,12 +30,18 @@
     "amend_mandate": "e37db0b387e9b98c",
     "account:Vault": "d308e82b02987577",
     "account:Mandate": "71d8629fb93f3712",
-    "account:Authorization": "0344a8f3c3a8204b"
+    "account:Authorization": "0344a8f3c3a8204b",
+    "lock_escrow": "371005500d66ce68",
+    "release_escrow": "92fd81e91491b5ce",
+    "refund_escrow": "6bba59631ac217cc",
+    "account:JobEscrow": "bde0a046694e7397"
   },
   "pdas": {
     "vault": { "address": "DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", "bump": 254 },
     "mandate": { "address": "GAVHd8tNo6aVyAmXRtUBApFw6KM6GyqDPnxxekE9YLSJ", "bump": 255 },
-    "authorization": { "address": "FPoRJk9GkBw44TNSErdHcnq18CazDp1mmHtFNQAbGvGJ", "bump": 255 }
+    "authorization": { "address": "FPoRJk9GkBw44TNSErdHcnq18CazDp1mmHtFNQAbGvGJ", "bump": 255 },
+    "escrow": { "address": "8KPuRAWJzfbWwGdEVzFavyQupm9t751jFrXNFjSGTAsh", "bump": 255 },
+    "escrowB": { "address": "9mEBa64nAF8xUyfpnByV54HJYh97hjT9QpA8GJiaxsRx", "bump": 254 }
   },
   "instructions": {
     "initialize_vault": "30bfa32c47813fa4fe",
@@ -35,18 +49,28 @@
     "open_mandate": "7491be1c56df694a881300000000000050c300000000000050690f00000000003333333333333333333333333333333333333333333333333333333333333333ff",
     "authorize": "adc166d2db897178ababababababababababababababababababababababababababababababababc4090000000000004444444444444444444444444444444444444444444444444444444444444444ff",
     "spend_authorized": "cb6797065250b975abababababababababababababababababababababababababababababababab",
-    "revoke": "e37db0b387e9b98c881300000000000050c300000000000050690f000000000001"
+    "revoke": "e37db0b387e9b98c881300000000000050c300000000000050690f000000000001",
+    "lock_escrow": "371005500d66ce689a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a5555555555555555555555555555555555555555555555555555555555555555b80b00000000000050500f00000000007f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7fff",
+    "lock_escrow_b": "371005500d66ce689b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b5555555555555555555555555555555555555555555555555555555555555555d00700000000000050500f00000000007f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7ffe",
+    "release_escrow": "92fd81e91491b5ce9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a",
+    "refund_escrow": "6bba59631ac217cc9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b"
   },
   "accountMetas": {
-    "_comment": "As passed to dispatch. open_mandate and authorize also take the program account LAST on chain, for the create_account CPI the in-process run skips.",
+    "_comment": "As passed to dispatch. open_mandate, authorize and lock_escrow also take the program account LAST on chain, for the create_account CPI the in-process run skips; for lock_escrow the extra system-program account is left in place at index 4 so the first five entries are the on-chain order.",
     "open_mandate": [["29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2", true, true], ["3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3", false, false], ["GAVHd8tNo6aVyAmXRtUBApFw6KM6GyqDPnxxekE9YLSJ", false, true], ["DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", false, false], ["11111111111111111111111111111111", false, false]],
     "authorize": [["4Ss5JMkXAD9Z7cktFEdrqeMuT6jGMF1pVozTyPHZ6zT4", true, true], ["3JF3sEqM796hk5WFqA6EtmEwJQ9quALszsfJyvXNQKy3", false, false], ["GAVHd8tNo6aVyAmXRtUBApFw6KM6GyqDPnxxekE9YLSJ", false, false], ["FPoRJk9GkBw44TNSErdHcnq18CazDp1mmHtFNQAbGvGJ", false, true], ["11111111111111111111111111111111", false, false]],
-    "spend_authorized": [["5bV6jUfhDHCQVA1WfKBUnXUsboJgoKgkzkKcxr3joew5", false, true], ["DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", false, true], ["FPoRJk9GkBw44TNSErdHcnq18CazDp1mmHtFNQAbGvGJ", false, true], ["GAVHd8tNo6aVyAmXRtUBApFw6KM6GyqDPnxxekE9YLSJ", false, false]]
+    "spend_authorized": [["5bV6jUfhDHCQVA1WfKBUnXUsboJgoKgkzkKcxr3joew5", false, true], ["DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", false, true], ["FPoRJk9GkBw44TNSErdHcnq18CazDp1mmHtFNQAbGvGJ", false, true], ["GAVHd8tNo6aVyAmXRtUBApFw6KM6GyqDPnxxekE9YLSJ", false, false]],
+    "lock_escrow": [["29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2", true, true], ["6k78AbasGMFFrhG95Pj6jQbqkVt7FQMhVgemxJovWKR6", false, false], ["DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", false, true], ["8KPuRAWJzfbWwGdEVzFavyQupm9t751jFrXNFjSGTAsh", false, true], ["11111111111111111111111111111111", false, false]],
+    "release_escrow": [["29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2", true, true], ["DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", false, true], ["8KPuRAWJzfbWwGdEVzFavyQupm9t751jFrXNFjSGTAsh", false, true], ["6k78AbasGMFFrhG95Pj6jQbqkVt7FQMhVgemxJovWKR6", false, true]],
+    "refund_escrow": [["7tj9biW3KRJ7EEWmVUGigHiouCTXhV2dzcyvwma7Cyu7", true, false], ["DgFd6vXchD4uVEJ87uEvS1eNGyXzXrWy4K7q2Zpd51vc", false, true], ["9mEBa64nAF8xUyfpnByV54HJYh97hjT9QpA8GJiaxsRx", false, true]]
   },
   "accounts": {
     "vault": "d308e82b029875771111111111111111111111111111111111111111111111111111111111111111fe10270000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010270000000000000000000000000000",
     "mandate": "71d8629fb93f371222222222222222222222222222222222222222222222222222222222222222228813000000000000010000000000000050690f000000000050c3000000000000000111111111111111111111111111111111111111111111111111111111111111113333333333333333333333333333333333333333333333333333333333333333",
     "authorizationIssued": "0344a8f3c3a8204b2222222222222222222222222222222222222222222222222222222222222222ababababababababababababababababababababababababababababababababc409000000000000010000000000000050690f000000000000ff4444444444444444444444444444444444444444444444444444444444444444",
-    "authorizationConsumed": "0344a8f3c3a8204b2222222222222222222222222222222222222222222222222222222222222222ababababababababababababababababababababababababababababababababc409000000000000010000000000000050690f000000000001ff4444444444444444444444444444444444444444444444444444444444444444"
+    "authorizationConsumed": "0344a8f3c3a8204b2222222222222222222222222222222222222222222222222222222222222222ababababababababababababababababababababababababababababababababc409000000000000010000000000000050690f000000000001ff4444444444444444444444444444444444444444444444444444444444444444",
+    "escrowLocked": "bde0a046694e73979a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a11111111111111111111111111111111111111111111111111111111111111115555555555555555555555555555555555555555555555555555555555555555b80b00000000000050500f000000000000007f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f",
+    "escrowCompleted": "bde0a046694e73979a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a11111111111111111111111111111111111111111111111111111111111111115555555555555555555555555555555555555555555555555555555555555555b80b00000000000050500f000000000001007f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f",
+    "escrowRefunded": "bde0a046694e73979b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b11111111111111111111111111111111111111111111111111111111111111115555555555555555555555555555555555555555555555555555555555555555d00700000000000050500f000000000000017f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f"
   }
 }

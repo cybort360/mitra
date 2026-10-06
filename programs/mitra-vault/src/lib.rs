@@ -102,8 +102,32 @@ pub fn dispatch(
         ix::AUTHORIZE => authorize(program_id, accounts, args, now),
         ix::SPEND_AUTHORIZED => spend_authorized(program_id, accounts, args, now),
         ix::AMEND_MANDATE => amend_mandate(program_id, accounts, args, now),
+        ix::LOCK_ESCROW => lock_escrow(program_id, accounts, args, now),
+        ix::RELEASE_ESCROW => release_escrow(program_id, accounts, args),
+        ix::REFUND_ESCROW => refund_escrow(program_id, accounts, args, now),
         _ => Err(ProgramError::InvalidInstructionData),
     }
+}
+
+/// Moves `amount` lamports between two accounts the program owns.
+///
+/// Ownership is the whole reason this is legal, and it is why it is not a
+/// system-program CPI: `transfer` rejects a source carrying data, and both the
+/// vault and every escrow PDA carry state. Both sides being program-owned is the
+/// precondition — the caller does not get to pass an account it has signed for,
+/// because every call site below has already proved program ownership.
+fn move_owned_lamports(from: &AccountInfo, to: &AccountInfo, amount: u64) -> ProgramResult {
+    let from_balance = from
+        .lamports()
+        .checked_sub(amount)
+        .ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
+    let to_balance = to
+        .lamports()
+        .checked_add(amount)
+        .ok_or(err::custom(err::ARITHMETIC_OVERFLOW))?;
+    **from.try_borrow_mut_lamports()? = from_balance;
+    **to.try_borrow_mut_lamports()? = to_balance;
+    Ok(())
 }
 
 /// Reads the single `u64` argument, little-endian, as Anchor's borsh would.
@@ -402,12 +426,14 @@ fn reserve(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
     vault.reserve(amount)?;
     data.copy_from_slice(&vault.to_bytes());
     // Reservation moves capital between positions; lamports must not move.
-    // Checking the real balance against `total` is what stops a caller from
-    // inflating the vault with a direct transfer and making the reported total
-    // agree with a balance the program never authorised.
+    // Checking the real balance against the capital the vault HOLDS is what stops
+    // a caller from inflating the vault with a direct transfer and making the
+    // reported total agree with a balance the program never authorised. `held()`
+    // rather than `total`, because escrowed capital lives in an escrow PDA — see
+    // the F70 note on `Vault::held`.
     drop(data);
-    let total = Vault::from_bytes(&vault_account.try_borrow_data()?)?.total;
-    check_no_surplus_lamports(vault_account, total)?;
+    let held = Vault::from_bytes(&vault_account.try_borrow_data()?)?.held();
+    check_no_surplus_lamports(vault_account, held)?;
     Ok(())
 }
 
@@ -432,8 +458,11 @@ fn release(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
     vault.release(amount)?;
     data.copy_from_slice(&vault.to_bytes());
     drop(data);
-    let total = Vault::from_bytes(&vault_account.try_borrow_data()?)?.total;
-    check_no_surplus_lamports(vault_account, total)?;
+    // `held()` rather than `total` — same reason as `reserve` (F70). Without it a
+    // single outstanding escrow made `release` fail too, which is worse than the
+    // reservation case: a release is how reserved capital comes back.
+    let held = Vault::from_bytes(&vault_account.try_borrow_data()?)?.held();
+    check_no_surplus_lamports(vault_account, held)?;
     Ok(())
 }
 
@@ -456,6 +485,13 @@ fn release(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> Progra
 /// rent-exempt balance to exist at all. Subtracting the requirement makes the
 /// check exact: any lamport above capital+rent is an unaccounted injection, and
 /// any lamport below it means the account has been drained.
+///
+/// `capital` is `Vault::held()`, not `Vault::total`. The job escrow holds its
+/// capital in separate accounts, so `total` overstates what this account contains
+/// by exactly the outstanding escrowed amount. Passing `total` here is what
+/// disabled every reservation and release for a vault with an outstanding escrow
+/// (F70); the reconciling identity is `lamports == held() + rent`, verified to the
+/// lamport on devnet.
 fn check_no_surplus_lamports(vault: &AccountInfo, capital: u64) -> ProgramResult {
     let rent = rent::rent_exempt_minimum(state::VAULT_LEN)?;
     if vault.lamports() != capital + rent {
@@ -1161,6 +1197,348 @@ fn amend_mandate(
         if mandate.revoked { "REVOKED" } else { "amended" },
         mandate.limit
     );
+    Ok(())
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 6 — Job escrow: one job's capital, held apart, recoverable on a timer.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The EVM rail has this as `MitraJobEscrow` (LP-2). Without it, this rail had
+// `reserve`/`release` — which earmarks rather than escrows: the lamports never
+// leave the vault, so a provider who went silent held nothing back, and a client
+// who wanted its own money back had to ask the party it had stopped trusting.
+// These three instructions close the ERC-8183 job on Solana with the two
+// properties that matter and that `reserve` cannot have:
+//
+//   · the capital is in its **own account**, unreachable by anyone but the two
+//     parties and a timeout; and
+//   · the way back is **committed in advance** (PRD §15.5), hash-pinned at
+//     funding, so a recovery can never invent the compensation it performs.
+//
+// The load-bearing rule is unchanged in shape: the *amount*, the *payee*, the
+// *job* and the *route* are all read from chain state, and the only thing a
+// caller supplies is which action it wants and — for a release — its signature.
+
+/// The escrow PDA is the canonical one for `(vault, job_id)`.
+///
+/// Program ownership alone says only that this program wrote the account; a PDA
+/// can hold any bytes and a caller may pass any program-owned account it likes.
+/// Re-deriving is what makes "the escrow for this job" a fact about the job
+/// rather than about the instruction's arguments — the same guard
+/// `assert_canonical_mandate` exists for on the policy side.
+fn check_escrow_account(
+    escrow_account: &AccountInfo,
+    vault_account: &AccountInfo,
+    job_id: &[u8; 32],
+    program_id: &Pubkey,
+) -> ProgramResult {
+    if escrow_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    let (expected, _) = Pubkey::try_find_program_address(
+        &anchor_parity::escrow_seeds(vault_account.key, job_id),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if &expected != escrow_account.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    Ok(())
+}
+
+/// The vault is the canonical vault for `client`, and `client` really is its
+/// authority.
+///
+/// [`check_vault_account`] cannot do this job on its own, because it requires the
+/// *signer* to be the authority — and an autonomous refund is signed by a keeper
+/// who is not the client. What must still be proved is the same pair of facts,
+/// from the escrow's own record rather than from the transaction's.
+fn check_vault_for_client(
+    vault_account: &AccountInfo,
+    client: &Pubkey,
+    program_id: &Pubkey,
+) -> ProgramResult {
+    if vault_account.owner != program_id {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    let (expected, _) = find_vault_pda(&vault_seeds(client), program_id)?;
+    if &expected != vault_account.key {
+        return Err(err::custom(err::VAULT_MISMATCH));
+    }
+    if Vault::from_bytes(&vault_account.try_borrow_data()?)?.authority != *client {
+        return Err(err::custom(err::VAULT_MISMATCH));
+    }
+    Ok(())
+}
+
+/// `lock_escrow(job_id, provider, amount, timeout, refund_route_hash)` — the
+/// client commits capital to one job.
+///
+/// Signature `[32 job_id][32 provider][u64 amount][u64 timeout][32 route][u8 bump?]`.
+/// Accounts `[client (signer, payer), provider, vault, escrow, system_program, program]`.
+///
+/// Two positions move and no lamports move *within the vault*: `available` down,
+/// `escrowed` up, `total` unchanged. The lamports then move to the escrow PDA, so
+/// `total` still describes Mitra's capital while the vault's balance no longer
+/// contains it. That is the difference between this and `reserve`.
+///
+/// **The client pays the escrow's rent, not the vault.** The system program
+/// refuses to transfer *out* of an account carrying data, and a `create_account`
+/// CPI debits its payer — so paying from the vault would depend on a
+/// `create_account` quirk that `transfer` explicitly forbids and that nothing in
+/// this repository has ever exercised on chain. Paying from the client's key
+/// keeps the CPI on the well-trodden path, and the job capital is moved by
+/// [`move_owned_lamports`] where ownership is what justifies it.
+fn lock_escrow(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u64) -> ProgramResult {
+    if args.len() < 112 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let mut job_id = [0u8; 32];
+    job_id.copy_from_slice(&args[0..32]);
+    let provider = Pubkey::try_from(&args[32..64]).map_err(|_| ProgramError::InvalidInstructionData)?;
+    let amount = read_amount(&args[64..72])?;
+    let timeout = read_amount(&args[72..80])?;
+    let mut refund_route_hash = [0u8; 32];
+    refund_route_hash.copy_from_slice(&args[80..112]);
+
+    let mut it = accounts.iter();
+    let client = next_account_info(&mut it)?;
+    let provider_account = next_account_info(&mut it)?;
+    let vault_account = next_account_info(&mut it)?;
+    let escrow_account = next_account_info(&mut it)?;
+    let system_program = next_account_info(&mut it)?;
+
+    check_vault_account(vault_account, client, program_id)?;
+    if system_program.key != &solana_program::system_program::ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    if amount == 0 {
+        return Err(ProgramError::InvalidArgument);
+    }
+    // The payee is named once, here, and stored. It is never read from an
+    // argument later, because `release_escrow` has no signature at all — a
+    // caller-chosen payee there would let anyone holding a funded escrow name
+    // their own address.
+    if provider == Pubkey::default() {
+        return Err(ProgramError::InvalidArgument);
+    }
+    // The account and the argument must name the same payee. Neither is
+    // authoritative on its own, and a mismatch means the caller and the client
+    // disagree about who is being paid — which is not something to discover at
+    // release time.
+    if provider_account.key != &provider {
+        return Err(err::custom(err::RECIPIENT_MISMATCH));
+    }
+    // PRD §15.5, at funding time. Refusing here means a job can only exist if its
+    // way back was agreed first, rather than discovering at recovery that nobody
+    // decided what recovery means.
+    if refund_route_hash == [0u8; 32] {
+        return Err(err::custom(err::NO_COMMITMENT));
+    }
+    // A timeout that is not in the future creates an escrow that is refundable
+    // the instant it exists — the autonomous recovery path would be a formality
+    // and the client would hold a "locked" job that anyone could undo.
+    if timeout <= now {
+        return Err(err::custom(err::INVALID_TIMEOUT));
+    }
+
+    if escrow_account.owner != &solana_program::system_program::ID
+        && escrow_account.owner != program_id
+    {
+        return Err(err::custom(err::INVALID_ACCOUNT_OWNER));
+    }
+    if escrow_account.owner == program_id {
+        // Re-funding a job that already has an escrow is refused rather than
+        // overwritten, for the same reason a second `initialize_vault` is: the
+        // old obligation must not be silently replaced by a new one.
+        return Err(err::custom(err::ALREADY_INITIALIZED));
+    }
+    let (expected, derived_bump) = Pubkey::try_find_program_address(
+        &anchor_parity::escrow_seeds(vault_account.key, &job_id),
+        program_id,
+    )
+    .ok_or(ProgramError::InvalidSeeds)?;
+    if expected != *escrow_account.key {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    let bump = match args.get(112).copied() {
+        None => derived_bump,
+        Some(b) if b == derived_bump => b,
+        Some(_) => return Err(ProgramError::InvalidSeeds),
+    };
+
+    // The client's own headroom must cover the job before anything is created.
+    // Checking first means a rejected lock costs nothing — no rent, no account,
+    // no state change — which matters because the failure is a routine one.
+    {
+        let mut data = vault_account.try_borrow_mut_data()?;
+        let mut vault = Vault::from_bytes(&data)?;
+        vault.lock_to_escrow(amount)?;
+        data.copy_from_slice(&vault.to_bytes());
+    }
+
+    if escrow_account.lamports() == 0 {
+        let lamports = rent_for_bytes(state::ESCROW_LEN)?;
+        let cpi = system_instruction::create_account(
+            client.key, escrow_account.key, lamports,
+            state::ESCROW_LEN as u64, &program_id,
+        );
+        let program_account = next_account_info(&mut it)?;
+        let bump_seed = [bump];
+        let seed_sets: &[&[&[u8]]] = &[&[
+            anchor_parity::ESCROW_SEED,
+            vault_account.key.as_ref(),
+            job_id.as_ref(),
+            &bump_seed,
+        ]];
+        invoke_signed(
+            &cpi,
+            &[client.clone(), escrow_account.clone(), program_account.clone()],
+            seed_sets,
+        )?;
+    }
+
+    let escrow = state::JobEscrow::new(job_id, *client.key, provider, amount, timeout, refund_route_hash);
+    escrow_account.try_borrow_mut_data()?.copy_from_slice(&escrow.to_bytes());
+    move_owned_lamports(vault_account, escrow_account, amount)?;
+    msg!("escrow locked for job {} at {}", job_id[0], amount);
+    Ok(())
+}
+
+/// `release_escrow(job_id)` — the client pays the provider.
+///
+/// Signature `[32 job_id]`. Accounts `[client (signer), vault, escrow, provider]`.
+///
+/// **The payee and the amount are read from the escrow, not supplied.** There is
+/// no amount argument and no provider argument. The provider *is* a positional
+/// account — Solana requires every account a transaction touches to be in the
+/// message, so it cannot be optional — and the program refuses it unless it is
+/// the key the escrow recorded at funding. That is the same recipient guard
+/// `spend_authorized` carries, and for the same reason: a caller-chosen payee on
+/// an instruction with no signer is a redemption to whoever submitted it.
+///
+/// **The provider does not sign.** An agent being paid for work does not have the
+/// client's keypair, and requiring it would make every payment a co-signature
+/// the payer has to obtain from the party being paid.
+fn release_escrow(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8]) -> ProgramResult {
+    if args.len() < 32 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let mut job_id = [0u8; 32];
+    job_id.copy_from_slice(&args[0..32]);
+
+    let mut it = accounts.iter();
+    let client = next_account_info(&mut it)?;
+    let vault_account = next_account_info(&mut it)?;
+    let escrow_account = next_account_info(&mut it)?;
+    let provider_account = next_account_info(&mut it)?;
+
+    check_vault_account(vault_account, client, program_id)?;
+    check_escrow_account(escrow_account, vault_account, &job_id, program_id)?;
+
+    let mut escrow =
+        state::JobEscrow::try_from_bytes(&escrow_account.try_borrow_data()?)?;
+    if escrow.job_id != job_id {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    if escrow.client != *client.key {
+        return Err(err::custom(err::UNAUTHORIZED));
+    }
+    if escrow.provider != *provider_account.key {
+        return Err(err::custom(err::RECIPIENT_MISMATCH));
+    }
+    let amount = escrow.amount;
+    let provider = escrow.provider;
+
+    // Consume the permit before the money moves, for the reason `spend_authorized`
+    // does: a burned escrow is a recoverable failure, whereas value paid against a
+    // still-live escrow is not.
+    escrow.mark_completed()?;
+    escrow_account
+        .try_borrow_mut_data()?
+        .copy_from_slice(&escrow.to_bytes());
+
+    {
+        let mut data = vault_account.try_borrow_mut_data()?;
+        let mut vault = Vault::from_bytes(&data)?;
+        vault.pay_escrow(amount)?;
+        data.copy_from_slice(&vault.to_bytes());
+    }
+    move_owned_lamports(escrow_account, provider_account, amount)?;
+    msg!("escrow released: {} to {}", amount, provider);
+    Ok(())
+}
+
+/// `refund_escrow(job_id)` — the capital comes back, on a timer or on rejection.
+///
+/// Signature `[32 job_id]`. Accounts `[caller (signer), vault, escrow]`.
+///
+/// **This is the autonomous recovery path**, and it is the reason the escrow
+/// exists: once `now >= timeout`, *anyone* may return the capital to the client's
+/// own `available` without the provider's or the client's cooperation. A keeper,
+/// a monitoring agent, or the provider themselves can all trigger it.
+///
+/// Three conditions, in this order, and the order matters for legibility:
+///
+///   1. the escrow is live — not already released or refunded;
+///   2. a compensation route was committed (PRD §15.5);
+///   3. the deadline has passed, **or** the caller is the client rejecting the
+///      work. The client's own rejection is what makes an escrow recoverable
+///      before its deadline on the EVM rail too, and without it a client whose
+///      provider submitted garbage would wait out the full timeout on capital it
+///      has already decided not to spend.
+///
+/// The refund goes to the vault's `available` — the client's own headroom — not
+/// out to a wallet, because the escrow has no way to know an off-vault address is
+/// the same client and guessing one would be exactly the "recovery engine invents
+/// its own route" failure §15.5 forbids.
+fn refund_escrow(program_id: &Pubkey, accounts: &[AccountInfo], args: &[u8], now: u64) -> ProgramResult {
+    if args.len() < 32 {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    let mut job_id = [0u8; 32];
+    job_id.copy_from_slice(&args[0..32]);
+
+    let mut it = accounts.iter();
+    let caller = next_account_info(&mut it)?;
+    let vault_account = next_account_info(&mut it)?;
+    let escrow_account = next_account_info(&mut it)?;
+
+    // Not `check_vault_account`: this instruction must work when the signer is a
+    // stranger to the vault. `caller.is_signer` is the whole requirement — it
+    // pays the fee and nothing more.
+    if !caller.is_signer {
+        return Err(err::custom(err::NOT_SIGNER));
+    }
+    check_escrow_account(escrow_account, vault_account, &job_id, program_id)?;
+
+    let mut escrow =
+        state::JobEscrow::try_from_bytes(&escrow_account.try_borrow_data()?)?;
+    if escrow.job_id != job_id {
+        return Err(ProgramError::InvalidSeeds);
+    }
+    check_vault_for_client(vault_account, &escrow.client, program_id)?;
+
+    if escrow.is_settled() {
+        return Err(err::custom(err::ESCROW_ALREADY_SETTLED));
+    }
+    escrow.refundable_at(now, *caller.key == escrow.client)?;
+    let amount = escrow.amount;
+
+    escrow.mark_refunded()?;
+    escrow_account
+        .try_borrow_mut_data()?
+        .copy_from_slice(&escrow.to_bytes());
+
+    {
+        let mut data = vault_account.try_borrow_mut_data()?;
+        let mut vault = Vault::from_bytes(&data)?;
+        vault.return_escrow(amount)?;
+        data.copy_from_slice(&vault.to_bytes());
+    }
+    move_owned_lamports(escrow_account, vault_account, amount)?;
+    msg!("escrow refunded: {} back to available", amount);
     Ok(())
 }
 

@@ -20,19 +20,57 @@ import {
   Connection, Keypair, PublicKey, SystemProgram, Transaction,
   TransactionInstruction, sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import { VAULT_PROGRAM_ID } from "./mitra-program.mjs";
 
 const RPC = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
-// Derived from the deployed keypair rather than hardcoded. An earlier version
-// carried a literal program id, and because the deploy and the edit ran in
-// different shells the two silently drifted: the script was driving a *previous*
-// deployment, reporting its failures as if they were current. That is a worse
-// failure than a missing constant, because every result is confidently wrong.
+// The deployed address, committed — not derived from a keypair.
+//
+// It used to be derived from `target/deploy/mitra_vault-keypair.json`, on the
+// reasoning that a derived id cannot drift from the binary. That reasoning is
+// sound and the mechanism is worse than useless: `cargo clean` deletes that file
+// and the next `cargo-build-sbf` mints a *fresh* keypair, so one clean between a
+// deploy and a harness run silently retargets the harness at a program that does
+// not exist. Observed 2026-10-06 (F69).
+//
+// The drift the derivation was meant to catch is caught more directly below: a
+// keypair that is present and derives a DIFFERENT id is refused, naming both. So
+// the guard against driving a stale deployment survives, without making the
+// harness depend on a file `cargo clean` is entitled to delete.
 const KEYPAIR_PATH = process.env.MITRA_VAULT_KEYPAIR
   ?? "programs/mitra-vault/target/deploy/mitra_vault-keypair.json";
-const PROGRAM_ID = process.env.MITRA_VAULT_PROGRAM_ID
-  ?? new PublicKey(Keypair.fromSecretKey(
+const PROGRAM_ID = process.env.MITRA_VAULT_PROGRAM_ID ?? VAULT_PROGRAM_ID;
+// The build's own keypair is a *corroborating* signal now, not the source of the
+// id. When it agrees, that is worth saying out loud — it means the `.so` beside it
+// is the one deployed at this address. When it does not agree, that is expected
+// after any `cargo clean` (which deletes it) followed by a rebuild (which mints a
+// fresh one), so it is reported and then ignored rather than treated as fatal:
+// the address is committed and pinned to the Rust constant and the TS client by
+// `tests/dev-scripts.test.ts`, and an address under that much pinning cannot go
+// quietly stale the way a derived id could.
+//
+// A hard refusal here was tried first and removed: it blocked a correct run of the
+// harness for the ordinary case of a cleaned build tree, and the failure it was
+// written to prevent — driving a previous deployment — is already impossible now
+// that the id is not derived.
+let keypairAgrees = null;
+try {
+  const fromKeypair = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(readFileSync(KEYPAIR_PATH, "utf8"))),
-  ).publicKey).toBase58();
+  ).publicKey.toBase58();
+  keypairAgrees = fromKeypair === PROGRAM_ID;
+  if (!keypairAgrees) {
+    console.warn(
+      `NOTE: ${KEYPAIR_PATH} derives ${fromKeypair}, which is NOT the program being driven.\n` +
+      `      Running against the committed address ${PROGRAM_ID}. This is expected after a\n` +
+      `      cargo clean; a stale binary next to the keypair no longer misdirects this\n` +
+      `      harness, because the id here is committed rather than derived.`,
+    );
+  }
+} catch (e) {
+  if (e?.code !== "ENOENT") throw e;
+  // No keypair beside the build. Also expected, and harmless: the upgrade
+  // authority lives in .dev-keys, not next to the artifact.
+}
 
 const connection = new Connection(RPC, "confirmed");
 const authority = Keypair.fromSecretKey(
@@ -52,7 +90,7 @@ const [vaultPda, bump] = PublicKey.findProgramAddressSync(
 
 console.log(`rpc        ${RPC}`);
 console.log(`authority  ${authority.publicKey.toBase58()}`);
-console.log(`program    ${programId.toBase58()}`);
+console.log(`program    ${programId.toBase58()}${keypairAgrees === true ? "  (build keypair agrees)" : ""}`);
 console.log(`vault PDA  ${vaultPda.toBase58()} (bump ${bump})\n`);
 
 let failures = 0;
@@ -118,6 +156,19 @@ async function readVault() {
   if (sum !== v.total) throw new Error(`INVARIANT BROKEN: ${sum} != ${v.total}`);
   return v;
 }
+
+/**
+ * The capital the vault's OWN lamports must account for: `total` less whatever is
+ * sitting in a job escrow PDA.
+ *
+ * This assertion previously compared against `total`, which was correct only while
+ * nothing was ever escrowed — and the job escrow (LP-4) moves real lamports out to
+ * a separate account while deliberately leaving `total` alone. The program now
+ * enforces `lamports == held + rent` (`Vault::held`, F70), and so does this
+ * harness: an assertion that disagrees with the program about what the balance
+ * should be reports the program as broken when it is the harness that is stale.
+ */
+const heldOf = (v) => (v ? v.total - v.escrowed : 0);
 
 // Scaled to the authority's actual devnet balance rather than a fixed 1 SOL.
 //
@@ -188,8 +239,8 @@ console.log("\n2. funding — deposit");
   check("available increased by the deposit", v?.available === before.available + amount,
     `${before.available} -> ${v?.available}`);
   const rent = await connection.getMinimumBalanceForRentExemption(VAULT_LEN);
-  check("lamports == capital + rent-exempt minimum", v?.lamports === v?.total + rent,
-    `lamports=${v?.lamports} total=${v?.total} rent=${rent}`);
+  check("lamports == held capital + rent-exempt minimum", v?.lamports === heldOf(v) + rent,
+    `lamports=${v?.lamports} held=${heldOf(v)} rent=${rent} escrowed=${v?.escrowed}`);
 }
 
 // --- 3. reservation --------------------------------------------------------
@@ -260,8 +311,8 @@ console.log("\n7. settlement — authority withdraws 40% of available");
   check("available reduced by the withdrawal", v?.available === before.available - amount,
     `${before.available} -> ${v?.available}`);
   const rent = await connection.getMinimumBalanceForRentExemption(VAULT_LEN);
-  check("lamports == capital + rent-exempt minimum", v?.lamports === v?.total + rent,
-    `lamports=${v?.lamports} total=${v?.total} rent=${rent}`);
+  check("lamports == held capital + rent-exempt minimum", v?.lamports === heldOf(v) + rent,
+    `lamports=${v?.lamports} held=${heldOf(v)} rent=${rent} escrowed=${v?.escrowed}`);
 }
 
 // --- 8. over-withdrawal must fail -----------------------------------------

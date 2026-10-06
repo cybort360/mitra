@@ -72,6 +72,12 @@ pub mod ix {
     pub const SPEND_AUTHORIZED: [u8; 8] = [203, 103, 151, 6, 82, 80, 185, 117];
     /// sha256("global:amend_mandate")[..8]
     pub const AMEND_MANDATE: [u8; 8] = [227, 125, 176, 179, 135, 233, 185, 140];
+    /// sha256("global:lock_escrow")[..8]
+    pub const LOCK_ESCROW: [u8; 8] = [55, 16, 5, 80, 13, 102, 206, 104];
+    /// sha256("global:release_escrow")[..8]
+    pub const RELEASE_ESCROW: [u8; 8] = [146, 253, 129, 233, 20, 145, 181, 206];
+    /// sha256("global:refund_escrow")[..8]
+    pub const REFUND_ESCROW: [u8; 8] = [107, 186, 89, 99, 26, 194, 23, 204];
 }
 
 /// Error codes. Anchor reserves 0–999 for its framework and assigns user errors
@@ -130,6 +136,32 @@ pub mod err {
     /// The mandate predates binding: no principal or engine is recorded, so it
     /// can neither authorize, spend, nor be amended (F51).
     pub const MANDATE_UNBOUND: u32 = 6018;
+    /// 6019 — a refund was attempted on a job with no committed compensation
+    /// route (PRD §15.5).
+    ///
+    /// The EVM escrow reverts `NoCommitment` and this is its exact counterpart.
+    /// A recovery engine that can synthesize a route after the failure can
+    /// execute anything it likes in the name of "recovery", so the route must be
+    /// hash-committed at *funding* time and its absence is terminal.
+    pub const NO_COMMITMENT: u32 = 6019;
+    /// 6020 — a refund was attempted before the job's timeout by a caller that is
+    /// neither the client nor entitled to it.
+    pub const BEFORE_TIMEOUT: u32 = 6020;
+    /// 6021 — the escrow has already been released or refunded; it is terminal.
+    pub const ESCROW_ALREADY_SETTLED: u32 = 6021;
+    /// 6022 — the escrow account carries no live obligation: either it was never
+    /// created, or it records a zero amount.
+    ///
+    /// Kept distinct from `ACCOUNT_DISCRIMINATOR_MISMATCH` because the two mean
+    /// opposite things to a caller: that one says "you named the wrong account",
+    /// this one says "this job was never funded". A recovery path that reports
+    /// the first for the second sends an operator looking for a wiring bug when
+    /// the truth is that the job never existed.
+    pub const ESCROW_NOT_FUNDED: u32 = 6022;
+    /// 6023 — a timeout that is not in the future. Locking an escrow that is
+    /// already refundable would make the autonomous recovery path a no-op the
+    /// instant it is created.
+    pub const INVALID_TIMEOUT: u32 = 6023;
 
     pub fn custom(code: u32) -> ProgramError {
         ProgramError::Custom(code)
@@ -224,6 +256,9 @@ mod tests {
         assert_eq!(instruction_discriminator("withdraw"), ix::WITHDRAW);
         assert_eq!(instruction_discriminator("reserve"), ix::RESERVE);
         assert_eq!(instruction_discriminator("release"), ix::RELEASE);
+        assert_eq!(instruction_discriminator("lock_escrow"), ix::LOCK_ESCROW);
+        assert_eq!(instruction_discriminator("release_escrow"), ix::RELEASE_ESCROW);
+        assert_eq!(instruction_discriminator("refund_escrow"), ix::REFUND_ESCROW);
     }
 
     #[test]
@@ -235,21 +270,70 @@ mod tests {
             err::UNEXPECTED_LAMPORTS, err::RECONCILIATION_FAILED, err::INSUFFICIENT_AVAILABLE,
             err::ARITHMETIC_OVERFLOW, err::VAULT_FROZEN, err::UNAUTHORIZED,
             err::ALREADY_INITIALIZED,
+            err::NO_COMMITMENT, err::BEFORE_TIMEOUT, err::ESCROW_ALREADY_SETTLED,
+            err::ESCROW_NOT_FUNDED, err::INVALID_TIMEOUT,
         ] {
             assert!(code >= 6000, "error {code} collides with Anchor's range");
         }
         assert_eq!(err::NOT_SIGNER, 6000);
         assert_eq!(err::UNAUTHORIZED, 6008);
         assert_eq!(err::ALREADY_INITIALIZED, 6009);
+        assert_eq!(err::MANDATE_UNBOUND, 6018);
+        // The escrow codes are contiguous from 6019 so a client can map a custom
+        // error back to a name without a table that can drift from this one.
+        assert_eq!(
+            [err::NO_COMMITMENT, err::BEFORE_TIMEOUT, err::ESCROW_ALREADY_SETTLED,
+             err::ESCROW_NOT_FUNDED, err::INVALID_TIMEOUT],
+            [6019, 6020, 6021, 6022, 6023]
+        );
     }
 
     #[test]
     fn instruction_discriminators_are_unique() {
-        let mut sorted = [ix::INITIALIZE_VAULT, ix::DEPOSIT, ix::WITHDRAW, ix::RESERVE, ix::RELEASE];
+        let mut sorted = [
+            ix::INITIALIZE_VAULT, ix::DEPOSIT, ix::WITHDRAW, ix::RESERVE, ix::RELEASE,
+            ix::OPEN_MANDATE, ix::AUTHORIZE, ix::SPEND_AUTHORIZED, ix::AMEND_MANDATE,
+            ix::LOCK_ESCROW, ix::RELEASE_ESCROW, ix::REFUND_ESCROW,
+        ];
         sorted.sort_unstable();
         for pair in sorted.windows(2) {
             assert_ne!(pair[0], pair[1], "instruction discriminators must not collide");
         }
+    }
+
+    /// Every account discriminator must be distinct, or two account types could
+    /// decode as each other. `sha256` makes a collision implausible; that it is
+    /// *impossible to introduce by a copy-paste* is what this pins.
+    #[test]
+    fn account_discriminators_are_distinct() {
+        let kinds = ["Vault", "Mandate", "Authorization", "JobEscrow"];
+        let mut sorted: Vec<[u8; 8]> = kinds.iter().map(|k| account_discriminator(k)).collect();
+        sorted.sort_unstable();
+        for pair in sorted.windows(2) {
+            assert_ne!(pair[0], pair[1], "account discriminators must not collide");
+        }
+    }
+
+    /// The escrow seed is the whole budget for one seed, so the derivation only
+    /// works if `job_id` is exactly 32 bytes. A longer id would fail at
+    /// `try_find_program_address` and abort an autonomous recovery — the one path
+    /// that must never be able to fail on a shape error.
+    #[test]
+    fn escrow_seeds_are_within_the_runtime_seed_limits() {
+        let vault = Pubkey::new_unique();
+        let program_id = Pubkey::new_unique();
+        let job_id = [0x77u8; 32];
+        let seeds = escrow_seeds(&vault, &job_id);
+        assert_eq!(seeds.len(), 3);
+        for s in seeds {
+            assert!(s.len() <= 32, "a seed longer than 32 bytes cannot derive");
+        }
+        let (a, _) = find_vault_pda(&seeds, &program_id).unwrap();
+        let (b, _) = find_vault_pda(&escrow_seeds(&vault, &[0x78u8; 32]), &program_id).unwrap();
+        assert_ne!(a, b, "a different job must be a different escrow");
+        let (c, _) = find_vault_pda(&escrow_seeds(&Pubkey::new_unique(), &job_id), &program_id).unwrap();
+        assert_ne!(a, c, "a different vault must be a different escrow");
+        assert!(!a.is_on_curve(), "an escrow PDA must not be on the ed25519 curve");
     }
 
     #[test]
@@ -301,4 +385,29 @@ pub const AUTHORIZATION_SEED: &[u8] = b"authorization";
 /// the signature honest about what it holds on to.
 pub fn authorization_seeds<'a>(mandate: &'a Pubkey, action_hash: &'a [u8; 32]) -> [&'a [u8]; 3] {
     [AUTHORIZATION_SEED, mandate.as_ref(), action_hash.as_ref()]
+}
+
+/// sha256("account:JobEscrow")[..8], derived for the same reason as
+/// `mandate_discriminator` — see the note there.
+pub fn job_escrow_discriminator() -> [u8; 8] {
+    account_discriminator("JobEscrow")
+}
+
+/// The job-escrow seed, distinct from both other seeds for the reason
+/// `MANDATE_SEED` gives: an escrow is *capital set aside for one obligation*, and
+/// sharing an address space with the vault would let a capital object and a
+/// policy object alias.
+pub const ESCROW_SEED: &[u8] = b"escrow";
+
+/// `[b"escrow", vault, job_id]` — the job id is part of the derivation, so one
+/// vault's outstanding jobs never share an address and a replay of the *same*
+/// job finds an account that already exists rather than a fresh obligation.
+///
+/// `job_id` is a `[u8; 32]`, which is exactly a 32-byte seed: the Solana runtime
+/// caps each seed at 32 bytes, so this uses the whole budget. A longer
+/// identifier (a URN such as `virtuals-acp:...`) must be hashed by the client
+/// before it gets here — the same 32-byte narrowing the EVM `bytes32 jobId`
+/// imposes, so both rails agree on which two jobs are the same job.
+pub fn escrow_seeds<'a>(vault: &'a Pubkey, job_id: &'a [u8; 32]) -> [&'a [u8]; 3] {
+    [ESCROW_SEED, vault.as_ref(), job_id.as_ref()]
 }

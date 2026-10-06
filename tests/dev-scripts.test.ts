@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { keccak256 } from "js-sha3";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { PublicKey } from "@solana/web3.js";
+import { VAULT_PROGRAM_ID } from "@/lib/solana/vault-program";
 
 /**
  * The key-generation scripts, checked.
@@ -32,6 +35,8 @@ const runExpectingFailure = (script: string, args: string[] = []) => {
 };
 
 const hasKeys = existsSync(path.join(".dev-keys", "evm-testnet.key"));
+
+const g = JSON.parse(readFileSync(path.join("programs", "mitra-vault", "tests", "golden", "vault-layout.json"), "utf8"));
 
 describe.skipIf(!hasKeys)("dev key scripts", () => {
   it("verify-dev-keys re-derives every address from the stored secret", () => {
@@ -244,6 +249,116 @@ describe.skipIf(!hasKeys)("dev key scripts", () => {
     // point being gated says nothing about the other.
     expect(bridge.error).toBeDefined();
   }, 40_000);
+
+  it("the deployed program id is committed, and all three copies agree", async () => {
+    // F69: the harness used to derive the program id from a keypair that lives
+    // in `target/`, which `cargo clean` deletes and `cargo-build-sbf` then
+    // replaces with a fresh one. One clean silently retargeted the harness at a
+    // program that does not exist. The address is now committed, in three places
+    // that must not drift:
+    //
+    //   scripts/mitra-program.mjs          — for the .mjs harness
+    //   lib/solana/vault-program.ts        — VAULT_PROGRAM_ID, for the TS client
+    //   programs/mitra-vault/src/lib.rs    — PROGRAM_ID_BYTES, which the golden
+    //                                         layout is generated from
+    //
+    // A redeploy at a new address therefore fails a test rather than pointing a
+    // harness at nothing.
+    const fromScript = (await import("@/scripts/mitra-program.mjs")).VAULT_PROGRAM_ID as string;
+    const fromTs = VAULT_PROGRAM_ID.toBase58();
+    const fromRust = JSON.parse(
+      readFileSync(path.join("programs", "mitra-vault", "tests", "golden", "vault-layout.json"), "utf8"),
+    ).programId as string;
+
+    expect(fromScript).toBe(fromTs);
+    expect(fromScript).toBe(fromRust);
+    // A base58 address that is not a valid point, i.e. not a real program.
+    expect(new PublicKey(fromScript).toBase58()).toBe(fromScript);
+  });
+
+  it("the .mjs harnesses' bytes match the RUST program's own bytes", async () => {
+    // The harness scripts cannot import the TypeScript client, so they carry their
+    // own discriminators and lengths (F12, F45: two hand-written encoders that
+    // agree with each other prove nothing). They are therefore pinned against
+    // `tests/golden/vault-layout.json`, which `programs/mitra-vault/tests/
+    // golden_layout.rs` generates from the program's own types — and every
+    // instruction in that file was accepted by the real `dispatch`.
+    const m = await import("@/scripts/mitra-program.mjs");
+    const hex = (b: Buffer) => Buffer.from(b).toString("hex");
+
+    for (const [name, golden] of [
+      ["initializeVault", "initialize_vault"],
+      ["deposit", "deposit"],
+      ["openMandate", "open_mandate"],
+      ["authorize", "authorize"],
+      ["spendAuthorized", "spend_authorized"],
+      ["amendMandate", "amend_mandate"],
+      ["lockEscrow", "lock_escrow"],
+      ["releaseEscrow", "release_escrow"],
+      ["refundEscrow", "refund_escrow"],
+    ] as const) {
+      expect(hex(m.IX[name]), `IX.${name}`).toBe(g.discriminators[golden]);
+    }
+    for (const [name, golden] of [
+      ["vault", "account:Vault"],
+      ["mandate", "account:Mandate"],
+      ["authorization", "account:Authorization"],
+      ["jobEscrow", "account:JobEscrow"],
+    ] as const) {
+      expect(hex(m.account[name]), `account.${name}`).toBe(g.discriminators[golden]);
+    }
+    // Lengths are arithmetic in both languages, so they are asserted against the
+    // byte lengths of the accounts the program actually wrote.
+    expect(m.VAULT_LEN).toBe(Buffer.from(g.accounts.vault, "hex").length);
+    expect(m.MANDATE_LEN).toBe(Buffer.from(g.accounts.mandate, "hex").length);
+    expect(m.AUTHORIZATION_LEN).toBe(Buffer.from(g.accounts.authorizationConsumed, "hex").length);
+    expect(m.ESCROW_LEN).toBe(Buffer.from(g.accounts.escrowLocked, "hex").length);
+  });
+
+  it("the harness PDAs agree with the Rust client's derivation", async () => {
+    // `.mjs` and TS both re-derive these, so the two could drift apart and each
+    // look right. The golden file's addresses came from `Pubkey::find_program_address`.
+    const m = await import("@/scripts/mitra-program.mjs");
+    const pid = new PublicKey(VAULT_PROGRAM_ID);
+    const principal = new PublicKey(g.inputs.principal);
+    const [v, vb] = m.vaultPda(principal, pid, PublicKey);
+    expect([v.toBase58(), vb]).toEqual([g.pdas.vault.address, g.pdas.vault.bump]);
+    const jobId = Buffer.from(g.inputs.jobId, "hex");
+    const [e, eb] = m.escrowPda(v, jobId, pid, PublicKey);
+    expect([e.toBase58(), eb]).toEqual([g.pdas.escrow.address, g.pdas.escrow.bump]);
+    // The per-seed cap is why a job id must be 32 bytes; a longer one cannot derive
+    // at all, so the harness refuses rather than sending something unpayable.
+    expect(() => m.escrowPda(v, Buffer.alloc(31), pid, PublicKey)).toThrow("JOB_ID_NOT_32_BYTES");
+  });
+
+  it("a derived refund route is never the absence of a commitment", async () => {
+    // PRD §15.5: the program refuses an all-zero `refund_route_hash` because that is
+    // what "no route was committed" looks like. So a derivation that could produce
+    // zero would produce a job that cannot be recovered and, worse, look like one
+    // that was never committed.
+    const m = await import("@/scripts/mitra-program.mjs");
+    for (const route of ["", "x", "refund to the client's own vault headroom", "0".repeat(64)]) {
+      expect(m.routeHashFor(route).toString("hex")).not.toBe("0".repeat(64));
+      expect(m.routeHashFor(route).length).toBe(32);
+    }
+    expect(m.routeHashFor("x").toString("hex")).toBe(m.routeHashFor("x").toString("hex"));
+    // Domain-separated from a bare sha256 of the same text.
+    expect(m.routeHashFor("x").toString("hex"))
+      .not.toBe(createHash("sha256").update("x", "utf8").digest("hex"));
+  });
+
+  it("the .mjs and TypeScript route-hash derivations agree", async () => {
+    // A third copy of one derivation is three chances to drift, and a drift here is
+    // silent: each side would produce a valid 32-byte commitment that the other
+    // does not recognise. PRD §15.5's whole guarantee is that the hash names a route
+    // somebody agreed to, so the two derivations must be one derivation.
+    const m = await import("@/scripts/mitra-program.mjs");
+    const ts = await import("@/lib/solana/vault-program");
+    for (const route of ["", "x", "refund to the client's own vault headroom", "0".repeat(64)]) {
+      expect(m.routeHashFor(route).toString("hex"), `route ${JSON.stringify(route)}`)
+        .toBe(ts.routeHashFor(route).toString("hex"));
+    }
+  });
 
   it("no program keypairs are tracked (a program key is upgrade authority)", () => {
     // A Solana *program* keypair is not a wallet key: whoever holds it can

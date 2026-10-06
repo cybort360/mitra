@@ -12,7 +12,8 @@
 //! what makes the eventual Anchor migration a wrapper rather than a rewrite.
 
 use crate::anchor_parity::{
-    authorization_discriminator, err, mandate_discriminator, VAULT_DISCRIMINATOR,
+    authorization_discriminator, err, job_escrow_discriminator, mandate_discriminator,
+    VAULT_DISCRIMINATOR,
 };
 use solana_program::{entrypoint::ProgramResult, program_error::ProgramError, pubkey::Pubkey};
 
@@ -63,6 +64,38 @@ impl Vault {
     /// capital alone.
     pub fn is_frozen(&self) -> bool {
         self.frozen > 0
+    }
+
+    /// The capital the vault's **own lamports** must account for: everything except
+    /// what is sitting in an escrow PDA.
+    ///
+    /// ## Why this exists, and what it cost to find out
+    ///
+    /// The vault's lamports are checked against its capital on every
+    /// `reserve`/`release` (see `check_no_surplus_lamports`), and that check was
+    /// written when every lamport of `total` was in the vault account. Adding the
+    /// job escrow broke the assumption: `lock_escrow` moves lamports *out* to the
+    /// escrow PDA while `total` deliberately does not change, so a vault with one
+    /// outstanding job reports `lamports == total - escrowed + rent` and the check
+    /// — written as `total + rent` — fails.
+    ///
+    /// The consequence was not a wrong number in a report. It was that **a single
+    /// outstanding escrow disabled `reserve` and `release` for the entire vault**:
+    /// every reservation returned `UNEXPECTED_LAMPORTS` (6003). Found on devnet
+    /// (F70), where `total - escrowed + rent` reconciled to the lamported balance
+    /// to the lamport — which is what identified the fix as exact rather than
+    /// approximate. An in-process suite could not have found it: nothing in the
+    /// escrow tests runs `reserve` against a vault that has an outstanding escrow.
+    ///
+    /// Subtracting `escrowed` is not a weakening. `escrowed` is written only by
+    /// the three escrow transitions, each of which moves exactly the lamports it
+    /// accounts for, and the account is a program-owned PDA whose data nothing
+    /// else can alter. So `total - escrowed` is still precisely the capital the
+    /// vault holds, and any lamport above or below it is still an unaccounted
+    /// injection or a drain.
+    pub fn held(&self) -> u64 {
+        self.total.checked_sub(self.escrowed)
+            .expect("a reconciling vault never has more escrowed than total")
     }
 
     /// The reconciliation invariant that replaces a state machine.
@@ -156,6 +189,78 @@ impl Vault {
         self.available = self.available.checked_sub(amount)
             .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
         self.total = self.total.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.reconcile()
+    }
+
+    /// Moves `amount` from `available` to `escrowed` — capital committed to one
+    /// named job, held in its own escrow account.
+    ///
+    /// **Refused while frozen**, like `reserve`: this attaches capital to a *new*
+    /// obligation, which is exactly what a freeze exists to stop.
+    ///
+    /// The lamports themselves leave for the escrow PDA, so unlike `reserve` the
+    /// capital is no longer reachable through the vault at all. That is the
+    /// difference between earmarking and escrowing, and it is why `total` is
+    /// unchanged here: the money is still Mitra's, just not the vault's.
+    pub fn lock_to_escrow(&mut self, amount: u64) -> ProgramResult {
+        if self.is_frozen() {
+            return Err(err::custom(err::VAULT_FROZEN));
+        }
+        if amount == 0 {
+            return Err(ProgramError::InvalidArgument);
+        }
+        if amount > self.available {
+            return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
+        }
+        self.available = self.available.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.escrowed = self.escrowed.checked_add(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.reconcile()
+    }
+
+    /// Moves `amount` out of `escrowed` **and out of the vault** — the provider is
+    /// paid. This is `withdraw` for one job.
+    ///
+    /// **Refused while frozen**, for the reason `withdraw` is: value leaving the
+    /// vault is what the freeze exists to prevent, and permitting it here would
+    /// make the freeze advisory for the one payment most likely to be illegitimate
+    /// during an incident.
+    pub fn pay_escrow(&mut self, amount: u64) -> ProgramResult {
+        if self.is_frozen() {
+            return Err(err::custom(err::VAULT_FROZEN));
+        }
+        if amount == 0 {
+            return Err(ProgramError::InvalidArgument);
+        }
+        if amount > self.escrowed {
+            return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
+        }
+        self.escrowed = self.escrowed.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.total = self.total.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.reconcile()
+    }
+
+    /// Moves `amount` from `escrowed` back to `available` — a refund. The capital
+    /// never left Mitra, and returns to the client's own headroom.
+    ///
+    /// **Permitted while frozen**, like `release`. This is the autonomous recovery
+    /// path: it is exercised precisely when something has gone wrong, and a freeze
+    /// that could block it would turn an emergency stop into a permanent trap for
+    /// the client's own capital.
+    pub fn return_escrow(&mut self, amount: u64) -> ProgramResult {
+        if amount == 0 {
+            return Err(ProgramError::InvalidArgument);
+        }
+        if amount > self.escrowed {
+            return Err(err::custom(err::INSUFFICIENT_AVAILABLE));
+        }
+        self.escrowed = self.escrowed.checked_sub(amount)
+            .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
+        self.available = self.available.checked_add(amount)
             .ok_or_else(|| err::custom(err::ARITHMETIC_OVERFLOW))?;
         self.reconcile()
     }
@@ -549,5 +654,216 @@ impl Authorization {
             return Err(err::custom(err::MANDATE_EXPIRED));
         }
         Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JobEscrow: one job's capital, held apart, with a pre-committed way back.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The EVM escrow (`MitraJobEscrow.sol`, LP-2) exists because ERC-8183 needs a
+// job's tokens to sit somewhere the provider cannot reach and the client cannot
+// spend twice. Solana's vault had `reserve`/`release`, which is *earmarking*: the
+// lamports never move, so a provider who went silent held nothing back and a
+// client who wanted its own money back had to ask. This type is the on-chain
+// form of the ERC-8183 job on this rail, and it has one property `reserve` can
+// never have: the money is genuinely in another account, so it is genuinely
+// unavailable to anyone but the two parties and a timeout.
+//
+// Two rules are structural rather than advisory, and both are enforced at the
+// type level so they cannot be forgotten at a call site:
+//
+//   1. **The refund route is committed at lock time.** PRD §15.5 — "a
+//      compensation route must be committed before execution when possible;
+//      never let the recovery engine invent arbitrary compensation calldata
+//      after failure". `refund_route_hash` is the hash of that route. It is set
+//      once and [`JobEscrow::has_commitment`] is the only thing a refund is
+//      allowed to consult, so there is no code path that could pay out against a
+//      route nobody agreed to.
+//
+//   2. **Settlement is terminal and one-shot.** `completed` and `refunded` are
+//      distinct flags rather than an enum, so a corrupted byte can never make a
+//      released job readable as refundable — but they are checked *together*
+//      (see [`JobEscrow::is_settled`]), so neither can be set after the other.
+
+/// Byte length of a serialized JobEscrow.
+///
+/// 8 discriminator + 32 job_id + 32 client + 32 provider + 8 amount +
+/// 8 timeout + 1 completed + 1 refunded + 32 refund_route_hash = 154.
+pub const ESCROW_LEN: usize = 154;
+
+/// Byte offsets, named for the same reason the Mandate's are: the arithmetic
+/// happens to work out, and that coincidence is exactly what a future field
+/// insertion would break silently.
+mod off {
+    pub const JOB_ID: usize = 8;
+    pub const CLIENT: usize = 40;
+    pub const PROVIDER: usize = 72;
+    pub const AMOUNT: usize = 104;
+    pub const TIMEOUT: usize = 112;
+    pub const COMPLETED: usize = 120;
+    pub const REFUNDED: usize = 121;
+    pub const ROUTE: usize = 122;
+}
+
+/// One job's escrowed capital, and the terms on which it may leave.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JobEscrow {
+    /// PRD §13 job identifier, hashed to 32 bytes. Recorded rather than implied
+    /// so that the account is self-describing: evidence about a job should not
+    /// require re-deriving it against a live node, which is the same rule the
+    /// Vault's stored bump follows.
+    pub job_id: [u8; 32],
+    /// The vault authority whose capital this is. Also the only account whose
+    /// signature releases it.
+    pub client: Pubkey,
+    /// The only account the released capital can be paid to. Stored, never
+    /// supplied by the caller — the F51 lesson, applied to a payee that did not
+    /// exist when F51 was written.
+    pub provider: Pubkey,
+    /// Lamports held by this escrow. Read from the account, never from an
+    /// instruction argument, so a caller cannot name the sum it wants paid.
+    pub amount: u64,
+    /// Unix seconds after which anyone may trigger a refund. `>=` is the refund
+    /// boundary, matching the EVM's `block.timestamp >= j.timeout`.
+    pub timeout: u64,
+    pub completed: bool,
+    pub refunded: bool,
+    /// PRD §15.5 — the compensation route, hash-committed at funding time. Never
+    /// synthesized after the failure. All-zero means no commitment was made, and
+    /// a refund against it is refused.
+    pub refund_route_hash: [u8; 32],
+}
+
+impl JobEscrow {
+    pub fn new(
+        job_id: [u8; 32],
+        client: Pubkey,
+        provider: Pubkey,
+        amount: u64,
+        timeout: u64,
+        refund_route_hash: [u8; 32],
+    ) -> Self {
+        Self {
+            job_id,
+            client,
+            provider,
+            amount,
+            timeout,
+            completed: false,
+            refunded: false,
+            refund_route_hash,
+        }
+    }
+
+    /// True when a compensation route was committed.
+    ///
+    /// An all-zero hash is the absence of one, not a hash: `bytes32(0)` is what
+    /// `MitraJobEscrow.sol` refuses at funding time for exactly this reason.
+    pub fn has_commitment(&self) -> bool {
+        self.refund_route_hash != [0u8; 32]
+    }
+
+    /// Terminal, in either direction.
+    ///
+    /// Both flags, deliberately: an escrow that has been paid and an escrow that
+    /// has been refunded are equally dead, and checking only the flag relevant to
+    /// the instruction being run would let a released job be refunded afterwards.
+    pub fn is_settled(&self) -> bool {
+        self.completed || self.refunded
+    }
+
+    /// The client paid, or released early to take the money back. Either way the
+    /// job is over and `amount` is the sum that moves.
+    pub fn mark_completed(&mut self) -> ProgramResult {
+        if self.is_settled() {
+            return Err(err::custom(err::ESCROW_ALREADY_SETTLED));
+        }
+        self.completed = true;
+        Ok(())
+    }
+
+    pub fn mark_refunded(&mut self) -> ProgramResult {
+        if self.is_settled() {
+            return Err(err::custom(err::ESCROW_ALREADY_SETTLED));
+        }
+        self.refunded = true;
+        Ok(())
+    }
+
+    /// Does the vault's freeze permit a refund at `now`?
+    ///
+    /// Not a property of this type — a refund is autonomous, and the caller may
+    /// be a keeper who is not the client. Stated as a method so the two
+    /// conditions are read together in one place: a refund needs the route
+    /// committed, and it needs *either* the deadline passed *or* the client's own
+    /// rejection.
+    pub fn refundable_at(&self, now: u64, caller_is_client: bool) -> Result<(), ProgramError> {
+        if !self.has_commitment() {
+            return Err(err::custom(err::NO_COMMITMENT));
+        }
+        if !caller_is_client && now < self.timeout {
+            return Err(err::custom(err::BEFORE_TIMEOUT));
+        }
+        Ok(())
+    }
+
+    pub fn to_bytes(&self) -> [u8; ESCROW_LEN] {
+        let mut out = [0u8; ESCROW_LEN];
+        out[0..8].copy_from_slice(&job_escrow_discriminator());
+        out[off::JOB_ID..off::JOB_ID + 32].copy_from_slice(&self.job_id);
+        out[off::CLIENT..off::CLIENT + 32].copy_from_slice(self.client.as_ref());
+        out[off::PROVIDER..off::PROVIDER + 32].copy_from_slice(self.provider.as_ref());
+        out[off::AMOUNT..off::AMOUNT + 8].copy_from_slice(&self.amount.to_le_bytes());
+        out[off::TIMEOUT..off::TIMEOUT + 8].copy_from_slice(&self.timeout.to_le_bytes());
+        out[off::COMPLETED] = u8::from(self.completed);
+        out[off::REFUNDED] = u8::from(self.refunded);
+        out[off::ROUTE..off::ROUTE + 32].copy_from_slice(&self.refund_route_hash);
+        out
+    }
+
+    /// Load an escrow, verifying the discriminator.
+    ///
+    /// A zero amount is refused here rather than at each call site: it is what an
+    /// *initialized but never funded* account looks like, and every instruction
+    /// that reads one would otherwise have to invent its own answer. The refusal
+    /// is `ESCROW_NOT_FUNDED` rather than a decode error because "you named the
+    /// wrong account" and "this job was never funded" send an operator to
+    /// completely different places.
+    pub fn try_from_bytes(data: &[u8]) -> Result<Self, ProgramError> {
+        if data.len() != ESCROW_LEN {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        if data[0..8] != job_escrow_discriminator() {
+            return Err(err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH));
+        }
+        let read_u64 = |from: usize| {
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&data[from..from + 8]);
+            u64::from_le_bytes(b)
+        };
+        let mut job_id = [0u8; 32];
+        job_id.copy_from_slice(&data[off::JOB_ID..off::JOB_ID + 32]);
+        let mut refund_route_hash = [0u8; 32];
+        refund_route_hash.copy_from_slice(&data[off::ROUTE..off::ROUTE + 32]);
+        let escrow = Self {
+            job_id,
+            client: Pubkey::try_from(&data[off::CLIENT..off::PROVIDER])
+                .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
+            provider: Pubkey::try_from(&data[off::PROVIDER..off::AMOUNT])
+                .map_err(|_| err::custom(err::ACCOUNT_DISCRIMINATOR_MISMATCH))?,
+            amount: read_u64(off::AMOUNT),
+            timeout: read_u64(off::TIMEOUT),
+            // `!= 0` in both directions, matching `Authorization::consumed`: any
+            // stray non-zero byte in a flag must read as *set*, because the safe
+            // direction to be wrong about a settlement flag is "already done".
+            completed: data[off::COMPLETED] != 0,
+            refunded: data[off::REFUNDED] != 0,
+            refund_route_hash,
+        };
+        if escrow.amount == 0 {
+            return Err(err::custom(err::ESCROW_NOT_FUNDED));
+        }
+        Ok(escrow)
     }
 }

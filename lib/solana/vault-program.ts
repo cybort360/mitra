@@ -22,6 +22,7 @@
  * because the vault, the amount and the payee are all read from chain state.
  */
 
+import { createHash } from "node:crypto";
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { sha256, toBytes } from "viem";
 
@@ -37,12 +38,16 @@ export const IX = {
   authorize: anchorDisc("global:authorize"),
   spendAuthorized: anchorDisc("global:spend_authorized"),
   amendMandate: anchorDisc("global:amend_mandate"),
+  lockEscrow: anchorDisc("global:lock_escrow"),
+  releaseEscrow: anchorDisc("global:release_escrow"),
+  refundEscrow: anchorDisc("global:refund_escrow"),
 } as const;
 
 export const ACCOUNT = {
   vault: anchorDisc("account:Vault"),
   mandate: anchorDisc("account:Mandate"),
   authorization: anchorDisc("account:Authorization"),
+  jobEscrow: anchorDisc("account:JobEscrow"),
 } as const;
 
 export const VAULT_LEN = 105;
@@ -50,6 +55,7 @@ export const MANDATE_LEN = 138;
 export const MANDATE_LEN_PRE_BINDING = 97;
 export const MANDATE_LEN_PRE_REVOCATION = 96;
 export const AUTHORIZATION_LEN = 130;
+export const ESCROW_LEN = 154;
 
 /** Program error codes the client needs to recognise (anchor_parity::err). */
 export const VAULT_ERRORS = {
@@ -67,6 +73,11 @@ export const VAULT_ERRORS = {
   6016: "RECIPIENT_MISMATCH",
   6017: "VAULT_MISMATCH",
   6018: "MANDATE_UNBOUND",
+  6019: "NO_COMMITMENT",
+  6020: "BEFORE_TIMEOUT",
+  6021: "ESCROW_ALREADY_SETTLED",
+  6022: "ESCROW_NOT_FUNDED",
+  6023: "INVALID_TIMEOUT",
 } as const;
 
 // ── PDAs ────────────────────────────────────────────────────────────────────
@@ -86,6 +97,22 @@ export const mandatePda = (principal: PublicKey, holder: PublicKey, programId = 
 export const authorizationPda = (mandate: PublicKey, action: Uint8Array, programId = VAULT_PROGRAM_ID) => {
   if (action.length !== 32) throw new Error("ACTION_HASH_NOT_32_BYTES");
   return PublicKey.findProgramAddressSync([Buffer.from("authorization"), mandate.toBuffer(), Buffer.from(action)], programId);
+};
+
+/**
+ * `[b"escrow", vault, job_id]` — the job id is part of the derivation, so one
+ * vault's outstanding jobs never alias and re-funding a live job finds an account
+ * that already exists.
+ *
+ * `jobId` must be 32 bytes: the seed is at the runtime's 32-byte per-seed cap, so
+ * a longer identifier cannot derive at all. Callers holding a URN
+ * (`virtuals-acp:...`) must narrow it first, exactly as the EVM rail's `bytes32
+ * jobId` does — and `jobIdFor` is the one narrowing both rails share, so two
+ * spellings of the same job cannot become two escrows.
+ */
+export const escrowPda = (vault: PublicKey, jobId: Uint8Array, programId = VAULT_PROGRAM_ID) => {
+  if (jobId.length !== 32) throw new Error("JOB_ID_NOT_32_BYTES");
+  return PublicKey.findProgramAddressSync([Buffer.from("escrow"), vault.toBuffer(), Buffer.from(jobId)], programId);
 };
 
 // ── encoding helpers ────────────────────────────────────────────────────────
@@ -212,6 +239,94 @@ export function amendMandateIx(
   });
 }
 
+/**
+ * `lockEscrowIx` — the client commits capital to one job.
+ *
+ * `[client (signer, payer), provider, vault, escrow, system_program, program]`,
+ * args `[32 job_id][32 provider][u64 amount][u64 timeout][32 refund_route_hash][u8 bump]`.
+ *
+ * `refundRouteHash` is PRD §15.5's pre-committed compensation route. The program
+ * refuses an all-zero hash, so a caller that has not decided how this job would be
+ * recovered cannot fund it — the guard is on chain rather than in a reviewer's
+ * memory, and `routeHashFor` is the single place that derives it.
+ */
+export function lockEscrowIx(
+  input: { client: PublicKey; provider: PublicKey; jobId: Uint8Array; amount: bigint; timeout: bigint; refundRouteHash: Uint8Array },
+  programId = VAULT_PROGRAM_ID,
+): TransactionInstruction {
+  if (input.refundRouteHash.length !== 32) throw new Error("REFUND_ROUTE_NOT_32_BYTES");
+  const [vault] = vaultPda(input.client, programId);
+  const [escrow, bump] = escrowPda(vault, input.jobId, programId);
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      meta(input.client, true, true),
+      meta(input.provider, false, false),
+      meta(vault, false, true),
+      meta(escrow, false, true),
+      meta(SystemProgram.programId, false, false),
+      meta(programId, false, false),
+    ],
+    data: Buffer.concat([
+      IX.lockEscrow, Buffer.from(input.jobId), input.provider.toBuffer(), u64(input.amount),
+      u64(input.timeout), Buffer.from(input.refundRouteHash), Buffer.from([bump]),
+    ]),
+  });
+}
+
+/**
+ * `releaseEscrowIx` — the client pays the provider.
+ *
+ * `[client (signer), vault, escrow, provider]`, arg `[32 job_id]`.
+ *
+ * **There is no amount and no payee argument.** The provider is a positional
+ * account only because Solana requires every account a transaction touches to be in
+ * the message, and the program refuses it unless it is the key the escrow recorded
+ * at funding — the same recipient guard `spendAuthorizedIx` relies on, and for the
+ * same reason: on an instruction this permissive, a caller-chosen payee is a
+ * redemption to whoever submitted it. So the caller must *know* the provider, and
+ * naming the wrong one fails at the program rather than paying the wrong party.
+ * The amount is never the caller's to choose; it is the escrow's.
+ */
+export function releaseEscrowIx(
+  input: { client: PublicKey; jobId: Uint8Array; provider: PublicKey },
+  programId = VAULT_PROGRAM_ID,
+): TransactionInstruction {
+  const [vault] = vaultPda(input.client, programId);
+  const [escrow] = escrowPda(vault, input.jobId, programId);
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      meta(input.client, true, true),
+      meta(vault, false, true),
+      meta(escrow, false, true),
+      meta(input.provider, false, true),
+    ],
+    data: Buffer.concat([IX.releaseEscrow, Buffer.from(input.jobId)]),
+  });
+}
+
+/**
+ * `refundEscrowIx` — the autonomous recovery path.
+ *
+ * `[caller (signer), vault, escrow]`, arg `[32 job_id]`. No vault authority is
+ * required, and none is accepted: after the job's timeout **anyone** may return
+ * the capital, which is the property `releaseEscrowIx` cannot offer. `caller` is
+ * whatever pays the fee — a keeper, a monitor, or the provider.
+ */
+export function refundEscrowIx(
+  input: { caller: PublicKey; escrowClient: PublicKey; jobId: Uint8Array },
+  programId = VAULT_PROGRAM_ID,
+): TransactionInstruction {
+  const [vault] = vaultPda(input.escrowClient, programId);
+  const [escrow] = escrowPda(vault, input.jobId, programId);
+  return new TransactionInstruction({
+    programId,
+    keys: [meta(input.caller, true, false), meta(vault, false, true), meta(escrow, false, true)],
+    data: Buffer.concat([IX.refundEscrow, Buffer.from(input.jobId)]),
+  });
+}
+
 // ── accounts ────────────────────────────────────────────────────────────────
 
 export interface VaultAccount {
@@ -296,3 +411,73 @@ export function decodeAuthorization(data: Buffer): AuthorizationAccount {
     recipient: readKey(data, 98),
   };
 }
+
+export interface JobEscrowAccount {
+  jobId: Buffer;
+  client: PublicKey;
+  provider: PublicKey;
+  amount: bigint;
+  timeout: bigint;
+  completed: boolean;
+  refunded: boolean;
+  /** PRD §15.5 — the pre-committed compensation route. All-zero means none. */
+  refundRouteHash: Buffer;
+}
+
+/**
+ * The job escrow. 154 bytes only, and the discriminator is checked — a PDA can
+ * hold any bytes, so without it an attacker could point this at an account they
+ * control and have it read as a funded job.
+ */
+export function decodeJobEscrow(data: Buffer): JobEscrowAccount {
+  if (data.length !== ESCROW_LEN || !data.subarray(0, 8).equals(ACCOUNT.jobEscrow)) {
+    throw new Error("NOT_A_JOB_ESCROW_ACCOUNT");
+  }
+  const amount = readU64(data, 104);
+  if (amount === 0n) throw new Error("NOT_A_JOB_ESCROW_ACCOUNT");
+  return {
+    jobId: Buffer.from(data.subarray(8, 40)),
+    client: readKey(data, 40),
+    provider: readKey(data, 72),
+    amount,
+    timeout: readU64(data, 112),
+    // `!== 0` in both directions: a corrupt flag must read as settled.
+    completed: data[120] !== 0,
+    refunded: data[121] !== 0,
+    refundRouteHash: Buffer.from(data.subarray(122, 154)),
+  };
+}
+
+/** True when a compensation route was committed. */
+export function hasRefundCommitment(escrow: JobEscrowAccount): boolean {
+  return escrow.refundRouteHash.some((b) => b !== 0);
+}
+
+/** Settled in either direction: a released job can never also be refunded. */
+export function isEscrowSettled(escrow: JobEscrowAccount): boolean {
+  return escrow.completed || escrow.refunded;
+}
+
+/**
+ * The 32-byte job id both rails use.
+ *
+ * The on-chain seed is at the runtime's per-seed cap, so a job's identifier has to
+ * narrow to 32 bytes somehow — and where that narrowing happens decides whether
+ * two spellings of the same job are the same job. It is sha256 of the canonical
+ * UTF-8 bytes here, matching `bytes32` job ids on the EVM side, so the same
+ * string produces the same escrow on both rails. Anything else (a raw address
+ * bytes32, say) would let one job occupy two escrows and be paid from either.
+ */
+export const jobIdFor = (jobId: string): Buffer =>
+  createHash("sha256").update(jobId, "utf8").digest();
+
+/**
+ * The hash of a job's compensation route (PRD §15.5).
+ *
+ * The client does not decide what the route *is* — that is a commercial term
+ * agreed between the parties. This only commits to a description of it, so an
+ * on-chain refund can name what was promised without the program ever being able
+ * to execute arbitrary calldata on the strength of a hash it cannot read.
+ */
+export const routeHashFor = (route: string): Buffer =>
+  createHash("sha256").update(`mitra-recovery-route-v1:${route}`, "utf8").digest();
