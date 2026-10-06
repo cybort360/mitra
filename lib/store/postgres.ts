@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import { transition } from "@/lib/kernel/machines";
 import type {
   Agent, ClearingEpoch,
-  Agreement, Authorization, Deliverable, EvidenceRecord, Integration, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
+  Agreement, Authorization, Deliverable, EvidenceRecord, Integration, Intent, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import { evidence, integrations } from "@/lib/store/seed";
@@ -208,6 +208,36 @@ export class PostgresRepository implements EconomicRepository {
    * The Postgres backend label on /evidence therefore tells you the ROWS would be
    * durable if anything wrote them. It does NOT tell you any claim was re-verified.
    */
+  /**
+   * Intent persistence (LP-1). Upsert on intent_id so retries converge.
+   * The searchable fields are columns; everything else lives only in `data`.
+   */
+  async createIntent(intent: Intent): Promise<Intent> {
+    await this.pool.query(
+      `INSERT INTO mitra.intents (intent_id, principal, agent_id, data)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (intent_id) DO UPDATE
+         SET principal = $2, agent_id = $3, data = $4::jsonb`,
+      [intent.intentId, intent.principal, intent.initiatingAgentId, JSON.stringify(intent)],
+    );
+    return intent;
+  }
+
+  async getIntent(id: string): Promise<Intent | null> {
+    const { rows } = await this.pool.query("SELECT data FROM mitra.intents WHERE intent_id = $1", [id]);
+    return rows[0] ? (rows[0].data as Intent) : null;
+  }
+
+  async listIntents(filter: { principal?: string; agentId?: string } = {}): Promise<Intent[]> {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (filter.principal) { params.push(filter.principal); clauses.push(`principal = $${params.length}`); }
+    if (filter.agentId) { params.push(filter.agentId); clauses.push(`agent_id = $${params.length}`); }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const { rows } = await this.pool.query(`SELECT data FROM mitra.intents ${where} ORDER BY intent_id`, params);
+    return rows.map((r) => r.data as Intent);
+  }
+
   async listIntegrations(): Promise<Integration[]> {
     return integrations.map((i) => ({ ...i }));
   }

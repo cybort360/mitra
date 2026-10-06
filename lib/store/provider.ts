@@ -43,7 +43,7 @@
 // already enforced by the fact that only app/api routes import this module.
 import type { Pool } from "pg";
 import type {
-  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration, Intent, Mandate, Obligation, Receipt, Reservation, Run, RunEvent,
   Saga, Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import { linkAndSign, type ReceiptDraft, type ReceiptSigner } from "@/lib/kernel/receipts";
@@ -72,6 +72,7 @@ export class InMemoryRepository implements EconomicRepository {
   private readonly settlementsMap = new Map<string, Settlement>();
   /** Per run, oldest first. Appends are synchronous, so the chain cannot fork. */
   private readonly receiptsByRun = new Map<string, Receipt[]>();
+  private readonly intentsMap = new Map<string, Intent>();
 
   constructor(ledger: CapitalLedger = getLedger()) {
     this.ledger = ledger;
@@ -131,6 +132,25 @@ export class InMemoryRepository implements EconomicRepository {
    * served through the store but are NOT runtime state, and why a "postgres"
    * backend label says nothing about whether a claim was re-verified.
    */
+  async createIntent(intent: Intent): Promise<Intent> {
+    // Intent maps are module-scoped like the other in-memory state; clone on
+    // write so a caller holding the old object cannot mutate stored state.
+    this.intentsMap.set(intent.intentId, { ...intent });
+    return { ...intent };
+  }
+
+  async getIntent(id: string): Promise<Intent | null> {
+    const i = this.intentsMap.get(id);
+    return i ? { ...i } : null;
+  }
+
+  async listIntents(filter: { principal?: string; agentId?: string } = {}): Promise<Intent[]> {
+    return [...this.intentsMap.values()]
+      .filter((i) => (!filter.principal || i.principal === filter.principal))
+      .filter((i) => (!filter.agentId || i.initiatingAgentId === filter.agentId))
+      .map((i) => ({ ...i }));
+  }
+
   async listIntegrations(): Promise<Integration[]> {
     return integrations.map((i) => ({ ...i }));
   }

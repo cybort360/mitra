@@ -25,7 +25,7 @@
  * reporting which backend served the request so state is never ambiguous.
  */
 import type {
-  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
+  Agent, Agreement, Authorization, ClearingEpoch, Deliverable, EvidenceRecord, Integration, Intent, Mandate, Obligation, Receipt, Reservation, Run, RunEvent, Saga,
   Settlement, Space, Vault,
 } from "@/lib/domain/types";
 import type { ReceiptDraft, ReceiptSigner } from "@/lib/kernel/receipts";
@@ -136,6 +136,16 @@ export interface EconomicRepository {
    * here means the rows are durable, NOT that the claims were re-verified. Only
    * a chain read or an executed test re-verifies a claim.
    */
+  /**
+   * Intents (LP-1, Phase 5 prereq). What a principal asked an agent to do.
+   *
+   * `createIntent` upserts on intent_id so a retried create converges rather
+   * than failing on the primary key — same discipline as spaces.
+   */
+  createIntent?(intent: Intent): Promise<Intent>;
+  getIntent?(id: string): Promise<Intent | null>;
+  listIntents?(filter?: { principal?: string; agentId?: string }): Promise<Intent[]>;
+
   listIntegrations(): Promise<Integration[]>;
   listEvidenceRecords(): Promise<EvidenceRecord[]>;
 

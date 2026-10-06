@@ -137,6 +137,21 @@ export const MIGRATIONS: string[] = [
   -- shape (Money, participant and capability arrays) would otherwise be a dozen
   -- join tables for a boundary that is read whole every time — a Space is
   -- fetched to answer "is this participant admitted", never queried by field.
+  -- Intents (LP-1). A durable record of what a principal asked an agent to do.
+  -- The document JSONB is the whole Intent; intent_id/principal/agent_id are
+  -- promoted to columns ONLY because listIntents filters on them. Promoting any
+  -- more of the document into columns would create a second source of truth
+  -- that drifts the moment someone updates one copy and forgets the other.
+  CREATE TABLE IF NOT EXISTS mitra.intents (
+    intent_id   TEXT PRIMARY KEY,
+    principal   TEXT NOT NULL,
+    agent_id    TEXT NOT NULL,
+    data        JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS mitra_intents_principal ON mitra.intents (principal);
+  CREATE INDEX IF NOT EXISTS mitra_intents_agent ON mitra.intents (agent_id);
+
   CREATE TABLE IF NOT EXISTS mitra.spaces (
     space_id  TEXT PRIMARY KEY,
     owner     TEXT NOT NULL,
