@@ -25,6 +25,8 @@ import {
 } from "@/lib/kernel/recovery";
 import { canTransition } from "@/lib/kernel/machines";
 import { failureScenarios } from "@/lib/kernel/failure-lab";
+import type { Saga } from "@/lib/domain/types";
+import { routeCommitment } from "@/lib/domain/canonical";
 
 const steps = [
   { stepId: "s1", name: "Reserve capital", state: "PENDING" as const, attempts: 0 },
@@ -210,5 +212,95 @@ describe("the failure-lab scenarios are each reachable and each has a reason cod
     for (const [name, s] of Object.entries(failureScenarios)) {
       expect(s.reasonCode, name).toMatch(/^[A-Z_]+$/);
     }
+  });
+});
+
+/**
+ * F76 — a committed route ID was not a commitment.
+ *
+ * `Saga.compensationRoutes` held ids; `compensate()` read route BODIES from a
+ * caller-supplied `availableRoutes`. So the committed id could come back carrying
+ * entirely different instructions. §15.5 forbids the recovery engine running
+ * arbitrary calldata after a failure, and that is precisely what happened: the
+ * engine invented nothing and still executed what it was handed.
+ *
+ * The route is now hashed at declaration (`declareSaga`) and re-derived at
+ * compensation time, so the id and the body are one value.
+ */
+describe("F76 — the route commitment binds the id to the instructions", () => {
+  const REFUND_ROUTE = "escrow:refund";
+
+  function armed(): Saga {
+    const declared = declareSaga("saga_f76", "run_f76", "intent_f76", {
+      steps: [
+        { stepId: "execute", name: "do the work", state: "PENDING", attempts: 0 },
+        { stepId: "deliver", name: "deliver", state: "PENDING", attempts: 0 },
+      ],
+      compensationRoutes: [{ routeId: "r_refund", route: REFUND_ROUTE, action: "REFUND", maxAttempts: 1 }],
+      timeoutPolicy: "refund on expiry",
+    });
+    if (!declared.ok) throw new Error(declared.reason);
+    return declared.value;
+  }
+
+  function failing(): Saga {
+    const s = armed();
+    return { ...s, status: "COMPENSATING" as const, steps: s.steps.map((x) => ({ ...x, state: "FAILED" as const })) };
+  }
+
+  it("the committed route still compensates", () => {
+    const r = compensate(failing(), {
+      routeId: "r_refund",
+      outcome: "RECOVERED",
+      availableRoutes: [{ routeId: "r_refund", route: REFUND_ROUTE, action: "REFUND", maxAttempts: 1 }],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("the committed id carrying DIFFERENT instructions is refused", () => {
+    // Before F76 this returned ok: the id matched, so the engine ran a refund route
+    // that nobody committed to.
+    const redirected = compensate(failing(), {
+      routeId: "r_refund",
+      outcome: "RECOVERED",
+      availableRoutes: [{
+        routeId: "r_refund",
+        route: "evm:refundEscrow:baseSepolia:0xattacker:0xjob",
+        action: "REFUND",
+        maxAttempts: 1,
+      }],
+    });
+    expect(redirected.ok, "a substituted route body must not run").toBe(false);
+    if (!redirected.ok) expect(redirected.reason).toBe("COMPENSATION_ROUTE_REDIRECTED");
+  });
+
+  it("a maxAttempts bump alone is not a redirection", () => {
+    // The commitment is over the INSTRUCTIONS, not the retry budget: raising
+    // maxAttempts is the caller's business (F47 already counts attempts on the saga),
+    // and refusing it would break legitimate retries to fix the wrong reason.
+    const r = compensate(failing(), {
+      routeId: "r_refund",
+      outcome: "RECOVERED",
+      availableRoutes: [{ routeId: "r_refund", route: REFUND_ROUTE, action: "REFUND", maxAttempts: 3 }],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("a saga persisted before commitments existed cannot compensate at all", () => {
+    const legacy: Saga = { ...failing() };
+    delete legacy.routeCommitments;
+    const r = compensate(legacy, {
+      routeId: "r_refund",
+      outcome: "RECOVERED",
+      availableRoutes: [{ routeId: "r_refund", route: REFUND_ROUTE, action: "REFUND", maxAttempts: 1 }],
+    });
+    expect(r.ok, "an unverifiable commitment must refuse, not wave through").toBe(false);
+    if (!r.ok) expect(r.reason).toBe("COMPENSATION_ROUTE_NOT_COMMITTED");
+  });
+
+  it("the commitment is deterministic and 32 bytes", () => {
+    const a = routeCommitment(REFUND_ROUTE);
+    expect(routeCommitment(REFUND_ROUTE)).toBe(a);
+    expect(a).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });

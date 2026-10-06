@@ -356,6 +356,23 @@ export interface Agreement {
   deadline: string;
   acceptanceCriteria: string[];
   escrowRef?: string;
+  /**
+   * PRD §15.5's commitment for this agreement's on-chain escrow: `keccak256` of the
+   * refund route string, set once at `fund` and never changed.
+   *
+   * This is the SAME value the escrow account carries in `refundRouteHash` — the EVM
+   * `MitraJobEscrow.sol` `Job` and the Solana `JobEscrow` PDA both store it and both
+   * revert `NoCommitment` if it is zero. Keeping one value in two places is the
+   * point: the kernel refuses to run a route that does not hash to this, and the
+   * contract refuses an escrow that has no commitment to check. Neither check is
+   * useful if the two hold different numbers.
+   *
+   * Derived by the kernel from the refund route it builds, never supplied by the
+   * caller. A caller-supplied hash would let the commitment describe a route other
+   * than the one that actually gets compensated — the commitment would be real, and
+   * about nothing.
+   */
+  refundRouteHash?: string;
   failurePolicy: string;
   status: AgreementStatus;
   /**
@@ -464,6 +481,24 @@ export interface Saga {
    * caller's diligence, which is the only place it can actually be relied upon.
    */
   routeAttempts?: Record<string, number>;
+  /**
+   * The PRD §15.5 commitment for each route, keyed by `routeId`, recorded when the
+   * saga was DECLARED — i.e. before any step ran.
+   *
+   * This exists because `compensate()` receives route **bodies** from a
+   * caller-supplied array while the saga itself persisted only route **ids**. An
+   * id commits to nothing: the same id could arrive carrying different calldata and
+   * the engine would run it, which is §15.5's forbidden post-failure calldata by
+   * another name. Hashing the route at declaration binds the two, so the check at
+   * compensation time is "is this the route I committed to" rather than "did the
+   * caller use the right id".
+   *
+   * Set by `declareSaga` for every route, so it cannot be omitted by accident. A
+   * saga persisted before this field existed has none, and `compensate` refuses
+   * those rather than waving them through — an unverifiable commitment is not a
+   * commitment.
+   */
+  routeCommitments?: Record<string, string>;
   timeoutPolicy: string;
   status: SagaStatus;
   recoveredValue: number;

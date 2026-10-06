@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET, POST } from "@/app/api/v1/agreements/route";
 import { bindTestParties, prepareStore, signedTransition } from "./fixtures";
+import { routeCommitment } from "@/lib/domain/canonical";
 
 beforeEach(async () => {
   await prepareStore();
@@ -155,5 +156,60 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.error).toBe("AGREEMENT_NOT_FOUND");
+  });
+});
+
+/**
+ * PRD §15.5 through the HTTP surface.
+ *
+ * The commitment is derived in the kernel, so this checks the thing a caller
+ * actually depends on: that `fund` with an `onChainEscrow` hands back a non-zero
+ * 32-byte commitment, and that it is the value over the refund route actually
+ * committed. A `200` with `escrowRef` set and no commitment would mean the escrow
+ * could be opened with a zero hash and refused on chain — a funded-looking
+ * agreement whose capital is not actually escrowed.
+ */
+describe("§15.5 — funding an on-chain escrow commits its refund route", () => {
+  beforeEach(async () => { await bindTestParties(); });
+
+  const jobId = `0x${"9a".repeat(32)}`;
+
+  it("returns the commitment the escrow account must be opened with", async () => {
+    const open = await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify({
+        op: "open",
+        spaceId: "space_research_1",
+        draft: {
+          agreementId: "ag_escrow_1", runId: "run_p1", intentId: "intent_1",
+          client: "agent_buyer_07", provider: "agent_data_03", evaluator: "agent_eval_02",
+          price: { asset: "USDC", amount: 15 },
+          deadline: "2027-01-01T00:00:00Z",
+          acceptanceCriteria: ["d"], failurePolicy: "refund on expiry",
+          externalJobRefs: [],
+        },
+        proposal: { capability: "research", amount: { asset: "USDC", amount: 15 } },
+      }),
+    }));
+    expect(open.status).toBe(201);
+
+    const contractAddress = "0x6a731a654423d64afb9839742c3e48c6c54eea9c";
+    const fund = await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify(await signedTransition("agent_buyer_07", "OPEN", {
+        op: "fund",
+        agreementId: "ag_escrow_1",
+        onChainEscrow: { chain: "baseSepolia", contractAddress, jobId, timeout: 1893456000 },
+      })),
+    }));
+
+    expect(fund.status).toBe(200);
+    const body = await fund.json();
+    expect(body.data.agreement.status).toBe("FUNDED");
+    expect(body.data.agreement.escrowRef).toBe(jobId);
+    expect(body.data.agreement.refundRouteHash).toBe(
+      routeCommitment(`evm:refundEscrow:baseSepolia:${contractAddress}:${jobId}`),
+    );
+    expect(body.data.agreement.refundRouteHash).not.toBe(`0x${"0".repeat(64)}`);
   });
 });

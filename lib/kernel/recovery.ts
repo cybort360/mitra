@@ -33,6 +33,7 @@
 
 import type { Saga, SagaStep } from "@/lib/domain/types";
 import { canTransition, isTerminal, transition } from "@/lib/kernel/machines";
+import { routeCommitment } from "@/lib/domain/canonical";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; reason: string };
 const fail = <T>(reason: string): Result<T> => ({ ok: false, reason });
@@ -102,6 +103,12 @@ export function declareSaga(
     sagaId, runId, intentId,
     steps: declaration.steps.map((s) => ({ ...s })),
     compensationRoutes: declaration.compensationRoutes.map((r) => r.routeId),
+    // §15.5: the commitment is taken HERE, at declaration, which is the last moment
+    // before any step runs. Recording it at compensation time would be a formality —
+    // the route would be committed by the same act that executes it.
+    routeCommitments: Object.fromEntries(
+      declaration.compensationRoutes.map((r) => [r.routeId, routeCommitment(r.route)]),
+    ),
     timeoutPolicy: declaration.timeoutPolicy,
     status: "DECLARED" as const,
     recoveredValue: 0,
@@ -203,6 +210,21 @@ export function compensate(
   // read `route.maxAttempts` from `input.availableRoutes`, which the caller rebuilds
   // on every call, so a caller that passed the original routes could compensate
   // indefinitely and the limit meant nothing.
+  // §15.5, and the gap F76 closed: the saga persisted route IDS, so this check was
+  // "does the caller know an id I declared". That is not a commitment — a caller
+  // could return the committed id carrying different instructions (another contract,
+  // another job, another payee) and the engine would execute them. Hash the route it
+  // is actually about to run and compare against what was committed at declaration.
+  const committed = saga.routeCommitments?.[route.routeId];
+  if (!committed) {
+    // A saga with no commitment cannot be verified, and "cannot verify" must not mean
+    // "allow". Absent for any saga declared before this field existed.
+    return fail("COMPENSATION_ROUTE_NOT_COMMITTED");
+  }
+  if (routeCommitment(route.route) !== committed) {
+    return fail("COMPENSATION_ROUTE_REDIRECTED");
+  }
+
   const attemptsSoFar = saga.routeAttempts?.[input.routeId] ?? 0;
   if (attemptsSoFar >= route.maxAttempts) return fail("COMPENSATION_ROUTE_EXHAUSTED");
 

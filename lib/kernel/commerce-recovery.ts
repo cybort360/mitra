@@ -41,6 +41,7 @@ import {
   type CompensationRoute, type SagaDeclaration,
 } from "@/lib/kernel/recovery";
 import { applyAgreementOp, type AgreementOp } from "@/lib/kernel/commerce";
+import { routeCommitment } from "@/lib/domain/canonical";
 import { fail, pass, type Result } from "@/lib/kernel/commerce";
 
 /**
@@ -112,12 +113,20 @@ export async function applyAgreementOpWithSaga(
 
   // ── fund: declare and ARM the saga ────────────────────────────────────────
   if (op === "fund") {
+    // The refund route an on-chain escrow will use. Built HERE, at funding, from the
+    // same fields the escrow account will be opened with — which is what makes the
+    // commitment below mean something. The route names the chain, the contract and
+    // the job, so a commitment over it cannot be satisfied by a refund anywhere else.
+    const onChainRefundRoute = opts.onChainEscrow
+      ? `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`
+      : null;
+
     const compensationRoutes = opts.compensationRoutes ?? (
-      opts.onChainEscrow
+      onChainRefundRoute
         ? [{
-            routeId: `route_refund_${opts.onChainEscrow.jobId.slice(0, 10)}`,
+            routeId: `route_refund_${opts.onChainEscrow!.jobId.slice(0, 10)}`,
             action: "REFUND" as const,
-            route: `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`,
+            route: onChainRefundRoute,
             maxAttempts: 1,
           }]
         : [REFUND_ROUTE]
@@ -141,7 +150,15 @@ export async function applyAgreementOpWithSaga(
       agreement: {
         ...nextAgreement,
         sagaIds: [armed.sagaId],
-        ...(opts.onChainEscrow ? { escrowRef: opts.onChainEscrow.jobId } : {}),
+        ...(opts.onChainEscrow
+          ? {
+              escrowRef: opts.onChainEscrow.jobId,
+              // §15.5, committed at funding and carried on the agreement so the value
+              // handed to `depositToEscrow`/`lock_escrow` and the value the kernel
+              // verifies against are one number.
+              refundRouteHash: onChainRefundRoute ? routeCommitment(onChainRefundRoute) : undefined,
+            }
+          : {}),
       },
       saga: armed,
     });

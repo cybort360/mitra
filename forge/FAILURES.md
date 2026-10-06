@@ -3155,3 +3155,70 @@ documented here even though the script is not. **Until that closes, the evidence
 **RULE ADDED:** (23) a mirror must live next to its source. A hand-written mirror whose
 original is untracked is not a test of the original, and it cannot be repaired by
 anyone who finds it wrong.
+
+## F76 — a committed compensation route ID was not a commitment
+
+**Status:** fixed (2026-10-06). Route hash-committed at declaration and re-derived at compensation time.
+**Found:** 2026-10-06, LP-3 task 2, while wiring the agreement route's on-chain escrow per PRD §15.5.
+
+`Saga.compensationRoutes` is `string[]` — route **ids**. The route **bodies** live in
+`CompensationRoute.route`, and `compensate()` receives those from a caller-supplied
+`availableRoutes` array on every invocation (F47 fixed the attempt counter to stop
+depending on that array; the route content still did). So the check was:
+
+```ts
+const route = input.availableRoutes.find((r) => r.routeId === input.routeId);
+if (!route) return fail("COMPENSATION_ROUTE_NOT_COMMITTED");
+```
+
+Which asks "did the caller use an id I declared?" — not "is this the route I committed
+to". A caller could return the committed id carrying entirely different instructions:
+another contract, another job, another payee, and the engine would run it. The engine
+was not inventing calldata after a failure, so §15.5's sentence read as satisfied; it
+was faithfully executing what it had been handed. That is the same class of defect as
+F51 (caller-chosen payee) and F47 (caller-supplied budget) — a control that reads as an
+enforcement point and is actually a request.
+
+**Why the id was the only thing checked.** The id and the body were two unrelated values
+from the start. `declareSaga` kept the ids and discarded the routes, so at compensation
+time there was nothing on the saga to compare a route body against. No amount of checking
+inside `compensate` could have closed it; the commitment had to start being stored.
+
+**The fix.** `routeCommitment(route) = keccak256(route)` (`lib/domain/canonical.ts`),
+recorded per route at `declareSaga` — the last moment before any step runs — and
+re-derived from the route about to be compensated. A mismatch is
+`COMPENSATION_ROUTE_REDIRECTED`; a saga with no commitment at all is
+`COMPENSATION_ROUTE_NOT_COMMITTED`, because unverifiable is not verified.
+
+Three decisions inside that:
+
+- **keccak256, not the `sha256:` the rest of `canonical.ts` uses.** Those hashes name
+  Mitra objects and nothing reads them off a chain. This one must equal the
+  `refundRouteHash` the escrow account stores, because the contract's zero-check and
+  the kernel's redirect-check are two halves of one guarantee. Two digests over one
+  route would leave them agreeing about nothing.
+- **Commitment over the route string, excluding `maxAttempts`.** Raising the retry
+  budget is the caller's business and F47 already counts attempts on the saga; refusing
+  it here would break legitimate retries to fix an unrelated reason.
+- **Legacy sagas refuse.** A saga persisted before this field has no commitment, and
+  allowing it would mean the guarantee holds only for sagas created after this commit.
+
+**Where the value comes from now.** `applyAgreementOpWithSaga` builds the refund route
+from the same `chain`/`contractAddress`/`jobId` the escrow account is opened with, and
+derives the commitment from that — it is never accepted from the request. A
+caller-supplied `refundRouteHash` would be a real hash about a different route, which
+is worse than no commitment because it looks like one. The agreement carries it as
+`refundRouteHash`, so the number handed to `depositToEscrow`/`lock_escrow` and the
+number the kernel verifies are one value.
+
+**Evidence.** `tests/recovery.test.ts` +5: the substituted route is refused; the
+committed route still runs; a `maxAttempts` bump is not a redirection; a legacy saga
+cannot compensate; the commitment is deterministic and 32 bytes. `tests/commerce-saga.test.ts`
++5 and `tests/agreements-api.test.ts` +1 cover the commitment reaching the agreement and
+the HTTP response. **Mutation audit 3/3 killed** on `tests/recovery.test.ts`: removing
+the redirect check, removing the missing-commitment refusal, and computing the
+commitment at compensation time from the caller's route (2 failures) each turn it red.
+
+**Still open.** Nothing yet calls `depositToEscrow`/`lock_escrow` from the agreement
+route, so this makes the commitment correct but does not move capital — see
+`EXECUTION_PLAN.md` §4.

@@ -30,6 +30,7 @@
  * likely to regress silently.
  */
 import { createHash } from "node:crypto";
+import { keccak256, toHex } from "viem";
 
 export type Canonical = null | boolean | number | string | Canonical[] | { [k: string]: Canonical };
 
@@ -152,4 +153,36 @@ export function settlementReceiptHash(receipt: {
       .map((t) => ({ from: t.from, to: t.to, amount: t.amount }))
       .sort((a, b) => `${a.from}${a.to}${a.amount}`.localeCompare(`${b.from}${b.to}${b.amount}`)),
   });
+}
+
+/**
+ * The PRD §15.5 commitment for a compensation route: `keccak256` of the route string.
+ *
+ * ## Why keccak256 and not the `sha256:` used above
+ *
+ * The other hashes in this module are Mitra's own — they name Mitra objects and
+ * nothing reads them off a chain. This one has to be the **same value** the escrow
+ * contract stores in `refundRouteHash`, because that is the whole point of it: the
+ * kernel verifies the route it is about to run against a commitment recorded at
+ * funding time, and the contract refuses an escrow whose commitment is zero. Two
+ * different digests over the same route would make those two independent checks
+ * agree about nothing.
+ *
+ * ## Why the route is hashed at all
+ *
+ * `Saga.compensationRoutes` stores route **ids**, and `compensate()` takes the route
+ * bodies from a caller-supplied `availableRoutes` array. So a caller could hand back
+ * the committed id with entirely different instructions behind it — the same id
+ * pointing at a different contract, a different job, a different payee — and the
+ * engine would run it. §15.5 says *"never let the recovery engine invent arbitrary
+ * compensation calldata after failure"*; without this, the engine is not inventing
+ * any, it is faithfully executing what it was handed. Hashing the route at
+ * declaration makes the id and the body one value, so substituting the body breaks
+ * the check instead of satisfying it.
+ *
+ * The empty string hashes to a real non-zero digest, so callers must refuse an empty
+ * route themselves; `armSaga` already does (`r.route.length > 0`).
+ */
+export function routeCommitment(route: string): string {
+  return keccak256(toHex(route));
 }

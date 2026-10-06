@@ -16,6 +16,7 @@
  * commercial operation**, driven through `applyAgreementOpWithSaga` — the same entry
  * point production would use.
  */
+import { routeCommitment } from "@/lib/domain/canonical";
 import { describe, expect, it, beforeEach } from "vitest";
 import type { Money, Space } from "@/lib/domain/types";
 import { openAgreement } from "@/lib/kernel/commerce";
@@ -265,3 +266,70 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 });
 
+
+/**
+ * PRD §15.5 — the funding commitment reaches the agreement, and it is the kernel's.
+ */
+describe("§15.5 — the on-chain refund route is committed at funding", () => {
+  let repo: Awaited<ReturnType<typeof getStore>>["repo"];
+
+  beforeEach(async () => {
+    __resetLedgerForTests();
+    __resetStoreForTests();
+    ({ repo } = await getStore());
+  });
+
+  const jobId = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+  const onChainEscrow = {
+    chain: "baseSepolia",
+    contractAddress: "0x6a731a654423d64afb9839742c3e48c6c54eea9c",
+    jobId,
+    timeout: Math.floor(Date.now() / 1000) + 3600,
+  };
+
+  it("records a non-zero 32-byte commitment derived from the refund route", async () => {
+    const { agreement } = await opened();
+    const f = await drive(repo, space(), agreement, "fund", { onChainEscrow });
+    expect(f.agreement.refundRouteHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(f.agreement.refundRouteHash).not.toBe(`0x${"0".repeat(64)}`);
+    // The exact value the escrow account must be opened with.
+    expect(f.agreement.refundRouteHash).toBe(
+      routeCommitment(`evm:refundEscrow:${onChainEscrow.chain}:${onChainEscrow.contractAddress}:${jobId}`),
+    );
+  });
+
+  it("the commitment is the saga's route commitment, not a second opinion", async () => {
+    const { agreement } = await opened();
+    const f = await drive(repo, space(), agreement, "fund", { onChainEscrow });
+    const routeId = `route_refund_${jobId.slice(0, 10)}`;
+    expect(f.saga?.routeCommitments?.[routeId]).toBe(f.agreement.refundRouteHash);
+  });
+
+  it("a caller cannot supply its own commitment", async () => {
+    // `refundRouteHash` is derived, never taken from the request: a caller-supplied
+    // one would commit to a route other than the one compensated.
+    const { agreement } = await opened();
+    const f = await drive(repo, space(), agreement, "fund", {
+      onChainEscrow,
+      ...({ refundRouteHash: `0x${"ab".repeat(32)}` } as Record<string, unknown>),
+    });
+    expect(f.agreement.refundRouteHash).not.toBe(`0x${"ab".repeat(32)}`);
+  });
+
+  it("a different job id produces a different commitment", async () => {
+    const a = await opened();
+    const fa = await drive(repo, space(), a.agreement, "fund", { onChainEscrow });
+    const b = await opened();
+    const fb = await drive(repo, space(), b.agreement, "fund", {
+      onChainEscrow: { ...onChainEscrow, jobId: `0x${"cd".repeat(32)}` },
+    });
+    expect(fa.agreement.refundRouteHash).not.toBe(fb.agreement.refundRouteHash);
+  });
+
+  it("an agreement funded without an on-chain escrow has no commitment", async () => {
+    const { agreement } = await opened();
+    const f = await drive(repo, space(), agreement, "fund");
+    expect(f.agreement.refundRouteHash).toBeUndefined();
+    expect(f.agreement.escrowRef).toBeUndefined();
+  });
+});
