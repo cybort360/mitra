@@ -2882,3 +2882,34 @@ transitions) is on the surface and served. Added to the participation test's nee
 `tests/external-agent-e2e.test.ts` reaches EXECUTING only through it, and refuses the
 client's own signed attempt (`ACTOR_NOT_PERMITTED`). PRD §10.2 calls its list "initial"; the
 extra tool is recorded here, not in the PRD.
+
+## F67 — the Virtuals adapter mapped job states ACP never emits
+
+**Status:** open (superseded in practice, not removed). Purple, 2026-10-06.
+**Found:** 2026-10-06, building PP-2 against the ACP SDK and the live acpx API.
+
+`VirtualsMarketplaceAdapter.toAgreementStatus` maps `open`, `funded`, `running`, `submitted`,
+`completed`, `failed` and `canceled`. ACP's job phases are numeric: `REQUEST`, `NEGOTIATION`,
+`TRANSACTION`, `EVALUATION`, `COMPLETED`, `REJECTED` and `EXPIRED`
+(`AcpJobPhases`, `@virtuals-protocol/acp-node` 0.3.0-beta.40). So only the default branch
+(`null`) would ever run against the real marketplace, and the tests asserting the mapping
+tested vocabulary that was invented. The `VirtualsClient` interface it consumes
+(`listProviders`, `openJob`) is likewise not ACP's API.
+
+**Now:** `acpPhaseToAgreementStatus` maps the real phases. It splits ACP's `REJECTED`,
+which covers both a declined request and a rejected deliverable, by whether the job reached
+`EVALUATION`. The old class is left in place because AGENTS.md says not to remove working
+behaviour, and `tests/virtuals-delegation.test.ts` exercises it. **Next:** rebuild the
+class's transport over the acpx API with the PP-2 translators, then retire the invented map.
+
+## F68 — `Agreement.externalJobRefs` is typed as objects and stored as strings
+
+**Status:** open. Purple, 2026-10-06.
+
+`lib/domain/types.ts` declares `externalJobRefs: ExternalIdentityRef[]` (`{ system, id, url? }`).
+The open route's schema is `z.array(z.string())`, and the store keeps what the route passes.
+So every stored agreement holds strings under an object type, and code that reads `.system`
+gets `undefined`. Nothing reads it yet. PP-2 emits URN strings
+(`virtuals-acp:<chainId>:<contract>:offering:…`) because that is what the route accepts.
+**Fix:** decide one shape. Either the route accepts `ExternalIdentityRef` objects, or the type
+becomes `string[]` with the URN grammar documented. Then add a parity test.

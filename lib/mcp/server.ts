@@ -191,6 +191,9 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
         price: Money, deadline: z.string().min(1), acceptanceCriteria: z.array(z.string()).optional(),
         failurePolicy: z.string().optional(),
         payTo: z.object({ chain: z.enum(["solana", "base", "tempo"]), address: z.string().min(1) }).optional(),
+        // The marketplace's own identifiers (PRD §8.4: never discard the external
+        // job identity), e.g. the refs lib/adapters/virtuals.ts gigToAgreementDraft emits.
+        externalJobRefs: z.array(z.string().min(1)).optional(),
       }),
       proposal: z.object({ capability: z.string().min(1), amount: Money }),
     },

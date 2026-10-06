@@ -42,7 +42,7 @@
     "2_solana_kernel_and_vault": "live_demonstrated_devnet",
     "3_authority_and_confidential_policy": "live_demonstrated_spend_leg__arcium_circuit_compiles_unexecuted",
     "4_commerce": "tested__erc8183_projection_space_partial_10_contents",
-    "5_agent_ecosystem": "e2e_verified__external_agent_signed_loop_over_mcp_vs_running_mitra_local__blocked_internal_f65_no_virtuals",
+    "5_agent_ecosystem": "e2e_verified__external_agent_signed_loop_over_mcp_vs_running_mitra_local__blocked_internal_f65__virtuals_translation_tested_no_acp_transport",
     "6_recovery": "integrated__saga_persistence_layer_a_b_prd15_talos_absent",
     "7_clearing": "tested__epoch_write_path_and_adversarial_suites_no_live_epoch",
     "8_base": "tested__eip712_erc1271_erc4337_envelope_no_transport_no_bundler",

@@ -207,6 +207,20 @@ describe("served tools go through the real routes", () => {
     expect((await back.json()).data.status).toBe("OPEN");
   });
 
+  it("mitra_create_agreement keeps the marketplace's external job refs (PRD §8.4)", async () => {
+    const client = await connect();
+    const refs = ["virtuals-acp:84532:0x8Db6B1c839Fc8f6bd35777E194677B67b4D51928:offering:0x67768f90d188992AfE2FD8705d4855d454b22cB9:x", "virtuals-acp:quote:sha256:ab"];
+    const r = await client.callTool({ name: "mitra_create_agreement", arguments: {
+      spaceId: "space_research_1",
+      draft: { agreementId: "ag_mcp_refs", runId: "run_refs", intentId: "intent_refs", client: "agent_buyer_07", provider: "p", evaluator: "e",
+        price: { asset: "USDC", amount: 1 }, deadline: "2027-01-01T00:00:00Z", externalJobRefs: refs },
+      proposal: { capability: "research", amount: { asset: "USDC", amount: 1 } },
+    } });
+    expect(r.isError, JSON.stringify(r.content)).toBe(false);
+    const back = await agreements.GET(new Request("http://localhost/api/v1/agreements?agreementId=ag_mcp_refs"));
+    expect((await back.json()).data.externalJobRefs).toEqual(refs);
+  });
+
   it("an API refusal comes back as a tool error carrying the API's own reason", async () => {
     const client = await connect();
     const r = await client.callTool({
