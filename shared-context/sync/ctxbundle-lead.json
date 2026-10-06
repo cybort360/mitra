@@ -1,6 +1,6 @@
 {
-  "fromNodeId": "n_raxmnny0",
-  "highSeq": 103,
+  "fromNodeId": "lead",
+  "highSeq": 104,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2123,6 +2123,30 @@
         "e297112ebdf6cf91f632723db90f2df4da8352f58038e74b36def9d31209b329"
       ],
       "hash": "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
+    },
+    {
+      "entryId": "ctx_136e9e8b939acf94",
+      "seq": 104,
+      "kind": "decision",
+      "title": "LP-2 Wire (ERC8183Transport) & Multi-Chain Live Verification Landed (003ff74)",
+      "body": "LP-2 Follow-up completed and pushed in 003ff74. lib/adapters/erc8183-transport.ts implements ERC8183Transport (depositToEscrow, completeJob, refundJob, getJob) dynamically reading deployments.json without polluting pure erc8183 projection. tests/commerce-escrow-live.test.ts live verified 6/6 on both Base Sepolia (0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6) and Tempo Moderato (0x95ca2170d1021cb9b5ce6809066f094e00c0a583). Base Sepolia funded with 20 USDC; tests fixed for transaction receipt confirmation, dynamic nonced job IDs, and RPC load-balancer propagation sync (waitForStatus). Offline suite passes 19/19, typecheck 0 errors. Active queue next: LP-3 Tempo settlement parity & caller wiring.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "base",
+        "erc8183",
+        "escrow",
+        "handoff",
+        "live",
+        "tempo",
+        "transport"
+      ],
+      "authorId": "lead",
+      "createdAt": "2026-10-06T02:14:43.720Z",
+      "parents": [
+        "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
+      ],
+      "hash": "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
     }
   ],
   "actors": [
@@ -2160,5 +2184,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "b6d7ff1d37888ea9c0afba1897d7886dc4cdbc95197586b472f3787c1d898c7c"
+  "tipHash": "7514e8824864b2fb91cce39033d0b24b94abde5ebf28bae8094cb419b5954e7f"
 }
