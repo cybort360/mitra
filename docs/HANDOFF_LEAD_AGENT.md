@@ -24,11 +24,11 @@
    - `lib/adapters/erc8183-transport.ts`: `ERC8183Transport` with `depositToEscrow`, `completeJob`, `refundJob`, `getJob`. Clean separation preserving `erc8183.ts` pure offline projection.
    - `tests/commerce-escrow-live.test.ts`: Live gated suite (`JOB_ESCROW_LIVE=1`).
    - Verified on **Base Sepolia (84532)**:
-     - Complete: Funded `0x294ea38fca81c9dff3a3c40156d485b26fd2753d1c36ba9ca0cd73bc6acb8c07`, Settled `0x8ff9c6d03f2b50bb0d61ef05c5d13ca3940066fcf90c7b8cd50cc4101c1079c9`
-     - Refund: Funded, Refunded `0x5ae3a080470aeed0b9d546610e1f3bf2af2952f15f649844e69be75cf686a975`
+     - Complete: Funded `0x294ea38fca81c9dff3a3c40156d485b26fd2753d1c36ba9ca0cd73bc6acb8c07` (Block `47742052`), Settled `0x8ff9c6d03f2b50bb0d61ef05c5d13ca3940066fcf90c7b8cd50cc4101c1079c9` (Block `47742053`)
+     - Refund: Refunded `0x5ae3a080470aeed0b9d546610e1f3bf2af2952f15f649844e69be75cf686a975` (Block `47742056`)
    - Verified on **Tempo Moderato (42431)**:
-     - Complete: Funded `0x2ebe2afebcddcce59e47aaf3a63290949b79956907954f884a32e919f6904650`, Settled `0x22060610c9e22318d3ef66ecf3d2a19c4b099caf9538a7110fbe5dff3a8774dd`
-     - Refund: Funded, Refunded `0x324779cd52eb0919bad820627dc3f9f6ff1f5eb7ba012817fba240c8f790765f`
+     - Complete: Funded `0x2ebe2afebcddcce59e47aaf3a63290949b79956907954f884a32e919f6904650` (Block `38360077`), Settled `0x22060610c9e22318d3ef66ecf3d2a19c4b099caf9538a7110fbe5dff3a8774dd` (Block `38360078`)
+     - Refund: Refunded `0x324779cd52eb0919bad820627dc3f9f6ff1f5eb7ba012817fba240c8f790765f` (Block `38360095`)
    - Gates: 6/6 live tests passed, 19/19 offline tests passed, 0 typecheck errors.
 
 ---
