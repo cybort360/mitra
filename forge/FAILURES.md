@@ -3222,3 +3222,62 @@ commitment at compensation time from the caller's route (2 failures) each turn i
 **Still open.** Nothing yet calls `depositToEscrow`/`lock_escrow` from the agreement
 route, so this makes the commitment correct but does not move capital — see
 `EXECUTION_PLAN.md` §4.
+
+## F77 — the saga write and the agreement write are not atomic, stranding an ARMED saga
+
+**Status:** open (found 2026-10-06). Canary test in place; not fixed.
+**Found:** 2026-10-06, immediately after F76, while asking whether an irreversible chain call could safely live in the fund path.
+
+`applyAgreementOpWithSaga` persists the ARMED saga and **returns**
+(`lib/kernel/commerce-recovery.ts:147`). The route then persists the agreement
+(`app/api/v1/agreements/route.ts:310`). Two transactions, no enclosing one.
+
+If the route's write never lands — process dies, connection drops, constraint
+violation — the store keeps an ARMED saga that no agreement names. It is then
+unreachable *by construction*: every later op finds its saga through
+`agreement.sagaIds?.[0]` (`commerce-recovery.ts:167`), which is empty, so line 168
+returns early and recovery is never touched. The agreement itself is still `OPEN`,
+so `startExecution` is refused as an illegal transition. There is no operation that
+moves it, and no reconciliation that finds it.
+
+**Why this is worse than a generic torn write.** An ARMED saga is not inert. §15.5's
+guarantee is that a compensation route is committed *before* execution; a stranded
+ARMED saga is a committed route with no execution behind it, and F76's commitment
+hash is sitting on disk with nothing able to check or run it. The invariant the
+saga exists to provide — every multi-step workflow has a way back — is quietly false
+for that agreement, while every health check that reads "agreement has a sagaIds" or
+"saga is ARMED" reports success.
+
+**Root cause is a documented-design violation, not a missing transaction.**
+`EconomicRepository`'s own doc says the write path is the store-free kernel and that
+"keeping the kernel store-free is what lets the same lifecycle be exercised in a unit
+test". `lib/kernel/commerce.ts` honours that. `commerce-recovery.ts` does not: it
+calls `saveSaga`/`updateSaga` in three places, which is what splits the fund write
+in half. Adding a transaction would close this symptom while leaving the kernel
+writing, and the next write added to the kernel would reopen it.
+
+**Two candidate fixes, deliberately not chosen here.**
+
+1. *Make `commerce-recovery.ts` store-free* — return the sagas to persist and let the
+   routes write them alongside the agreement. Consistent with the interface's stated
+   design; touches 3 kernel writes, 2 routes and 2 test files.
+2. *Add `transaction(fn)` to the repository* and wrap each route's writes. Smaller
+   diff, but the kernel keeps writing and the trap stays armed. Also largely
+   untestable in this repository's dominant in-memory backend, which has no
+   transactions — the fix would be verified only by the Postgres suites.
+
+Option 1 is the better fix and the more expensive one. That trade is a call for the
+lead, not a detail to settle inside a bug fix.
+
+**Evidence.** `tests/torn-write-probe.test.ts` walks the tear end to end: saga
+persisted ARMED → route's agreement write never lands → `sagaIds` empty → `OPEN`
+agreement refuses `startExecution` → the ARMED saga is still ARMED with its F76
+commitment attached. Written as `it.fails` asserting the *invariant* ("a persisted
+ARMED saga is never left unreachable"), so the suite is green today and vitest reports
+a failure the moment someone makes the fund path atomic. A plain `it` asserting
+today's behaviour would have made the repair look like a regression.
+
+**Why this blocks the obvious next step.** Wiring `depositToEscrow`/`lock_escrow`
+into the fund path means an irreversible chain call in exactly this window. A strand
+that costs one unreachable saga would instead cost capital moved with no durable
+record of it. Fix F77 before any capital moves.
