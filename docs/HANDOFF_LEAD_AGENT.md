@@ -55,21 +55,23 @@
 
 ---
 
-#### 📦 Task 2: LP-3 — Tempo Settlement Parity & Caller Wiring (Phase 9) [ACTIVE NEXT]
-**Context:** `POST /api/v1/settlements` settles agreements on Base Sepolia, but Tempo settlement has only been exercised from adapter unit tests. It must be accessible through the common API route with full execution guard verification.
+#### 📦 Task 2: LP-3 — Tempo Settlement Parity & Caller Verification (Phase 9) [ACTIVE NEXT]
+**Context:** Survey confirmed that `POST /api/v1/settlements` and `lib/settlement/settle-agreement.ts` are already polymorphic (`rails[chain]`). `rails.tempo` is constructed at `lib/settlement/rails.ts:130` using `TempoSettlementAdapter` and `tempoCommitment`. Therefore, LP-3 does not require adapter plumbing—it requires proving the route works end-to-end and pinning it with a test suite.
 
 **Tasks:**
-1. **API Wiring & Caller Test (`tests/settlement-tempo-caller.test.ts`)**:
-   - Drive the full route: Create agreement with `payTo.chain = "tempo"` (asset `PathUSD`) $\rightarrow$ Fund $\rightarrow$ Submit $\rightarrow$ Accept.
-   - Call `POST /api/v1/settlements` with `{ agreementId }`.
+1. **Exploratory Probe**:
+   - Drive a single `payTo.chain = "tempo"` agreement (`PathUSD`) through `POST /api/v1/settlements` to observe live routing, fee behavior, and memo emission.
+2. **Caller Test (`tests/settlement-tempo-caller.test.ts`)**:
+   - Model after `tests/settlement-caller.test.ts` (Base path).
+   - Test full lifecycle: Create agreement (`payTo.chain = "tempo"`, asset `PathUSD`) $\rightarrow$ Fund $\rightarrow$ Submit deliverable $\rightarrow$ Accept deliverable $\rightarrow$ `POST /api/v1/settlements` with `{ agreementId }`.
    - Verify that:
-     1. The execution guard re-derives the digest and validates mandate headroom.
+     1. The execution guard independently re-derives the action digest and validates mandate headroom.
      2. The reservation nonce is consumed.
      3. Value settles through `TempoSettlementAdapter` or `MitraVault.sol` (`0x85409dfc...`).
      4. On-chain TIP-20 transfer emits with the agreement `actionHash` in the transaction memo.
-2. **Verify live on Tempo Moderato**:
+3. **Verify live on Tempo Moderato**:
    - Run under `TEMPO_LIVE=1` with `.dev-keys/evm-testnet.key`.
-   - Record block number and transaction hash in `forge/PROOF_LEDGER.md`.
+   - Record block number and un-truncated 66-character transaction hash in `forge/PROOF_LEDGER.md`.
 
 ---
 
