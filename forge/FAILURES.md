@@ -3653,3 +3653,80 @@ reported `MISMATCH` on a correctly-funded escrow. The probe's timeout was comput
 time and had moved by the wall-clock second between the lock and the probe. The guard was
 right; the test was wrong. A term comparison is only as good as the terms, and a timeout
 recomputed mid-test is two different terms.
+
+## F87 — the LP-7 fee ceiling was 100× too small
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-7, by the boundary test at the cap.
+
+`maxFeeFor` computed the proportional 1% as
+
+```ts
+(BigInt(Math.round(amount.amount * 1_000_000)) * MAX_FEE_BPS) / (BPS * 100n)   // ← extra /100n
+```
+
+which yields **1/100th** of the intended ceiling: `$10` payout → allowed fee `$0.001`
+instead of `$0.10`. It failed **closed** — every real quote was refused — which is why the
+tests that mattered were the *boundary* ones ("accepts a quote exactly at the ceiling") and
+not the refusal ones, which all passed regardless of what the limit was.
+
+The arithmetic is now in micro-units throughout with a single division by `BPS`. **Recorded
+because the failure mode is worth naming: a fee ceiling that is too small looks exactly like
+a working one.** Every "REFUSES a quote above the ceiling" test passed. Only the test that
+asked what the ceiling *was* caught it. A limit needs an assertion on its own value, not only
+on the refusals it produces.
+
+Two fixture consequences worth recording, because both would have hidden the bug rather than
+revealing it:
+
+- The default test quote was `USDC(0.5)` on a `$10` payout — which is 500% of the *correct*
+  ceiling and only passed while the ceiling was 100× too small. A fixture can quietly depend
+  on a bug.
+- `maxFeeFor(USDC(3))` was asserted as `$0.03`, i.e. "min(1%, $2) does not eat a small
+  payout". Under the broken formula it was `$0.0003`, and the assertion failed for a reason
+  that had nothing to do with the property being tested.
+
+## F88 — two guards in the cross-chain settlement path, only one of which was load-bearing
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, LP-7, by mutation audit.
+
+The recipient checksum was validated **twice** in `settleCrossChainAgreement`: once after the
+store reads, once before the quote. Deleting the first changed nothing, because the second
+caught it — so the mutation survived, and surviving is the signal. Two identical checks read
+as defence in depth and are in fact one check with a maintenance cost: the next edit that
+moves or removes "the redundant one" removes the guard entirely.
+
+Reduced to a single check, placed **before any store read**, which is both the cheapest
+ordering and the one that survives mutation. Re-audited: deleting it now fails 3 tests.
+
+The same audit found a genuine gap next to it: **no end-to-end test for insufficient
+headroom**. The policy arithmetic was tested, the settlement path was not — so replacing
+`remainingHeadroom` with `Number.MAX_SAFE_INTEGER` in the settlement path was invisible,
+because the fixture's vault had 100 against a 10.05 debit and the guard passed either way.
+Added, and the mutation now fails 3 tests.
+
+The general lesson, which is F78's again in a different costume: **a guard is only verified
+by the path that reaches it.** Both survivors were guards that existed, were correct, and
+were never consulted by the test suite.
+
+## F89 — a live relayer that can quote but cannot broadcast
+
+**Status:** avoided by construction (2026-10-08).
+**Found:** 2026-10-08, LP-7, while writing the route dispatch.
+
+The first version of the route's relayer selection was: live if `LIFI_API_KEY` is set,
+otherwise simulate. That produced a configuration in which the canonical leg settles, the
+quote passes the fee and slippage guards, and then the bridge throws — **on every attempt**,
+because nothing was ever going to broadcast.
+
+The ordering makes that failure *recoverable* rather than fatal (funds sit in the relayer's
+account on a chain Mitra operates, reconcilable the way LP-6 reconciles escrows), which is
+the right property. But "recoverable, every time" is not the same as working, and a
+configuration that silently converts into that on the strength of one env var is a trap.
+
+Now the live path requires a key **and** a broadcaster **and** a relayer address. Absent any
+of them, the process uses the simulator, which announces itself on every result. There is
+deliberately no third option: never falling back to the canonical path, because paying a BNB
+Chain address from a Base vault is a transfer to an address on the wrong chain, not a
+settlement.

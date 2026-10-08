@@ -33,11 +33,22 @@
 
 import type { Agreement, ClearingEpoch, Reservation, Settlement, Vault } from "@/lib/domain/types";
 import type { EconomicRepository } from "@/lib/store/repository";
-import { planAgreementSettlement, planResidualSettlement, residualSettlementIdFor } from "@/lib/kernel/settlement";
+import {
+  agreementPaymentDigest, settlementIdFor,
+  planAgreementSettlement, planResidualSettlement, residualSettlementIdFor,
+} from "@/lib/kernel/settlement";
+import { assertSettlementBinding } from "@/lib/kernel/commerce";
+import { validateExecutionBinding } from "@/lib/kernel/authorization";
 import { settlementReceipt, type ReceiptSigner } from "@/lib/kernel/receipts";
 import { toAtomic } from "@/lib/evm/eip712";
 import type { Rails, SettlementRail } from "@/lib/settlement/rails";
 import type { ClearingReader } from "@/lib/settlement/clearing-reader";
+import {
+  buildCrossChainReceipt, isCanonicalChain, isExternalChain, planCrossChainPayout,
+  validatePayoutRecipient,
+  type BridgePayoutResult, type BridgeQuote, type CanonicalChain,
+  type CrossChainPayoutRelayer, type MitraCrossChainReceipt,
+} from "@/lib/adapters/cross-chain-payout";
 
 /** What a settlement discharged: the agreement it paid, or the epoch whose residual it paid. */
 type Discharged = { agreement?: Agreement; epoch?: ClearingEpoch };
@@ -390,3 +401,220 @@ async function event(
     },
   });
 }
+
+// ── LP-7: settling to a payee on a chain Mitra holds no vault on ────────────────
+
+/**
+ * Settles an agreement whose payee is on BNB Chain or X Layer (LP-7).
+ *
+ * ## Why this is a separate path and not a flag on `settleAgreement`
+ *
+ * `planAgreementSettlement` refuses with `VAULT_CHAIN_MISMATCH` whenever
+ * `vault.chain !== payTo.chain`. That refusal is **correct** and must stay: for a canonical
+ * chain it is the guard that stops a Base vault paying a Solana address. Bridging is the
+ * exception that proves it, so it gets its own function rather than a boolean — a boolean
+ * would put `if (bridging) skipTheChainCheck()` inside the guard that protects every other
+ * settlement.
+ *
+ * ## Ordering: canonical leg first, then the bridge
+ *
+ * The failure this ordering accepts is the recoverable one. If the canonical debit succeeds
+ * and the bridge then fails, the funds sit in the relayer's account on a chain Mitra already
+ * operates — visible, reclaimable, and reconcilable by the same probe-then-retry shape LP-6
+ * established. The other order would leave the destination chain short with no record
+ * anywhere, which is unrecoverable and unattributable.
+ *
+ * The canonical leg pays **the relayer**, not the recipient. The recipient only ever appears
+ * on the far side of the bridge, where it has been checksum-validated — so a bad address
+ * cannot be paid by the vault directly even for one hop.
+ */
+export async function settleCrossChainAgreement(
+  repo: EconomicRepository,
+  rails: Rails,
+  input: {
+    agreementId: string;
+    reservationId: string;
+    now: Date;
+    relayer: CrossChainPayoutRelayer;
+    /** The relayer's EOA on the SOURCE chain. Where the canonical leg pays. */
+    relayerAddress: string;
+    testnet: boolean;
+  },
+): Promise<CrossChainSettleOutcome> {
+  if (!canPersist(repo)) return { ok: false, httpStatus: 501, reason: "STORE_CANNOT_PERSIST_SETTLEMENT" };
+
+  const agreement = await repo.getAgreement(input.agreementId);
+  if (!agreement) return { ok: false, httpStatus: 404, reason: "AGREEMENT_NOT_FOUND" };
+  const reservation = await repo.getReservation(input.reservationId);
+  if (!reservation) return { ok: false, httpStatus: 404, reason: "RESERVATION_NOT_FOUND" };
+  const mandate = await repo.getMandate(reservation.mandateId);
+  if (!mandate) return { ok: false, httpStatus: 404, reason: "MANDATE_NOT_FOUND" };
+  const vault = await repo.getVault(reservation.vaultId);
+  if (!vault) return { ok: false, httpStatus: 404, reason: "VAULT_NOT_FOUND" };
+
+  const payTo = agreement.payTo;
+  if (!payTo) return { ok: false, httpStatus: 409, reason: "PAYOUT_ADDRESS_MISSING" };
+  if (!isExternalChain(payTo.chain)) {
+    // The caller routed a canonical payee here. Refusing is better than quietly settling it
+    // through a relayer: the canonical path is cheaper and already proven.
+    return {
+      ok: false,
+      httpStatus: 409,
+      reason: "NOT_A_CROSS_CHAIN_PAYOUT",
+      detail: `payTo is on ${payTo.chain}, which is a canonical rail`,
+    };
+  }
+  if (!isCanonicalChain(vault.chain)) {
+    return { ok: false, httpStatus: 409, reason: "VAULT_NOT_ON_CANONICAL_CHAIN", detail: vault.chain };
+  }
+
+  // ── identity, before any money moves ─────────────────────────────────────────
+  const recipient = validatePayoutRecipient(payTo.address);
+  if (!recipient.ok) return { ok: false, httpStatus: 400, reason: recipient.reason, detail: recipient.detail };
+
+  const consumedNonces = await consumedNoncesOf(repo, vault);
+
+  // The canonical plan, with the vault-chain match deliberately NOT required. Every other
+  // guard it applies — reservation binding, mandate ownership and expiry, freeze, nonce,
+  // amount ceiling — still applies, because they are about authority rather than geography.
+  const due = assertSettlementBinding(agreement, { provider: agreement.provider, amount: agreement.price });
+  if (!due.ok) return { ok: false, httpStatus: 409, reason: due.reason };
+  if (reservation.agreementId !== agreement.agreementId) return { ok: false, httpStatus: 409, reason: "RESERVATION_NOT_FOR_AGREEMENT" };
+  if (mandate.mandateId !== reservation.mandateId) return { ok: false, httpStatus: 409, reason: "MANDATE_MISMATCH" };
+  if (mandate.agentId !== agreement.client) return { ok: false, httpStatus: 409, reason: "MANDATE_NOT_HELD_BY_CLIENT" };
+  if (mandate.vaultId !== vault.vaultId || reservation.vaultId !== vault.vaultId) return { ok: false, httpStatus: 409, reason: "VAULT_MISMATCH" };
+  if (mandate.status !== "ACTIVE") return { ok: false, httpStatus: 409, reason: "MANDATE_NOT_ACTIVE" };
+  if (input.now >= new Date(mandate.expiresAt)) return { ok: false, httpStatus: 409, reason: "MANDATE_EXPIRED" };
+  if (vault.emergencyFreeze) return { ok: false, httpStatus: 409, reason: "VAULT_FROZEN" };
+
+  const guard = validateExecutionBinding(
+    reservation,
+    agreementPaymentDigest(agreement, reservation, vault.chain),
+    agreement.price.amount,
+    agreement.price.asset,
+    vault.chain,
+    input.now,
+    { consumedNonces },
+  );
+  if (!guard.ok) return { ok: false, httpStatus: 409, reason: guard.reason };
+
+  // ── quote and plan the bridge BEFORE the canonical debit ─────────────────────
+  // A quote we cannot accept must not be discovered after the money has left the vault.
+  const sourceChain = vault.chain as CanonicalChain;
+  const amount = { asset: agreement.price.asset, amount: agreement.price.amount };
+
+  let quoted: BridgeQuote;
+  try {
+    quoted = await input.relayer.quoteBridge({
+      // `recipient.value` — the checksummed form, validated above before any store read.
+      sourceChain, targetChain: payTo.chain, recipient: recipient.value, amount,
+    });
+  } catch (e) {
+    return { ok: false, httpStatus: 503, reason: message(e) };
+  }
+
+  const planned = planCrossChainPayout({
+    sourceChain,
+    targetChain: payTo.chain,
+    recipient: payTo.address,
+    amount,
+    quote: quoted,
+    // Headroom is what the VAULT can still send. The fee is an extra debit, which is why
+    // `planCrossChainPayout` checks `amount + fee` rather than `amount`.
+    remainingHeadroom: { asset: agreement.price.asset, amount: vault.available },
+  });
+  if (!planned.ok) return { ok: false, httpStatus: 409, reason: planned.reason, detail: planned.detail };
+
+  // ── canonical leg: pay the RELAYER on the canonical chain ────────────────────
+  const settlementId = settlementIdFor(agreement.agreementId);
+  const outcome = await execute(repo, rails, {
+    plan: { settlementId, chain: vault.chain, amount, to: input.relayerAddress },
+    reservation, vault, now: input.now,
+    subject: agreementSubject(repo, agreement),
+    draft: { runId: agreement.runId, agreementId: agreement.agreementId },
+  });
+  if (!outcome.ok) return { ok: false, httpStatus: outcome.httpStatus, reason: outcome.reason };
+
+  const sourceTxHash = crossChainSourceTxHash(outcome);
+  if (!sourceTxHash) {
+    // The canonical leg paid but reported no transaction hash. Without one the receipt
+    // cannot be anchored to anything, and a receipt that cites no source is a label.
+    return {
+      ok: false,
+      httpStatus: 409,
+      reason: "NO_SOURCE_TX_HASH",
+      detail: "the canonical settlement did not report a transaction hash; funds are in the relayer and need manual reconciliation",
+    };
+  }
+
+  // ── the bridge ──────────────────────────────────────────────────────────────
+  let bridged: BridgePayoutResult;
+  try {
+    bridged = await input.relayer.executeBridgePayout({
+      sourceChain, targetChain: payTo.chain, recipient: planned.value.recipient,
+      amount, quote: quoted, sourceTxHash,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      httpStatus: 503,
+      reason: message(e),
+      detail: `the canonical leg settled as ${sourceTxHash}; the bridge failed and the funds are in the relayer account on ${vault.chain}`,
+    };
+  }
+
+  const receipt = buildCrossChainReceipt({
+    agreementId: agreement.agreementId,
+    sourceChain,
+    targetChain: payTo.chain,
+    testnet: input.testnet,
+    recipient: planned.value.recipient,
+    amount,
+    bridgeFee: planned.value.bridgeFee,
+    sourceTxHash,
+    result: bridged,
+  });
+
+  // Anchored as a settlement document so it lives beside every other settlement, and its
+  // hash is recomputed on read to catch a record edited in place.
+  if (repo.claimSettlement) {
+    // `claimSettlement` is INSERT-only and is the repository's at-most-once boundary, so
+    // anchoring the receipt through it means a retry cannot produce two receipts for one
+    // settlement — it collides on the primary key instead.
+    await repo.claimSettlement({
+      settlementId: `${settlementId}_xchain`,
+      runId: agreement.runId,
+      agreementId: agreement.agreementId,
+      reservationId: reservation.reservationId,
+      chain: vault.chain,
+      asset: amount.asset,
+      amount: planned.value.totalDebit.amount,
+      from: vault.address,
+      // The FINAL recipient, not the relayer: the canonical leg paid the relayer, and the
+      // relayer exists only between the two hops. Recording it here would make the record
+      // wrong about who was paid.
+      to: planned.value.recipient,
+      // The canonical leg's hash, so the external record still points at a real transaction.
+      commitment: sourceTxHash,
+      obligationIds: [],
+      status: "SETTLED_EXTERNALLY",
+      submittedAt: input.now.toISOString(),
+      // The receipt id, which is a content hash over both hops — so this reference cannot
+      // resolve to a receipt describing a different agreement, amount or destination.
+      receiptId: receipt.receiptId,
+      evidenceLevel: receipt.evidenceLevel,
+    });
+  }
+
+  return { ok: true, httpStatus: 200, settlement: outcome.settlement, receipt };
+}
+
+/** The canonical leg's transaction hash, wherever the rail happens to have put it. */
+function crossChainSourceTxHash(outcome: { ok: true; settlement: Settlement } & Record<string, unknown>): string | undefined {
+  const s = outcome.settlement as Settlement & { txHash?: string; commitment?: string; evidence?: { txHash?: string } };
+  return s.txHash ?? s.evidence?.txHash ?? s.commitment;
+}
+
+export type CrossChainSettleOutcome =
+  | { ok: true; httpStatus: 200; settlement: Settlement; receipt: MitraCrossChainReceipt }
+  | { ok: false; httpStatus: number; reason: string; detail?: string };

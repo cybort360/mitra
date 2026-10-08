@@ -58,7 +58,9 @@ export type SagaStatus =
   | "CONTAINED"
   | "ABORTED";
 export type ClearingStatus = "OPEN" | "FROZEN" | "CALCULATING" | "CHALLENGE" | "FINALIZED" | "SETTLING" | "SETTLED";
-export type SettlementStatus = "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "REVERSED";
+export type SettlementStatus = "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "REVERSED"  // LP-7: settled to a payee on a chain Mitra holds no vault on; the receipt anchors
+  // the external destination to the internal agreement.
+  | "SETTLED_EXTERNALLY";
 export type RunStatus = "RUNNING" | "WAITING" | "RECOVERING" | "CLEARING" | "SETTLING" | "SETTLED" | "CONTAINED" | "FAILED";
 
 export interface Money {
