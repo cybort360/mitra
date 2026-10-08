@@ -3730,3 +3730,106 @@ of them, the process uses the simulator, which announces itself on every result.
 deliberately no third option: never falling back to the canonical path, because paying a BNB
 Chain address from a Base vault is a transfer to an address on the wrong chain, not a
 settlement.
+
+## F90 — a session-key delegation that is only *read* makes the scope mechanism theatre
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, while writing the scope check.
+
+The obvious way to build a delegated session key is to carry a `delegation` object and check
+its `allowedActions` before each call. That reads like authorisation and is none: a
+delegation is just data, so **anyone can mint one** with `allowedActions: ["settle"]` and a
+generous `maxSpendUsd`, and every check downstream passes. The scope machinery would be a
+speed bump in front of an attacker who simply writes their own permit.
+
+The fix is to make the delegation a **signature over the exact tuple that is enforced**:
+
+```
+sessionAddress · ruleDigest · allowedActions (order-insensitive, hashed) · maxSpendUsd · expiresAt
+```
+
+EIP-712, verified by recovery **before use**. Two properties follow that a data-only
+delegation does not have:
+
+- no field can be edited after signing — each mutation either changes the recovered signer or
+  makes recovery fail;
+- the actions are hashed **sorted**, so a reorder cannot change meaning while keeping the
+  same string.
+
+This is the same lesson as F51 (caller-chosen payee) and F55 (a signature must prove *who*,
+not just *that*): an authorisation that is not cryptographically bound to the authority is a
+preference.
+
+**Evidence.** `tests/virtuals-transport.test.ts`: recovery matches the signer; five
+post-signature mutations each break verification; a self-declared delegator with someone
+else's signature is refused `SESSION_KEY_DELEGATOR_MISMATCH`; an unparseable signature is
+refused `SESSION_KEY_DELEGATION_UNVERIFIABLE` rather than skipped. **Mutation:** replacing
+recovery with `d.delegator` — trusting the field — fails 4 tests.
+
+## F91 — the allowlist must be an enum, not only a delegation's contents
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, by mutation audit.
+
+The first scope check asked only "is this action in `delegation.allowedActions`?" — which is
+the delegation's own list consulted by the code it authorises. A delegator (compromised, buggy,
+or simply wrong) could therefore widen the executable surface to include `settle` or
+`claim_dispute`, and every check would pass.
+
+Now the action is checked against `ACP_PERMITTED_ACTIONS` **first**, as an enum, and only then
+against the delegation. Both halves are load-bearing and they refuse for different reasons,
+so both are tested:
+
+- a **genuine** delegation, signed by the agent's own wallet, listing `settle` → refused
+  `SESSION_KEY_ACTION_NOT_PERMITTED`. Only the code can widen the surface, never a delegator.
+- a **forged** delegation edited to list `settle` → refused earlier at
+  `SESSION_KEY_DELEGATOR_MISMATCH`, because it is not a delegation at all.
+
+**The control is also the ABSENCE of verbs.** `ACP_PERMITTED_ACTIONS` is five actions and
+none of them moves capital: `openJob` proposes a spend against a cap, it does not disburse,
+and settlement stays on a canonical rail through the machinery that already governs it. A test
+asserts no permitted action matches `/spend|settle|dispute|claim|withdraw|transfer/`.
+
+**Mutation:** removing the enum check and consulting only the delegation fails **9** tests —
+the largest kill in this package, which is what a load-bearing guard looks like.
+
+## F92 — scope checked once at construction is scope checked until the process dies
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, by mutation audit.
+
+The failure mode session keys exist to prevent is a long-lived process holding a scope that
+was valid when it started. A transport that called `assertSessionScope` once in its
+constructor would keep signing **for its entire lifetime** after the delegation expired — which
+is precisely the window an attacker wants.
+
+`assertSessionScope` therefore takes a clock and is called immediately before **every**
+signature, in both transports and the simulator. The test proves the live case by advancing an
+injected clock past `expiresAt` on a running transport and asserting the next call refuses.
+
+**Mutation:** freezing the clock to wall-time at construction fails 1 test. Only 1, because
+the test is the only thing that distinguishes "checks on every call" from "checks once" — a
+gap worth naming, since the guard is load-bearing and thin.
+
+## F93 — a test helper that signed first and mutated second tested nothing
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, while writing the scope tests.
+
+The first `delegation(over)` helper called `signSessionDelegation({...defaults})` and then
+spread `over` onto the result — so `delegation({ maxSpendUsd: 0.3 })` produced a delegation
+whose signature covered `25` while the object said `0.3`. Every such test then failed at
+`SESSION_KEY_DELEGATOR_MISMATCH`, which is correct behaviour and has nothing to do with the
+rule being exercised.
+
+Four tests failed for reasons unrelated to their subject, and the tempting response — to
+assert the mismatch instead — would have left the spend ceiling, the rule-digest binding and
+the expiry boundary entirely untested while the suite was green.
+
+The helper now signs **over** every field it is given. Worth recording because the failure is
+invisible: a fixture that quietly invalidates its own signature converts every downstream
+assertion into a test of the signature check, and the suite still reports failures rather than
+passing. Green suites hide this; loud failures merely misattribute it.
+
+The same class as F87's fixture, which depended on a 100×-wrong fee ceiling: **a fixture can
+depend on a bug and keep asserting the right words.**
