@@ -3441,3 +3441,141 @@ like a product bug and is not.
 **Open, deliberately.** Making `InMemoryRepository.updateAgreement` strict like Postgres
 would catch more of this in the default suite, but it would change behaviour for every
 test that passes an unpersisted agreement, and that is a bigger call than this entry.
+
+## F81 — the two rails computed the §15.5 commitment differently
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, LP-6, before writing a line of escrow code.
+
+Two functions derived "the hash of a refund route" and they did not agree:
+
+| | definition |
+|---|---|
+| `routeCommitment` (`lib/domain/canonical.ts`, added with F76) | `keccak256(route)` |
+| `routeHashFor` (`lib/solana/vault-program.ts`) | `sha256("mitra-recovery-route-v1:" + route)` |
+
+Both produce 32 bytes, and neither contract can read a hash — `MitraJobEscrow.sol` and
+the Solana `JobEscrow` program only check it is non-zero. So the disagreement was
+**invisible on chain** and only became real when LP-6 needed to hand *one* value to both
+rails and store it on the agreement, and there was no single value to hand.
+
+The Solana definition won: it is what LP-4's live devnet proof actually committed, so it is
+the deployed reality; and a domain prefix is the correct construction, because without one
+the same route string hashed for another purpose yields the same commitment — exactly the
+collision `typedHash`'s domain prefixes exist to prevent. `routeHashFor` now delegates to
+`routeCommitment`, so there is one implementation.
+
+Note the direction of the near-miss: F76's own comment argued for keccak256 *because* it
+must equal what the escrow stores, and would have been right had both rails used it. The
+defect was not the choice of digest, it was having two choices.
+
+**Evidence.** `tests/canonical.test.ts` (F81): 32 bytes and `0x`-prefixed; domain-separated
+(compared against a bare hash of the same route); and byte-for-byte agreement with
+`routeHashFor`, imported from the Solana module so the two cannot drift again.
+
+## F82 — `ERC8183Transport.getJob` returned an array, so every named field was `undefined`
+
+**Status:** fixed (2026-10-08). Found by the LP-6 live suite on its first run.
+**Found:** 2026-10-08, LP-6, `JOB_ESCROW_LIVE=1`.
+
+`jobs(...)` declares its return as a **flat list** — `returns (bytes32 jobId, address
+clientVault, ...)`. viem therefore returns an **array indexed 0..8**, so every named access
+(`job.amount`, `job.status`, `job.provider`) was `undefined`.
+
+It went unnoticed for two independent reasons, and both had to be removed for the bug to
+die:
+
+1. **The function had no callers.** Nothing had ever exercised it against a deployed
+   contract. `tests/commerce-escrow-live.test.ts` *did* read it — but positionally,
+   `job[7]` and `job[8]` — so the array shape was observed and worked around rather than
+   fixed, and the workaround read like knowledge of the struct.
+2. **Every caller cast its way past it.** `as unknown as EvmEscrowRail` in
+   `escrowRailFor` — written during LP-6 — made an array-returning `getJob` type-check as a
+   named-returning one. That cast is removed, so a shape divergence now fails to compile;
+   the removal immediately caught two further mismatches (`status` as `bigint` vs `number`,
+   and `getJob` resolving to `undefined`).
+
+**Why it matters more than a decode bug.** `getJob` is the input to the probe that decides
+whether to move capital. With `amount === undefined`, the absence test
+(`job.amount === 0n`) was **false**, so a job id that had never been funded fell through
+to comparing terms made of `undefined`s and reported `MISMATCH`. The live suite hit this
+within a second of running: `expected [ 'ABSENT', 'FUNDED' ] to include 'MISMATCH'` on a
+freshly generated agreement id. **A probe that cannot distinguish "no escrow" from
+"malformed answer" is not a safety mechanism** — it is a coin flip that happens to land on
+"refuse", which is the safe side for a *mismatch* and catastrophic for an *absence*.
+
+**The fix.** `normalizeJobRow` maps positionally onto named fields, accepts an
+already-named row, and **throws `UNREADABLE_RETURN_SHAPE`** on anything else — because a
+malformed answer must never be read as "no escrow".
+
+**Evidence.** `tests/agreement-onchain-escrow.test.ts` (F82) pins the *observed wire shape*
+captured from the deployed contract — a fixture written to match the code rather than the
+chain would have passed while the probe was still broken, which is how this survived. Four
+tests: positional mapping; the zeroed row reads as ABSENT (the actual bug); idempotent on
+a named row; and throws on `undefined`, a short array, and a string. A fifth asserts the
+concrete transport assigns to the bridge interface without a cast.
+
+**Verified live.** `0x75dbc74252698faa3aa2a583bc79cea90b4598cbb8a00dad1bba3fd9763fb928` on
+Base Sepolia: `depositToEscrow` → receipt `success`, `JobFunded` emitted from
+`0xc49c93f0…` with `topic1` equal to `sha256(agreementId)`, and the repaired `getJob`
+reading `amount 1, status 1`.
+
+**One observation, not a defect.** Immediately after that receipt the same `getJob` read
+`amount 0` on the public endpoint, then read `amount 1` a minute later — RPC state
+propagation on a load-balanced provider. The safety property does not depend on this: the
+contract refuses a second deposit for a live `jobId` (`MitraJobEscrow.sol:89`,
+`AlreadySettled`), so a stale-ABSENT retry reverts rather than double-funding. The probe is
+an optimisation against that revert, not the guarantee — which is worth stating, because
+"probe first" reads like the load-bearing control and is not.
+
+## F83 — an agreement had no on-chain provider to escrow for
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, LP-6, while writing the route integration.
+
+The escrow step derived the escrow's provider from `agreement.provider`, which is a Mitra
+**agent id** (`agent_data_03`) — not an EVM address and not a Solana pubkey. Every probe
+would have reported `ESCROW_PROVIDER_DIFFERS` against any real escrow, and the fund path
+could never have escrowed anything.
+
+The correct source is `agreement.payTo`, the term `assertSettlementBinding` records
+precisely so the payee cannot be chosen by whoever calls settle — the F51 caller-chosen-payee
+defect, already fixed on the settlement side and reintroduced here by reaching for the
+nearest-looking field.
+
+Two guards now refuse rather than guess:
+
+- `ESCROW_PROVIDER_ADDRESS_MISSING` — no `payTo`, so there is no on-chain party.
+- `ESCROW_CHAIN_DISAGREES_WITH_PAYTO` — the escrow's chain and the agreement's `payTo` chain
+  must agree. A `payTo` recorded for Solana cannot receive a Base Sepolia payout: the address
+  is a base58 pubkey where the contract wants 20 bytes. The Space already refuses a `payTo`
+  on a chain it does not settle (`SETTLEMENT_CHAIN_NOT_ALLOWED_IN_SPACE`), which is why this
+  surfaced during test setup — but that check is about the Space, not about the escrow being
+  requested, and neither substitutes for the other.
+
+**Evidence.** `tests/agreements-api.test.ts` (LP-6): both refusals, plus the caller-chosen
+`ESCROW_JOB_ID_MISMATCH` — the escrow identity is derived from the agreement, so a request
+naming a different `jobId` is refused rather than funding an escrow the §15.5 commitment does
+not cover. Mutation: removing any of the three guards turns the suite red.
+
+## F84 — two fixtures asserted a clean database that only exists in memory
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, running `npm run test:postgres` for LP-6.
+
+Instances of F78 found by the matrix, both of which **passed in memory and asserted the
+wrong thing**:
+
+- `tests/intent-persistence.test.ts` — `prepareStore()` in `beforeEach` resets the in-memory
+  store and nothing else. Against Postgres a shared `intentId` made the second test's create
+  an idempotent **replay (200)** where it asserted a fresh create (201). Worse, the F65 case
+  ("refuses to overwrite an existing intent with a different body") compared against an
+  intent left over from a **previous run**, so the refusal was not being exercised at all.
+  Its fixed `i0`/`i1` ids had the same effect: the "refuses a zero budget" assertions were
+  passing because the create was refused for being a duplicate.
+- `tests/commerce-saga.test.ts` — a second `openAgreement` call site that bypassed the helper
+  fixed in F77, still using the literal `ag_1` and never persisting, so `commitAgreementOp`'s
+  strict `UPDATE` raised `AGREEMENT_NOT_FOUND`.
+
+Both now generate per-run, per-test identities. This is the concrete cost of F78 being open,
+and the argument for closing it.

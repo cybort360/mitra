@@ -23,6 +23,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { routeCommitment } from "@/lib/domain/canonical";
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { sha256, toBytes } from "viem";
 
@@ -480,4 +481,7 @@ export const jobIdFor = (jobId: string): Buffer =>
  * to execute arbitrary calldata on the strength of a hash it cannot read.
  */
 export const routeHashFor = (route: string): Buffer =>
-  createHash("sha256").update(`mitra-recovery-route-v1:${route}`, "utf8").digest();
+  // F81: delegates to the domain's canonical definition. This used to be a second,
+  // independent `sha256("mitra-recovery-route-v1:…")` written out here, and it is why
+  // the kernel and the Solana rail disagreed about the §15.5 commitment.
+  Buffer.from(routeCommitment(route).slice(2), "hex");

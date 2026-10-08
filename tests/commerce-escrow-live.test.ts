@@ -82,7 +82,7 @@ async function waitForStatus(t: ERC8183Transport, jobId: Hex, targetStatus: numb
   const start = Date.now();
   while (Date.now() - start < maxMs) {
     const job = await t.getJob(jobId);
-    if (Number(job[7]) === targetStatus) return job;
+    if (Number(job.status) === targetStatus) return job;
     await new Promise((r) => setTimeout(r, 1000));
   }
   return t.getJob(jobId);
@@ -118,13 +118,13 @@ describe(`live job escrow (JOB_ESCROW_LIVE=${target ?? "unset"})`, () => {
       expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
 
       const job = await waitForStatus(t, jobId, 1);
-      expect(Number(job[7])).toBe(1); // status: Funded
-      expect(job[8]).toBe(route); // the pre-committed route, as recorded
+      expect(Number(job.status)).toBe(1); // status: Funded
+      expect(job.refundRouteHash).toBe(route); // the pre-committed route, as recorded
 
       const releaseHash = await t.completeJob(jobId);
       console.log(`${network} completed ${jobId} tx ${releaseHash}`);
       const settled = await waitForStatus(t, jobId, 2);
-      expect(Number(settled[7])).toBe(2); // status: Completed
+      expect(Number(settled.status)).toBe(2); // status: Completed
 
       // Single shot — a second settlement must be refused.
       await expect(t.refundJob(jobId)).rejects.toThrow();
@@ -158,7 +158,7 @@ describe(`live job escrow (JOB_ESCROW_LIVE=${target ?? "unset"})`, () => {
       const hash = await t.refundJob(jobId);
       console.log(`${network} refunded ${jobId} tx ${hash}`);
       const job = await waitForStatus(t, jobId, 3);
-      expect(Number(job[7])).toBe(3); // status: Refunded
+      expect(Number(job.status)).toBe(3); // status: Refunded
     });
   }
 

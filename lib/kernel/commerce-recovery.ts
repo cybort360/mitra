@@ -108,6 +108,24 @@ export interface OnChainEscrowRef {
   timeout?: number;
 }
 
+/**
+ * The refund route string for an on-chain escrow. PRD §15.5.
+ *
+ * Exported because **two places must derive the same string**: the kernel, which commits
+ * a hash over it at `fund`, and the route, which has to hand the chain that hash. When the
+ * route computed it itself, it read `agreement.refundRouteHash` — which does not exist yet
+ * on `fund`, because the kernel is what puts it there. The first integration attempt failed
+ * with `ESCROW_REFUND_ROUTE_UNCOMMITTED`, which is the ordering problem showing up as a
+ * runtime refusal rather than as a divergence nobody noticed.
+ *
+ * So the kernel owns the derivation and the route asks for it. One function, one string.
+ */
+export const onChainRefundRouteFor = (escrow: {
+  chain: string;
+  contractAddress: string;
+  jobId: string;
+}): string => `evm:refundEscrow:${escrow.chain}:${escrow.contractAddress}:${escrow.jobId}`;
+
 export interface CommercialSagaOptions {
   capability?: string;
   amount?: { asset: Agreement["price"]["asset"]; amount: number };
@@ -163,9 +181,7 @@ export function applyAgreementOpWithSaga(input: {
     // same fields the escrow account will be opened with — which is what makes the
     // commitment below mean something. The route names the chain, the contract and
     // the job, so a commitment over it cannot be satisfied by a refund anywhere else.
-    const onChainRefundRoute = opts.onChainEscrow
-      ? `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`
-      : null;
+    const onChainRefundRoute = opts.onChainEscrow ? onChainRefundRouteFor(opts.onChainEscrow) : null;
 
     const compensationRoutes = opts.compensationRoutes ?? (
       onChainRefundRoute

@@ -258,8 +258,14 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
     //   exists to prevent.
     //
     //   The empty policy becomes the DEFAULT policy rather than an absent saga.
-    const r = openAgreement(space(), { ...draft, failurePolicy: "" }, { capability: "research", amount: USDC(10) });
+    // Same two obligations as `opened()`: a unique id (this database is not reset between
+    // runs) and a persisted row, because `commitAgreementOp` writes the agreement and
+    // Postgres `updateAgreement` is a strict UPDATE. This second call site was missed when
+    // the F77 fixtures were fixed, and failed only against Postgres.
+    await repo.createSpace!(space());
+    const r = openAgreement(space(), { ...draft, agreementId: `ag_${OPENED_NONCE}_x${++openedCount}`, failurePolicy: "" }, { capability: "research", amount: USDC(10) });
     if (!r.ok) throw new Error(r.reason);
+    await repo.saveAgreement!(r.value.agreement);
     const f = await drive(repo, space(), r.value.agreement, "fund");
     expect(f.saga?.status, "a funded multi-step agreement is never left without a route").toBe("ARMED");
     expect(f.saga?.timeoutPolicy, "an empty policy falls back to a default").toBeTruthy();

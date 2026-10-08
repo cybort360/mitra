@@ -49,6 +49,48 @@ export const MITRA_JOB_ESCROW_ABI = parseAbi([
 
 export type EscrowNetwork = "baseSepolia" | "moderato";
 
+/** The shape of one `Job` struct, as `jobs()` returns it. */
+export interface JobRow {
+  jobId: Hex;
+  clientVault: Address;
+  provider: Address;
+  evaluator: Address;
+  token: Address;
+  amount: bigint;
+  timeout: bigint;
+  status: number;
+  refundRouteHash: Hex;
+}
+
+/**
+ * Maps a `jobs()` return into named fields. F82.
+ *
+ * Accepts an already-named object so the function is idempotent, and **throws** on a shape
+ * it does not recognise rather than returning `undefined` fields — an unreadable answer
+ * must not be mistaken for "no escrow", because that is what turns a read into a
+ * double-fund.
+ */
+export function normalizeJobRow(raw: unknown): JobRow {
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && "amount" in raw) {
+    return raw as JobRow;
+  }
+  if (!Array.isArray(raw) || raw.length < 9) {
+    throw new Error(`MitraJobEscrow.jobs: UNREADABLE_RETURN_SHAPE (${typeof raw}, ${Array.isArray(raw) ? `length ${raw.length}` : "not an array"})`);
+  }
+  const [jobId, clientVault, provider, evaluator, token, amount, timeout, status, refundRouteHash] = raw;
+  return {
+    jobId: jobId as Hex,
+    clientVault: clientVault as Address,
+    provider: provider as Address,
+    evaluator: evaluator as Address,
+    token: token as Address,
+    amount: amount as bigint,
+    timeout: timeout as bigint,
+    status: Number(status),
+    refundRouteHash: refundRouteHash as Hex,
+  };
+}
+
 export interface EscrowJob {
   jobId: Hex;
   clientVault: Address;
@@ -153,13 +195,38 @@ export class ERC8183Transport {
     return this.waitFor(hash);
   }
 
+  /**
+   * The on-chain job record, or the zeroed record for a job that was never funded.
+   *
+   * ## Why the normalisation (F82)
+   *
+   * `jobs(...)` declares its return as a FLAT list — `returns (bytes32 jobId, address
+   * clientVault, ...)`. viem therefore hands back an **array indexed 0..8**, not an object
+   * with those names, so every named access (`job.amount`, `job.status`) was `undefined`.
+   *
+   * That went unnoticed because the function had no callers: nothing exercised it against
+   * a deployed contract. It type-checked, because its inferred return type was
+   * `readonly [Hex, Address, ...]` and every *caller* cast its way to whatever shape it
+   * wanted — `as unknown as EvmEscrowRail` in particular, which hid the whole thing.
+   *
+   * LP-6 made this the first thing that reads `getJob` before it moves capital, and the
+   * live suite immediately reported `MISMATCH` on a job id that had never been funded: the
+   * probe saw `amount === undefined`, which is not `0n`, so it fell through to comparing
+   * terms made of `undefined`s. **A probe that cannot tell "no escrow" from "malformed
+   * answer" is not a safety mechanism.**
+   *
+   * The mapping is written out rather than relying on viem naming, and
+   * `normalizeJobRow` is exported and tested against the exact wire shape observed on
+   * Base Sepolia so it cannot silently regress again.
+   */
   async getJob(jobId: Hex) {
-    return this.public().readContract({
+    const raw: unknown = await this.public().readContract({
       address: this.address,
       abi: MITRA_JOB_ESCROW_ABI,
       functionName: "jobs",
       args: [jobId],
     });
+    return normalizeJobRow(raw);
   }
 
   private signer() {
