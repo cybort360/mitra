@@ -35,7 +35,6 @@
  */
 
 import type { Agreement, Saga, Space } from "@/lib/domain/types";
-import type { EconomicRepository } from "@/lib/store/repository";
 import {
   armSaga, beginCompensation, compensate, declareSaga, recordStep, startSaga,
   type CompensationRoute, type SagaDeclaration,
@@ -68,8 +67,38 @@ const unwrap = <T>(r: Result<T>, what: string): T => {
 export interface CoupledResult {
   space: Space;
   agreement: Agreement;
-  /** Absent until the agreement is funded and its saga armed. */
+  /**
+   * The saga as it stands after this op. For the API response.
+   *
+   * Separate from `sagasToPersist` because they answer different questions: "what
+   * should I show" and "what did I change". Ops that do not move the saga
+   * (`submitDeliverable`, `acceptDeliverable`, `refund`) report the current saga and
+   * persist nothing, and collapsing the two would either write unchanged state or drop
+   * it from the response.
+   */
   saga?: Saga;
+  /**
+   * The sagas the caller must write, in order. Empty means the saga did not move.
+   *
+   * **Write the agreement FIRST.** This ordering is the whole point of the field.
+   *
+   * F77: this kernel used to `saveSaga` itself and the route wrote the agreement
+   * afterwards, in a second transaction. If the second never landed, the store kept an
+   * ARMED saga that no agreement named — and since every op finds its saga through
+   * `agreement.sagaIds`, nothing could ever advance it. A committed §15.5 route with
+   * no execution behind it, and no health check that could see it.
+   *
+   * Returning the write-set instead of performing it inverts that: the caller persists
+   * the agreement (which names the saga) and only then the saga. A tear now leaves an
+   * agreement pointing at a saga that is not there, which line 173 already handles as
+   * a broken link rather than a reason to throw. The benign direction, chosen
+   * deliberately — it costs a saga, never a stranded commitment nobody can run.
+   *
+   * This is also why the function is synchronous: with no `repo`, there is no IO left
+   * to await, and a kernel that awaits is a kernel whose next contributor will assume
+   * it may persist.
+   */
+  sagasToPersist: Saga[];
 }
 
 export interface OnChainEscrowRef {
@@ -93,16 +122,33 @@ export interface CommercialSagaOptions {
 /**
  * Applies a commercial operation AND advances the attached saga.
  *
- * @param repo injected rather than imported so the kernel stays pure and the caller
- *   chooses the backend. This is the same shape `EconomicRepository` exists for.
+ * ## Store-free, as of F77
+ *
+ * This function used to take an `EconomicRepository` and write to it — `saveSaga` on
+ * fund, `updateSaga` on the two saga-moving ops — while its sibling `commerce.ts` is
+ * pure. `EconomicRepository`'s own documentation says the kernel is store-free and
+ * that this "lets the same lifecycle be exercised in a unit test", so the saga kernel
+ * was the exception, and the exception was a bug (F77): it split the fund write
+ * across two transactions, because the route could not write the agreement until this
+ * function had already returned and written the saga.
+ *
+ * It now takes no repository and returns `sagasToPersist`. The caller loads the
+ * agreement's current saga and passes it in; the caller writes the result. Nothing is
+ * read from or written to a store in here, which is why it is no longer `async`.
+ *
+ * @param input.saga the agreement's current saga, loaded by the caller. Passing it in
+ *   rather than looking it up is the other half of the change — a kernel that fetches
+ *   its own state cannot be tested against a state the test did not choose.
  */
-export async function applyAgreementOpWithSaga(
-  repo: EconomicRepository,
-  space: Space,
-  agreement: Agreement,
-  op: AgreementOp,
-  opts: CommercialSagaOptions = {},
-): Promise<Result<CoupledResult>> {
+export function applyAgreementOpWithSaga(input: {
+  space: Space;
+  agreement: Agreement;
+  op: AgreementOp;
+  /** The agreement's current saga. `null`/absent when it has none, or the link is broken. */
+  saga?: Saga | null;
+  opts?: CommercialSagaOptions;
+}): Result<CoupledResult> {
+  const { space, agreement, op, saga: current, opts = {} } = input;
   // The commercial transition first: if the agreement cannot legally make this move,
   // the saga must not move either. Doing it the other way round would let a rejected
   // `startExecution` still drive a saga to EXECUTING.
@@ -144,8 +190,8 @@ export async function applyAgreementOpWithSaga(
     };
     const declared = unwrap(declareSaga(`saga_${nextAgreement.agreementId}`, nextAgreement.runId, nextAgreement.intentId, declaration), "declareSaga");
     const armed = unwrap(armSaga(declared, declaration), "armSaga");
-    await repo.saveSaga(armed);
     return pass({
+      sagasToPersist: [armed],
       space: nextSpace,
       agreement: {
         ...nextAgreement,
@@ -164,21 +210,21 @@ export async function applyAgreementOpWithSaga(
     });
   }
 
-  const sagaId = nextAgreement.sagaIds?.[0];
-  if (!sagaId) return pass({ space: nextSpace, agreement: nextAgreement });
-
-  const loaded = await repo.getSaga(sagaId);
-  if (!loaded) {
-    // An agreement pointing at a saga that is not there is a broken link, not a
-    // reason to throw: the commercial move already succeeded.
-    return pass({ space: nextSpace, agreement: nextAgreement });
+  if (!current) {
+    // No saga, or a broken link: an agreement naming a saga that is not there. That is
+    // not a reason to throw — the commercial move already succeeded, and the write-set
+    // is empty precisely so the caller writes only the agreement. This is the branch
+    // F77's fix makes reachable in the tear direction, and it is why that direction is
+    // the safe one.
+    return pass({ space: nextSpace, agreement: nextAgreement, sagasToPersist: [] });
   }
+
+  const loaded = current;
 
   // ── startExecution: ARMED -> EXECUTING ────────────────────────────────────
   if (op === "startExecution") {
     const started = unwrap(startSaga(loaded), "startSaga");
-    await repo.updateSaga(started);
-    return pass({ space: nextSpace, agreement: nextAgreement, saga: started });
+    return pass({ space: nextSpace, agreement: nextAgreement, saga: started, sagasToPersist: [started] });
   }
 
   // ── rejectDeliverable: the whole point of this module ─────────────────────
@@ -206,16 +252,38 @@ export async function applyAgreementOpWithSaga(
     const targetRouteId = opts.compensationRouteId
       ?? (loaded.compensationRoutes.length > 0 ? loaded.compensationRoutes[0] : REFUND_ROUTE.routeId);
 
-    const availableRoutes = opts.compensationRoutes ?? [
-      {
-        routeId: targetRouteId,
-        action: "REFUND" as const,
-        route: opts.onChainEscrow
-          ? `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`
-          : (nextAgreement.escrowRef ? `evm:refundEscrow:${nextAgreement.escrowRef}` : REFUND_ROUTE.route),
-        maxAttempts: 1,
-      },
-    ];
+    // **F80: the route comes from what was COMMITTED, never rebuilt here.**
+    //
+    // This used to reconstruct the refund route from `agreement.escrowRef`, which is
+    // only the job id — so a route funded as
+    // `evm:refundEscrow:<chain>:<contract>:<jobId>` came back as
+    // `evm:refundEscrow:<jobId>`. F76's commitment check then refused every on-chain
+    // refund with COMPENSATION_ROUTE_REDIRECTED, permanently and correctly: the string
+    // being run was not the string that was agreed. Rebuilding a compensation route
+    // after a failure is the thing §15.5 exists to forbid.
+    //
+    // `committedRoutes` is set at declaration from the same declaration the commitment
+    // was taken over, so the two cannot disagree.
+    const availableRoutes = opts.compensationRoutes ?? (
+      loaded.committedRoutes
+        ? Object.entries(loaded.committedRoutes).map(([routeId, route]) => ({
+            routeId,
+            action: "REFUND" as const,
+            route,
+            maxAttempts: 1,
+          }))
+        // No committed body — a saga declared before F80. The pre-F80 reconstruction,
+        // kept only so such a saga can still finish; its commitment will refuse anything
+        // that does not match, which is the correct outcome.
+        : [{
+            routeId: targetRouteId,
+            action: "REFUND" as const,
+            route: opts.onChainEscrow
+              ? `evm:refundEscrow:${opts.onChainEscrow.chain}:${opts.onChainEscrow.contractAddress}:${opts.onChainEscrow.jobId}`
+              : (nextAgreement.escrowRef ? `evm:refundEscrow:${nextAgreement.escrowRef}` : REFUND_ROUTE.route),
+            maxAttempts: 1,
+          }]
+    );
 
     const terminal = compensate(compensating, {
       routeId: targetRouteId,
@@ -228,10 +296,15 @@ export async function applyAgreementOpWithSaga(
       // (F47). Report it rather than pretending the agreement recovered.
       return fail(terminal.reason);
     }
-    await repo.updateSaga(terminal.value);
-
-    return pass({ space: spaceAfter, agreement: agreementAfter, saga: terminal.value });
+    return pass({
+      space: spaceAfter,
+      agreement: agreementAfter,
+      saga: terminal.value,
+      sagasToPersist: [terminal.value],
+    });
   }
 
-  return pass({ space: nextSpace, agreement: nextAgreement, saga: loaded });
+  // Every other op moves the commercial state only; the saga is reported unchanged and
+  // nothing is written for it.
+  return pass({ space: nextSpace, agreement: nextAgreement, saga: loaded, sagasToPersist: [] });
 }

@@ -109,6 +109,11 @@ export function declareSaga(
     routeCommitments: Object.fromEntries(
       declaration.compensationRoutes.map((r) => [r.routeId, routeCommitment(r.route)]),
     ),
+    // F80: the bodies alongside their hashes, so compensation runs the route that was
+    // committed instead of reconstructing one from whatever the agreement still carries.
+    committedRoutes: Object.fromEntries(
+      declaration.compensationRoutes.map((r) => [r.routeId, r.route]),
+    ),
     timeoutPolicy: declaration.timeoutPolicy,
     status: "DECLARED" as const,
     recoveredValue: 0,

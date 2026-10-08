@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as getSagas } from "@/app/api/v1/sagas/route";
 import { openAgreement, type Result } from "@/lib/kernel/commerce";
-import { applyAgreementOpWithSaga } from "@/lib/kernel/commerce-recovery";
+import { commitAgreementOp } from "@/lib/commerce/commit-op";
 import type { Money, Space } from "@/lib/domain/types";
 import { getStore } from "@/lib/store/provider";
 import { prepareStore } from "./fixtures";
@@ -71,12 +71,13 @@ describe("GET /api/v1/sagas — Layer B read surface", () => {
       externalJobRefs: [], price: USDC(15), deadline: "2027-01-01T00:00:00Z",
       acceptanceCriteria: ["deliverable verified"], failurePolicy: "refund on failure",
     }, { capability: "research", amount: USDC(15) }), "openAgreement");
+    // Persist as the route does — `commitAgreementOp` writes the agreement (F77), and
+    // Postgres `updateAgreement` is a strict UPDATE that refuses a row that is not there.
+    await repo.createSpace!(sp);
+    await repo.saveAgreement!(opened.agreement);
 
     // 2. Fund agreement -> declares and arms saga in repo
-    const funded = unwrap(await applyAgreementOpWithSaga(
-      repo, opened.space, opened.agreement, "fund",
-      { capability: "research", amount: USDC(15) },
-    ), "fund");
+    const funded = unwrap(await commitAgreementOp(repo, opened.space, opened.agreement, "fund", { capability: "research", amount: USDC(15) }), "fund");
     const sagaId = funded.saga!.sagaId;
 
     // 3. GET /api/v1/sagas lists the armed saga
@@ -90,21 +91,13 @@ describe("GET /api/v1/sagas — Layer B read surface", () => {
     expect(armedList.data[0].isTerminal).toBe(false);
 
     // 4. Start execution
-    const executed = unwrap(await applyAgreementOpWithSaga(
-      repo, funded.space, funded.agreement, "startExecution",
-    ), "startExecution");
+    const executed = unwrap(await commitAgreementOp(repo, funded.space, funded.agreement, "startExecution"), "startExecution");
 
     // 5. Submit deliverable
-    const submitted = unwrap(await applyAgreementOpWithSaga(
-      repo, executed.space, executed.agreement, "submitDeliverable",
-      { artifactRefs: ["ipfs://art1"], contentHash: "sha256:abcd" },
-    ), "submitDeliverable");
+    const submitted = unwrap(await commitAgreementOp(repo, executed.space, executed.agreement, "submitDeliverable", { artifactRefs: ["ipfs://art1"], contentHash: "sha256:abcd" }), "submitDeliverable");
 
     // 6. Reject deliverable -> drives saga through STEP_FAILURE -> COMPENSATING -> RECOVERED
-    const rejected = unwrap(await applyAgreementOpWithSaga(
-      repo, submitted.space, submitted.agreement, "rejectDeliverable",
-      { failureReason: "SPEC_MISMATCH" },
-    ), "rejectDeliverable");
+    const rejected = unwrap(await commitAgreementOp(repo, submitted.space, submitted.agreement, "rejectDeliverable", { failureReason: "SPEC_MISMATCH" }), "rejectDeliverable");
     expect(rejected.saga!.status).toBe("RECOVERED");
 
     // 7. GET /api/v1/sagas?sagaId=... fetches the terminal recovered saga
@@ -134,7 +127,9 @@ describe("GET /api/v1/sagas — Layer B read surface", () => {
       externalJobRefs: [], price: USDC(5), deadline: "2027-01-01T00:00:00Z",
       acceptanceCriteria: ["crit"], failurePolicy: "refund",
     }, { capability: "research", amount: USDC(5) }), "openAgreement 1");
-    await applyAgreementOpWithSaga(repo, o1.space, o1.agreement, "fund", { capability: "research", amount: USDC(5) });
+    await repo.createSpace!(sp);
+    await repo.saveAgreement!(o1.agreement);
+    await commitAgreementOp(repo, o1.space, o1.agreement, "fund", { capability: "research", amount: USDC(5) });
 
     // Saga for run_202
     const o2 = unwrap(openAgreement(sp, {
@@ -143,7 +138,8 @@ describe("GET /api/v1/sagas — Layer B read surface", () => {
       externalJobRefs: [], price: USDC(8), deadline: "2027-01-01T00:00:00Z",
       acceptanceCriteria: ["crit"], failurePolicy: "refund",
     }, { capability: "research", amount: USDC(8) }), "openAgreement 2");
-    await applyAgreementOpWithSaga(repo, o2.space, o2.agreement, "fund", { capability: "research", amount: USDC(8) });
+    await repo.saveAgreement!(o2.agreement);
+    await commitAgreementOp(repo, o2.space, o2.agreement, "fund", { capability: "research", amount: USDC(8) });
 
     // Query with filter ?runId=run_101
     const res1 = await getSagas(new Request("http://localhost/api/v1/sagas?runId=run_101"));

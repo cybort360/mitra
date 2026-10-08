@@ -20,7 +20,9 @@ import { routeCommitment } from "@/lib/domain/canonical";
 import { describe, expect, it, beforeEach } from "vitest";
 import type { Money, Space } from "@/lib/domain/types";
 import { openAgreement } from "@/lib/kernel/commerce";
-import { applyAgreementOpWithSaga, REFUND_ROUTE } from "@/lib/kernel/commerce-recovery";
+import { REFUND_ROUTE } from "@/lib/kernel/commerce-recovery";
+import { commitAgreementOp } from "@/lib/commerce/commit-op";
+import type { AgreementOp } from "@/lib/kernel/commerce";
 import { __resetLedgerForTests, getLedger } from "@/lib/store/ledger";
 import { __resetStoreForTests, getStore } from "@/lib/store/provider";
 
@@ -45,14 +47,45 @@ const draft = {
   acceptanceCriteria: ["d"], failurePolicy: "refund on expiry",
 };
 
-async function opened() {
-  const r = openAgreement(space(), draft, { capability: "research", amount: USDC(10) });
+/**
+ * Opens an agreement AND persists it, as the route does.
+ *
+ * The persist is not incidental. `commitAgreementOp` now writes the agreement (that is
+ * the F77 fix — the agreement is what names the saga), and `PostgresRepository
+ * .updateAgreement` is a strict UPDATE that throws `AGREEMENT_NOT_FOUND` when the row
+ * is absent. The in-memory backend upserts, so a fixture that skipped this step passed
+ * in memory and failed against Postgres. Persisting here means the fixture is honest on
+ * both, which is the whole point of running these suites against a real database.
+ */
+// The NONCE matters as much as the counter, and for the same reason as in
+// tests/torn-write-probe.test.ts: this suite is run against a REAL Postgres in CI, where
+// `__resetStoreForTests` resets nothing and `mitra.agreements` has a PRIMARY KEY. A
+// counter alone restarts at 1 every run and collides with the previous run's rows —
+// which surfaces as `duplicate key value violates unique constraint "agreements_pkey"`,
+// a failure that looks like a product bug and is not.
+const OPENED_NONCE = Math.random().toString(36).slice(2, 8);
+let openedCount = 0;
+
+async function opened(repo: Awaited<ReturnType<typeof getStore>>["repo"]) {
+  // The Space first: `saveAgreement` writes the `agreement_spaces` membership rows,
+  // which carry a foreign key to `mitra.spaces`. Against Postgres the order is
+  // enforced; in memory there is nothing to enforce it with.
+  await repo.createSpace!(space());
+  // A fresh id per call. The in-memory store keeps agreements in a Map, so re-using
+  // `ag_1` just overwrote it; `mitra.agreements` has a PRIMARY KEY and refuses. Every
+  // one of these fixture fixes is the same divergence (see F78), not a test bug.
+  const r = openAgreement(space(), { ...draft, agreementId: `ag_${OPENED_NONCE}_${++openedCount}` }, { capability: "research", amount: USDC(10) });
   if (!r.ok) throw new Error(r.reason);
+  await repo.saveAgreement!(r.value.agreement);
   return r.value;
 }
 
-const drive = async (repo: Awaited<ReturnType<typeof getStore>>["repo"], s: Space, a: Awaited<ReturnType<typeof opened>>["agreement"], op: Parameters<typeof applyAgreementOpWithSaga>[3], extra = {}) => {
-  const r = await applyAgreementOpWithSaga(repo, s, a, op, { capability: "research", amount: USDC(10), ...extra });
+// Goes through `commitAgreementOp` rather than the kernel, deliberately: the ordering
+// guarantee F77 bought is a property of that function, so the tests exercise the same
+// path the route does. Calling the pure kernel here would test a write order the
+// product does not use, and would keep passing when the route's did.
+const drive = async (repo: Awaited<ReturnType<typeof getStore>>["repo"], s: Space, a: Awaited<ReturnType<typeof opened>>["agreement"], op: AgreementOp, extra = {}) => {
+  const r = await commitAgreementOp(repo, s, a, op, { capability: "research", amount: USDC(10), ...extra });
   if (!r.ok) throw new Error(`${op}: ${r.reason}`);
   return r.value;
 };
@@ -67,7 +100,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("funding declares AND ARMS a saga with a pre-committed route (§15.5)", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const { saga, agreement: after } = await drive(repo, space(), agreement, "fund");
 
     expect(saga?.status, "an ARMED saga, not merely DECLARED").toBe("ARMED");
@@ -78,7 +111,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("the commitment is recorded BEFORE execution, not invented at failure time", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const { saga } = await drive(repo, space(), agreement, "fund");
     // Persisted, durable, and available to read back — the route was committed while
     // the agreement was still funded and nothing had failed.
@@ -87,14 +120,14 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("startExecution advances the saga ARMED -> EXECUTING", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     expect(e.saga?.status).toBe("EXECUTING");
   });
 
   it("THE HAZARD TEST — rejection walks EXECUTING -> STEP_FAILURE -> COMPENSATING -> RECOVERED", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     expect(e.saga?.status).toBe("EXECUTING");
@@ -122,7 +155,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
     // Evidence the intermediate states really existed. `recordStep` produces
     // STEP_FAILURE and `beginCompensation` produces COMPENSATING; if either were
     // skipped, `compensate` would have refused (`SAGA_NOT_COMPENSATING`).
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     const sub = await drive(repo, e.space, e.agreement, "submitDeliverable");
@@ -134,7 +167,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   it("zero unhandled exceptions across the whole failure lifecycle", async () => {
     // Every step above returns a Result. This asserts none of them threw, by running
     // the full chain without a single try/catch of our own.
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     const s = await drive(repo, e.space, e.agreement, "submitDeliverable");
@@ -144,7 +177,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("committed capital is returned to the Space budget", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     expect(f.space.committed.amount, "funding encumbers").toBe(10);
     const e = await drive(repo, f.space, f.agreement, "startExecution");
@@ -155,7 +188,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("settledRef stays undefined — escrow release is not payment settlement (F46)", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     const s = await drive(repo, e.space, e.agreement, "submitDeliverable");
@@ -165,7 +198,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("the compensation route cannot be replayed (F47)", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     const s = await drive(repo, e.space, e.agreement, "submitDeliverable");
@@ -194,9 +227,9 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   it("a commercial move the machine refuses does not advance the saga", async () => {
     // Commercial transition FIRST. If the saga moved independently, a rejected
     // `startExecution` would still drive a saga to EXECUTING.
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
-    const bad = await applyAgreementOpWithSaga(repo, f.space, f.agreement, "startExecution", {
+    const bad = await commitAgreementOp(repo, f.space, f.agreement, "startExecution", {
       capability: "research", amount: USDC(10_000), // over budget -> refused
     });
     expect(bad.ok).toBe(false);
@@ -204,7 +237,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("an accepted deliverable does NOT compensate — only rejection unwinds", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     const e = await drive(repo, f.space, f.agreement, "startExecution");
     const s = await drive(repo, e.space, e.agreement, "submitDeliverable");
@@ -234,7 +267,7 @@ describe("F49 Step 2 — a rejected deliverable drives the saga to terminal comp
   });
 
   it("funding with onChainEscrow pre-commits the on-chain refund route and sets escrowRef (PRD §15.5, ADR-0012)", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const jobId = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
     const onChainEscrow = {
       chain: "baseSepolia",
@@ -288,7 +321,7 @@ describe("§15.5 — the on-chain refund route is committed at funding", () => {
   };
 
   it("records a non-zero 32-byte commitment derived from the refund route", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund", { onChainEscrow });
     expect(f.agreement.refundRouteHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(f.agreement.refundRouteHash).not.toBe(`0x${"0".repeat(64)}`);
@@ -299,7 +332,7 @@ describe("§15.5 — the on-chain refund route is committed at funding", () => {
   });
 
   it("the commitment is the saga's route commitment, not a second opinion", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund", { onChainEscrow });
     const routeId = `route_refund_${jobId.slice(0, 10)}`;
     expect(f.saga?.routeCommitments?.[routeId]).toBe(f.agreement.refundRouteHash);
@@ -308,7 +341,7 @@ describe("§15.5 — the on-chain refund route is committed at funding", () => {
   it("a caller cannot supply its own commitment", async () => {
     // `refundRouteHash` is derived, never taken from the request: a caller-supplied
     // one would commit to a route other than the one compensated.
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund", {
       onChainEscrow,
       ...({ refundRouteHash: `0x${"ab".repeat(32)}` } as Record<string, unknown>),
@@ -317,9 +350,9 @@ describe("§15.5 — the on-chain refund route is committed at funding", () => {
   });
 
   it("a different job id produces a different commitment", async () => {
-    const a = await opened();
+    const a = await opened(repo);
     const fa = await drive(repo, space(), a.agreement, "fund", { onChainEscrow });
-    const b = await opened();
+    const b = await opened(repo);
     const fb = await drive(repo, space(), b.agreement, "fund", {
       onChainEscrow: { ...onChainEscrow, jobId: `0x${"cd".repeat(32)}` },
     });
@@ -327,7 +360,7 @@ describe("§15.5 — the on-chain refund route is committed at funding", () => {
   });
 
   it("an agreement funded without an on-chain escrow has no commitment", async () => {
-    const { agreement } = await opened();
+    const { agreement } = await opened(repo);
     const f = await drive(repo, space(), agreement, "fund");
     expect(f.agreement.refundRouteHash).toBeUndefined();
     expect(f.agreement.escrowRef).toBeUndefined();

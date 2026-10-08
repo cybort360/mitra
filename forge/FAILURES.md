@@ -3225,7 +3225,7 @@ route, so this makes the commitment correct but does not move capital — see
 
 ## F77 — the saga write and the agreement write are not atomic, stranding an ARMED saga
 
-**Status:** open (found 2026-10-06). Canary test in place; not fixed.
+**Status:** FIXED (2026-10-06), Option 1 — `commerce-recovery.ts` is store-free.
 **Found:** 2026-10-06, immediately after F76, while asking whether an irreversible chain call could safely live in the fund path.
 
 `applyAgreementOpWithSaga` persists the ARMED saga and **returns**
@@ -3277,7 +3277,167 @@ ARMED saga is never left unreachable"), so the suite is green today and vitest r
 a failure the moment someone makes the fund path atomic. A plain `it` asserting
 today's behaviour would have made the repair look like a regression.
 
-**Why this blocks the obvious next step.** Wiring `depositToEscrow`/`lock_escrow`
-into the fund path means an irreversible chain call in exactly this window. A strand
-that costs one unreachable saga would instead cost capital moved with no durable
-record of it. Fix F77 before any capital moves.
+**The fix (Option 1, approved by the lead).** `applyAgreementOpWithSaga` no longer
+takes a repository: it is synchronous, reads nothing, writes nothing, and returns
+`sagasToPersist` alongside the agreement and space. It also takes the agreement's
+current saga as an argument instead of fetching it — a kernel that looks up its own
+state cannot be tested against a state the test did not choose.
+
+The write happens in `lib/commerce/commit-op.ts`, in this order:
+
+```
+agreement FIRST — it is what NAMES the saga — then the sagas
+```
+
+The reverse leaves an agreement naming a saga that is not there, which the kernel
+already treats as a broken link rather than an error (`commerce-recovery.ts:173`). The
+cheap failure, chosen because it costs a saga and never strands capital. **The route
+and the test suite both go through `commitAgreementOp`**, deliberately: the ordering IS
+the guarantee, so if each caller assembled its own writes the copy in the tests would be
+the one that stopped being maintained — and a test that persists sagas before
+agreements would keep passing while the product did the opposite.
+
+**Evidence.** `tests/torn-write-probe.test.ts` rewritten from `it.fails` to a plain
+`it` (3 tests): a lost agreement write leaves NO saga; both writes succeed and the
+agreement's `sagaIds` names the ARMED saga; a store missing the optional write methods
+refuses with `AgreementStoreIncomplete` before writing anything. **Mutation audit 5/5
+killed**, plus M5 for a `this`-losing bug this refactor introduced itself (see below).
+
+**Two bugs this work found in itself, both worth naming.**
+
+- *A guard that could not fire.* The first version checked `saveSaga`, which is
+  **required** on `EconomicRepository` — so the check was unreachable dead code that
+  read like protection. Now it checks only `updateAgreement`/`updateSpace`, which really
+  are optional, and its test asserts the error **class** rather than the message: a
+  `/updateSpace/` regex also matches the raw `TypeError` you get with the guard removed,
+  and that weak assertion let the "drop the guard" mutation survive a full round.
+- *Losing `this`.* Writing `const { updateAgreement } = repo; await updateAgreement(…)`
+  drops the receiver and dies on `this.agreementsMap`. Caught by the existing tests, not
+  by reasoning. The comment in `commit-op.ts` says so, because it is the obvious
+  "tidier" edit and it is wrong.
+
+**Why this unblocked the obvious next step.** Wiring `depositToEscrow`/`lock_escrow`
+into the fund path means an irreversible chain call. That is now safe from the tear, and
+the §15.5 commitment it will carry is genuinely reachable. Two more defects surfaced
+while proving it against a real database — see F79 and F80.
+
+## F79 — `saveSaga` names its columns explicitly, so a new `Saga` field is silently dropped
+
+**Status:** fixed (2026-10-06).
+**Found:** 2026-10-06, while running the F77 suites against real PostgreSQL.
+
+`PostgresRepository.saveSaga` writes an explicit column list. Adding
+`routeCommitments` to the `Saga` type and enforcing it in the kernel was therefore not
+enough — the field reached the database call and vanished. The next `compensate` on that
+saga failed with `COMPENSATION_ROUTE_NOT_COMMITTED`.
+
+**It failed CLOSED, which is exactly why it survived.** The in-memory store keeps whole
+objects, so 1128 in-memory assertions stayed green while the only backend that runs in
+production quietly lost the §15.5 commitment. A guarantee that is enforced in the kernel
+and absent in the datastore is not a guarantee; it is a check that happens to fail
+loudly instead of silently passing, which is better than the reverse and still a defect.
+
+**The test that should have caught it did not, because it was a hardcoded list.**
+`tests/saga-persistence.test.ts` asserted that `mitra.sagas` contains eleven columns
+named out by hand. Adding a twelfth field to the type did not touch that list, so it
+could not fail. It now derives the expected columns from a representative `Saga`'s own
+key set against an explicit camelCase→column mapping, so a new field cannot be added
+without the test noticing.
+
+Two more gaps in the same method, both closed at once: the parameter array was not
+extended when the column was added to the SQL (the query would have failed loudly, but
+only at runtime against a real database), and the `ON CONFLICT DO UPDATE` clause needs
+the column too or every saga that advances once loses it.
+
+**The general lesson, which is the reason this is recorded rather than just patched.**
+Any `Saga`/`Agreement` field added to a domain type must be added to the Postgres write
+list, the row mapper and the migration in the same commit. Three of the four repositories
+store whole documents as JSONB and need nothing; `sagas` is the odd one out with named
+columns, which makes it the one place this failure can happen. The derived-column test
+now guards exactly that place.
+
+**Evidence.** `tests/saga-persistence.test.ts`: the derived column assertion, plus an
+F79 test that persists `routeCommitments`, re-reads through a **fresh** `getSaga` —
+reading back the object the kernel returned would prove nothing — checks it equals
+`keccak256` of the refund route, checks the agreement carries the identical value, and
+then drives the saga all the way to compensation **from reloaded state**.
+
+## F80 — the refund route was rebuilt after the failure, so no on-chain escrow could ever be refunded
+
+**Status:** fixed (2026-10-06).
+**Found:** 2026-10-06, by F76's commitment check refusing a legitimate refund.
+
+At `rejectDeliverable` the kernel reconstructed the refund route from
+`agreement.escrowRef`, which is only the job id:
+
+```
+funded as     evm:refundEscrow:baseSepolia:0x6a73…:0x7c7c…
+rebuilt as    evm:refundEscrow:0x7c7c…
+```
+
+F76 hashes the committed route and re-derives the hash of the route about to run, so this
+failed with `COMPENSATION_ROUTE_REDIRECTED` — **correctly, and permanently**. The string
+being executed was not the string that was agreed, and no amount of retrying helps. Every
+agreement funded against an on-chain escrow would have reached REJECTED and been
+permanently unrefundable, with the capital sitting in the escrow until its timeout.
+
+This is §15.5's actual prohibition, arrived at from the other direction: the rule is not
+only "do not invent a route", it is **"do not reconstruct one"**. The refund was reading
+whatever the agreement happened to still carry, and an agreement only ever stored the
+job id — the chain and contract lived in the caller's request and nowhere else. The
+recovery path's correctness depended on the caller happening to resend `onChainEscrow`.
+
+**Why every suite missed it.** `tests/commerce-saga.test.ts` passes `onChainEscrow`
+again on the reject call, which reconstructs the full route by hand at the call site and
+makes the kernel's reconstruction agree with the commitment by coincidence. The bug only
+appears when the caller does NOT resend it — which is the realistic case and the one a
+timeout refund takes, since nothing is driving the request.
+
+**The fix.** `declareSaga` now records `committedRoutes` (routeId → route body) next to
+the hashes, taken from the same declaration, so the two cannot disagree. The reject path
+builds `availableRoutes` from those committed bodies and consults nothing else. The
+pre-F80 reconstruction survives only as the fallback for a saga declared before the field
+existed, where the commitment check will refuse anything that does not match — the right
+outcome for an unverifiable route.
+
+**Evidence.** `tests/saga-persistence.test.ts` (F79 suite) asserts the committed body
+survives the round trip **and** that a reloaded saga can still reach compensation.
+Mutation audit: reverting to the `escrowRef` reconstruction → 1 failure; dropping
+`committedRoutes` from the `Saga` mapper → 1 failure; dropping it from `declareSaga` → 8
+failures.
+
+## F78 — the in-memory backend silently tolerates what PostgreSQL refuses
+
+**Status:** open (recorded 2026-10-06). Not fixed; it is a property of the test backend.
+**Found:** 2026-10-06, four times in one hour, while making the F77 suites pass on both backends.
+
+`InMemoryRepository` and `PostgresRepository` do not agree on the contract, in the same
+direction every time: **the cheap backend accepts things the real one rejects.**
+
+| Call | In-memory | Postgres |
+|---|---|---|
+| `updateAgreement` | `Map.set` — upsert, silently creates | strict `UPDATE`, throws `AGREEMENT_NOT_FOUND` |
+| `saveAgreement` | `Map.set` — overwrites a duplicate id | `INSERT`, throws on the primary key |
+| `agreement_spaces` FK | not represented, so never enforced | enforced; a missing Space fails the write |
+
+Every one of these produced a green in-memory suite and a red Postgres run on a fixture
+that had been quietly relying on the tolerance. Three test files needed real changes for
+this reason alone.
+
+**Why it matters beyond test convenience.** 68 of 77 test files run against the in-memory
+backend by default. A suite can therefore be green while the production backend would
+refuse the same calls — which is precisely what happened to F79, and what made F80
+invisible. The divergence is not a test bug; it is the reason the whole `DATABASE_URL`
+matrix exists, and the reason approving the devbox Postgres privileges (lead, this
+session) was worth more than it looked.
+
+**Also surfaced, and fixed here.** Two fixtures assumed a clean slate that only exists
+in memory: `__resetStoreForTests` resets nothing in Postgres, so ids generated from a
+counter that restarts at 1 collide with the previous run's rows. Both now carry a
+per-process nonce, without which the second run of a suite fails with
+`duplicate key value violates unique constraint "agreements_pkey"` — a failure that looks
+like a product bug and is not.
+
+**Open, deliberately.** Making `InMemoryRepository.updateAgreement` strict like Postgres
+would catch more of this in the default suite, but it would change behaviour for every
+test that passes an unpersisted agreement, and that is a bigger call than this entry.

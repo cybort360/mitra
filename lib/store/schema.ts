@@ -283,11 +283,27 @@ export const MIGRATIONS: string[] = [
     steps               JSONB NOT NULL DEFAULT '[]'::jsonb,
     compensation_routes JSONB NOT NULL DEFAULT '[]'::jsonb,
     route_attempts      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- F76: the PRD §15.5 commitment for each route. Added when the kernel began
+    -- enforcing it, because saveSaga writes an explicit column list — a field on the
+    -- Saga type that is not in that list is silently dropped, and the kernel then
+    -- refuses to compensate (COMPENSATION_ROUTE_NOT_COMMITTED). It failed CLOSED, which
+    -- is why the in-memory suites stayed green while Postgres quietly lost the
+    -- commitment. See F79.
+    route_commitments   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- F80: the committed route BODIES. Without these the refund route has to be
+    -- reconstructed after the failure, which is what §15.5 forbids.
+    committed_routes    JSONB NOT NULL DEFAULT '{}'::jsonb,
     timeout_policy      TEXT NOT NULL DEFAULT '',
     version             INTEGER NOT NULL DEFAULT 1,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-  CREATE INDEX IF NOT EXISTS idx_sagas_run ON mitra.sagas(run_id);
+  CREATE INDEX IF NOT EXISTS idx_sagas_run ON Mitra.sagas(run_id);
+
+  -- F76/F79: added to an EXISTING table, so the CREATE TABLE IF NOT EXISTS above is a
+  -- no-op on any database created before the column existed. Without this the column
+  -- exists only on fresh databases and the bug returns on every existing install.
+  ALTER TABLE mitra.sagas ADD COLUMN IF NOT EXISTS route_commitments JSONB NOT NULL DEFAULT '{}'::jsonb;
+  ALTER TABLE mitra.sagas ADD COLUMN IF NOT EXISTS committed_routes JSONB NOT NULL DEFAULT '{}'::jsonb;
   CREATE INDEX IF NOT EXISTS idx_sagas_status ON mitra.sagas(status);
 
   -- The agreement a reservation pays (sprint item 1). Nullable: most reservations

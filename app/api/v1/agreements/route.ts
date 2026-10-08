@@ -8,7 +8,7 @@ import {
   mayInstruct,
   type AgreementOp,
 } from "@/lib/kernel/commerce";
-import { applyAgreementOpWithSaga } from "@/lib/kernel/commerce-recovery";
+import { commitAgreementOp } from "@/lib/commerce/commit-op";
 import { recordEvent } from "@/lib/store/events";
 import { requestBodyHash, verifySignedRequest } from "@/lib/identity/signed-request";
 import { signatureVerifierFor } from "@/lib/identity/verifier";
@@ -280,7 +280,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const opResult = await applyAgreementOpWithSaga(
+  // `commitAgreementOp` loads the agreement's saga, applies the op through the
+  // store-free kernel, and persists the whole result — agreement first, then sagas.
+  // That order is the F77 fix, and it lives in ONE function so the test suite and the
+  // route cannot drift apart on it.
+  const opResult = await commitAgreementOp(
     repo,
     space,
     agreement,
@@ -307,8 +311,7 @@ export async function POST(req: Request) {
     );
   }
 
-  await repo.updateAgreement(opResult.value.agreement);
-  await repo.updateSpace(opResult.value.space);
+  // Already persisted by `commitAgreementOp`, in the order that matters.
   await recordEvent(repo, {
     runId: agreement.runId, kind: "COMMERCE", title: `Agreement ${agreement.status} → ${opResult.value.agreement.status}`,
     status: opResult.value.agreement.status === "REJECTED" ? "WARNING" : "SUCCESS",
