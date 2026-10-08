@@ -96,6 +96,15 @@ export interface EvmEscrowRail {
 }
 
 export interface SolanaEscrowRail {
+  /**
+   * The escrow's client/authority, as base58.
+   *
+   * On Solana the `client` is not a caller-supplied address: `vaultPda(client)` derives the
+   * vault from it and the program checks it as the authority. So the escrow's `client`
+   * term is fixed by the key that will sign, and the route must read it from the rail
+   * rather than invent it.
+   */
+  readonly authority: string;
   /** The escrow PDA's account bytes, or `null` when the account does not exist. */
   readEscrow(jobId: Uint8Array): Promise<Buffer | null>;
   lockEscrow(jobId: Uint8Array, terms: SolanaLockTerms): Promise<string>;

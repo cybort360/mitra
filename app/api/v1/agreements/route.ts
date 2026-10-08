@@ -477,12 +477,42 @@ async function runEscrowStep(
     };
   }
 
-  const intended: EscrowTerms = {
-    amount: agreementOnChainAmount(agreement),
-    provider: providerAddress,
-    client: requested.contractAddress,
-    timeout: BigInt(requested.timeout ?? Math.floor(new Date(agreement.deadline).getTime() / 1000)),
-  };
+  // ── Terms are RAIL-SPECIFIC, and guessing here is how the two rails drift ──────
+  //
+  // The same agreement means different numbers on different chains, so there is no
+  // single conversion:
+  //
+  //   EVM     `client` is a deployed MitraVault address the caller names; `amount` is the
+  //           token in base units; the refund returns tokens to that vault.
+  //   Solana  `client` is FIXED BY THE SIGNING KEY — `vaultPda(client)` derives the vault
+  //           from it and the program checks it as the authority — so it is read from the
+  //           rail, never taken from the request; `amount` is lamports.
+  //
+  // Reading `client` from `requested.contractAddress` on both rails is what the first
+  // version did, and on Solana it would have compared a base58 authority against an
+  // EVM-shaped address and reported `ESCROW_PROVIDER_DIFFERS` for every probe.
+  let lamports: bigint | null = null;
+  if (rail.solana) {
+    try {
+      lamports = lamportsFor(agreement);
+    } catch (e) {
+      return { refused: { action, reason: "SOLANA_ESCROW_AMOUNT_UNSUPPORTED", detail: (e as Error).message } };
+    }
+  }
+  const timeout = BigInt(requested.timeout ?? Math.floor(new Date(agreement.deadline).getTime() / 1000));
+  const intended: EscrowTerms = rail.solana
+    ? {
+        amount: lamports!,
+        provider: providerAddress,
+        client: rail.solana.authority,
+        timeout,
+      }
+    : {
+        amount: agreementOnChainAmount(agreement),
+        provider: providerAddress,
+        client: requested.contractAddress,
+        timeout,
+      };
 
   if (action === "locked") {
     const outcome = await executeEscrowLock({
@@ -517,6 +547,26 @@ const ESCROW_ACTION_FOR_OP: Partial<Record<AgreementOp, "locked" | "released" | 
   acceptDeliverable: "released",
   rejectDeliverable: "refunded",
 };
+
+/**
+ * The escrowed amount in LAMPORTS, for the Solana rail.
+ *
+ * Solana escrows native lamports, not a token, so a decimal USDC amount has no direct
+ * conversion — and inventing one would put the wrong number of lamports in an account whose
+ * balance is the whole guarantee. **1 USDC == 1 lamport is refused, not approximated**: a
+ * devnet/testnet placeholder that silently differs from mainnet by nine orders of magnitude
+ * is exactly the kind of value that looks fine in testing and is catastrophic live.
+ */
+function lamportsFor(agreement: Agreement): bigint {
+  const { amount } = agreement.price;
+  if (amount !== 1) {
+    throw new Error(
+      `SOLANA_ESCROW_AMOUNT_NOT_1: the Solana rail escrows lamports and this agreement prices ${amount} ${agreement.price.asset}; ` +
+      `refusing to guess a lamports-per-token conversion`,
+    );
+  }
+  return 1n;
+}
 
 /**
  * The escrowed amount, in the asset's smallest unit.

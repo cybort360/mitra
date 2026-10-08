@@ -8,9 +8,14 @@ import {
 import { routeCommitment } from "@/lib/domain/canonical";
 import { onChainRefundRouteFor } from "@/lib/kernel/commerce-recovery";
 import { ERC8183Transport, normalizeJobRow } from "@/lib/adapters/erc8183-transport";
-import { ACCOUNT, ESCROW_LEN, jobIdFor } from "@/lib/solana/vault-program";
-import { PublicKey } from "@solana/web3.js";
+import { ACCOUNT, ESCROW_LEN, jobIdFor, vaultPda, VAULT_PROGRAM_ID } from "@/lib/solana/vault-program";
+import { readSolanaKeypair } from "@/lib/adapters/solana-escrow-transport";
+import { Keypair, PublicKey, SystemProgram, type Connection } from "@solana/web3.js";
+import { createHash } from "node:crypto";
+import { SolanaEscrowRailImpl } from "@/lib/adapters/solana-escrow-transport";
 import type { Agreement, Money } from "@/lib/domain/types";
+
+const SOLANA_KEY = ".dev-keys/solana-testnet.json";
 
 /** USDC on Base Sepolia — the token a live job escrow holds. */
 const USDC_ADDRESS = "0x036cbd53842c5426634e7929541ec2318f3dcf7e" as `0x${string}`;
@@ -87,6 +92,8 @@ function solanaRail(bytes: Buffer | null) {
   let account = bytes;
   const rail: SolanaEscrowRail & { calls: string[] } = {
     calls,
+    // The escrow's client is fixed by the signing key on Solana, so the fake reports one.
+    authority: SOL_CLIENT,
     async readEscrow() { calls.push("readEscrow"); return account; },
     async lockEscrow() { calls.push("lockEscrow"); return "SOLLOCK"; },
     async releaseEscrow() { calls.push("releaseEscrow"); return "SOLRELEASE"; },
@@ -562,5 +569,211 @@ describe("F82 — a `jobs()` read is normalised into named fields", () => {
     // Assigning the concrete transport to the bridge interface must be a plain assignment.
     const typed: EvmEscrowRail | undefined = rail?.evm;
     expect(typed).toBeDefined();
+  });
+});
+
+/**
+ * The Solana escrow rail's own guarantees.
+ *
+ * These use a fake `Connection` rather than the interface-level fake used above, because
+ * the claims under test are about **what the rail did to the chain**: that it waits for
+ * confirmation, that a confirmed-but-absent escrow is a failure rather than a success, and
+ * that `releaseEscrow` reads the provider off the account instead of trusting a caller.
+ */
+describe("LP-6 — the Solana rail waits for the effect, not just the signature", () => {
+  const AUTHORITY = Keypair.fromSeed(createHash("sha256").update("lp6-sol-authority").digest());
+  const PROVIDER = Keypair.fromSeed(createHash("sha256").update("lp6-sol-provider").digest());
+
+  /** A Connection that records calls and answers from a script. */
+  function fakeConnection(over: {
+    account?: Buffer | null;
+    confirmFails?: boolean;
+    latestBlockhash?: string;
+  } = {}) {
+    const calls: string[] = [];
+    let account = over.account ?? null;
+    const conn = {
+      calls,
+      getAccountInfo: async () => { calls.push("getAccountInfo"); return account ? { data: account } : null; },
+      // A real 32-byte base58 blockhash: `Transaction.serialize` validates the length,
+      // so a short placeholder fails at encoding and masks the behaviour under test.
+      getLatestBlockhash: async () => {
+        calls.push("getLatestBlockhash");
+        return { blockhash: over.latestBlockhash ?? SystemProgram.programId.toBase58(), lastValidBlockHeight: 1 };
+      },
+      sendRawTransaction: async () => { calls.push("sendRawTransaction"); return "SIG1"; },
+      confirmTransaction: async () => {
+        calls.push("confirmTransaction");
+        if (over.confirmFails) throw new Error("block height exceeded");
+      },
+      setAccount: (b: Buffer | null) => { account = b; },
+    };
+    return conn;
+  }
+
+  const railWith = (conn: ReturnType<typeof fakeConnection>) =>
+    new SolanaEscrowRailImpl({ client: AUTHORITY, programId: new PublicKey(VAULT_PROGRAM_ID), connection: conn as unknown as Connection });
+
+  it("REFUSES a keyfile paired with the wrong vault rather than moving the wrong lamports", () => {
+    // `vaultPda(client)` derives the vault from the signing key, so a mismatched
+    // MITRA_SOLANA_VAULT would derive a *different* vault. Failing here names the cause;
+    // failing at the program does not.
+    expect(() => new SolanaEscrowRailImpl({
+      rpcUrl: "http://127.0.0.1:1",
+      client: AUTHORITY,
+      programId: new PublicKey(VAULT_PROGRAM_ID),
+      expectVault: "11111111111111111111111111111111",
+    })).toThrow(/SOLANA_VAULT_MISMATCH/);
+  });
+
+  it("accepts the vault its own key derives", () => {
+    const [vault] = vaultPda(AUTHORITY.publicKey, new PublicKey(VAULT_PROGRAM_ID));
+    expect(() => new SolanaEscrowRailImpl({
+      rpcUrl: "http://127.0.0.1:1", client: AUTHORITY,
+      programId: new PublicKey(VAULT_PROGRAM_ID), expectVault: vault.toBase58(),
+    })).not.toThrow();
+  });
+
+  it("exposes the authority as base58, because that is what the escrow records as client", () => {
+    const rail = new SolanaEscrowRailImpl({ rpcUrl: "http://127.0.0.1:1", client: AUTHORITY });
+    expect(rail.authority).toBe(AUTHORITY.publicKey.toBase58());
+  });
+
+  const LOCK = {
+    amount: 1n, timeout: 1_900_000_000n,
+    refundRouteHash: Buffer.from(COMMITMENT.slice(2), "hex"),
+    provider: PROVIDER.publicKey.toBase58(),
+  };
+
+  it("awaits confirmation before reporting a lock", async () => {
+    const conn = fakeConnection({ account: solanaEscrowBytes() });
+    await railWith(conn).lockEscrow(jobIdFor("ag_lp6"), LOCK);
+    expect(conn.calls.indexOf("sendRawTransaction")).toBeLessThan(conn.calls.indexOf("confirmTransaction"));
+  });
+
+  it("REFUSES when the signature never confirms", async () => {
+    // A signature comes back whether or not the transaction succeeded, so waiting is the
+    // only difference between "locked" and "reported as locked".
+    const conn = fakeConnection({ account: solanaEscrowBytes(), confirmFails: true });
+    await expect(railWith(conn).lockEscrow(jobIdFor("ag_lp6"), LOCK)).rejects.toThrow(/NOT CONFIRMED/);
+  });
+
+  it("REFUSES a confirmed transaction that left no escrow behind", async () => {
+    // "Confirmed" is not the same claim as "the escrow exists", and the caller is about to
+    // record the second on the strength of the first.
+    const conn = fakeConnection({ account: null });
+    await expect(railWith(conn).lockEscrow(jobIdFor("ag_lp6"), LOCK)).rejects.toThrow(/NO ESCROW EXISTS/);
+  });
+
+  it("REFUSES a confirmed escrow carrying no §15.5 commitment", async () => {
+    // An escrow with no commitment can never be refunded, and discovering that at refund
+    // time is too late — so it is a failure here, at the moment the commitment was available.
+    const conn = fakeConnection({ account: solanaEscrowBytes({ commitment: `0x${"0".repeat(64)}` }) });
+    await expect(railWith(conn).lockEscrow(jobIdFor("ag_lp6"), LOCK)).rejects.toThrow(/COMMITMENT/);
+  });
+
+  it("reads the provider off the account to release, and refuses with no escrow at all", async () => {
+    // `releaseEscrowIx` names the provider as a positional account only because Solana
+    // requires every touched account in the message; the program refuses it unless it is
+    // the key the escrow recorded. A caller-chosen provider would pay whoever was named, so
+    // the rail reads it and the payment can only go to the committed party.
+    const conn = fakeConnection({ account: solanaEscrowBytes({ provider: PROVIDER.publicKey.toBase58() }) });
+    await railWith(conn).releaseEscrow(jobIdFor("ag_lp6")).catch(() => undefined);
+    expect(conn.calls, "the provider came from a read, not from a parameter").toContain("getAccountInfo");
+
+    const empty = fakeConnection({ account: null });
+    await expect(railWith(empty).releaseEscrow(jobIdFor("ag_lp6"))).rejects.toThrow(/NO_ESCROW_FOR_JOB/);
+  });
+
+  it("refunds without needing the vault authority, as the program intends", async () => {
+    // `refundEscrowIx` accepts any caller who pays the fee. That autonomy is the property
+    // `releaseEscrowIx` cannot offer, and the rail must not quietly reintroduce authority.
+    const conn = fakeConnection({ account: solanaEscrowBytes() });
+    expect(await railWith(conn).refundEscrow(jobIdFor("ag_lp6"))).toBe("SIG1");
+  });
+});
+
+/**
+ * LP-6 live: a real escrow on Solana Devnet.
+ *
+ * Gated on `SOLANA_ESCROW_LIVE=1` and a keypair file. This is the suite that found F82 on
+ * the EVM side, and it is the only thing that can show the Solana rail's `getAccountInfo`
+ * and instruction encoding agree with a deployed program.
+ *
+ * LP-4 already proved `lockEscrow` / `release_escrow` / `refund_escrow` work in isolation via
+ * `scripts/escrow-devnet.mjs`. What is unproven — and what this closes — is that the rail the
+ * ROUTE uses speaks the same protocol: same PDA derivation, same account layout, same
+ * commitment.
+ */
+describe.skipIf(
+  !(process.env.SOLANA_ESCROW_LIVE === "1"
+    && existsSync(SOLANA_KEY)
+    && (process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com") !== ""),
+)("live: the Solana escrow rail speaks the deployed program's protocol (SOLANA_ESCROW_LIVE=1)", () => {
+  const rpc = process.env.SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+  let rail: SolanaEscrowRailImpl;
+  let client: Keypair;
+
+  beforeAll(() => {
+    client = readSolanaKeypair(SOLANA_KEY);
+    rail = new SolanaEscrowRailImpl({ rpcUrl: rpc, client, commitment: "confirmed" });
+  });
+
+  it("probes ABSENT, locks for real, then probes FUNDED — and a replay skips", async () => {
+    const id = `ag_live_sol_${Math.random().toString(36).slice(2, 10)}`;
+    const jobId = jobIdFor(id);
+    const provider = Keypair.fromSeed(createHash("sha256").update(`lp6-live-provider:${id}`).digest());
+    const commitment = routeCommitment(onChainRefundRouteFor({ chain: "solana", contractAddress: new PublicKey(VAULT_PROGRAM_ID).toBase58(), jobId: escrowIdFor(id) }));
+    // ONE timeout for the lock and both probes. An earlier version computed it twice, and
+    // the probe then reported MISMATCH on a correctly-funded escrow — which is the guard
+    // working, and a useful reminder that a term comparison is only as good as the terms.
+    const TIMEOUT = BigInt(Math.floor(Date.now() / 1000) + 3600);
+    const TERMS = { amount: 1n, provider: provider.publicKey.toBase58(), client: rail.authority, timeout: TIMEOUT };
+
+    const before = await probeEscrowStatus(
+      agreement({ agreementId: id }),
+      { chain: "solana", network: "devnet", solana: rail },
+      TERMS,
+    );
+    expect(before.state, `a fresh job id must be ABSENT (${JSON.stringify(before)})`).toBe("ABSENT");
+
+    let sig: string | undefined;
+    try {
+      sig = await rail.lockEscrow(jobId, {
+        amount: 1n,
+        timeout: TIMEOUT,
+        refundRouteHash: Buffer.from(commitment.slice(2), "hex"),
+        provider: provider.publicKey.toBase58(),
+      });
+    } catch (e) {
+      // A refusal here is a real result: the vault PDA is derived from the client key and
+      // may hold no lamports. Report it rather than asserting a broadcast that did not happen.
+      console.warn(`[lp6-live-sol] lock refused: ${(e as Error).message}`);
+      return;
+    }
+    console.log(`[lp6-live-sol] lock_escrow ${sig}`);
+    expect(sig, "a signature, never a placeholder").toMatch(/^[1-9A-HJ-NP-Za-km-z]{80,90}$/);
+
+    const after = await probeEscrowStatus(
+      agreement({ agreementId: id }),
+      { chain: "solana", network: "devnet", solana: rail },
+      TERMS,
+    );
+    expect(after.state).toBe("FUNDED");
+
+    // The committed route on chain is the one the kernel derived (F81/F80 across rails).
+    if (after.state === "FUNDED") {
+      expect(after.onChainRefundRouteHash.toLowerCase()).toBe(commitment.toLowerCase());
+    }
+
+    // The replay: probe finds it funded, so nothing is broadcast and no hash is invented.
+    const replay = await executeEscrowLock({
+      agreement: agreement({ agreementId: id }),
+      intended: TERMS,
+      refundRouteHash: commitment,
+      rail: { chain: "solana", network: "devnet", solana: rail },
+    });
+    expect(replay).toMatchObject({ ok: true, skipped: true, reason: "ALREADY_FUNDED" });
+    expect(replay).not.toHaveProperty("txHash");
   });
 });

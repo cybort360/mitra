@@ -22,6 +22,8 @@
 
 import type { EscrowRail, EvmEscrowRail } from "@/lib/commerce/onchain-escrow";
 import { ERC8183Transport, type EscrowNetwork } from "@/lib/adapters/erc8183-transport";
+import { SolanaEscrowRailImpl, readSolanaKeypair } from "@/lib/adapters/solana-escrow-transport";
+import type { Keypair } from "@solana/web3.js";
 
 /** Chains `onChainEscrow.chain` may name. Anything else is not a rail we have. */
 const EVM_NETWORKS = new Set<string>(["baseSepolia", "moderato", "base", "tempo"]);
@@ -103,12 +105,31 @@ export function escrowRailFor(
   }
 
   if (isSolanaNetwork(requestedChain)) {
-    // No rail is constructed here yet: the Solana escrow rail needs a funded
-    // `Connection`, a vault PDA and an authority keypair, which is the next slice of LP-6
-    // rather than something to fake. Returning null makes the route REFUSE a Solana
-    // escrow, which is the correct behaviour while the rail cannot exist — an agreement
-    // whose capital was never escrowed must not be recorded as funded.
-    return null;
+    const keyFile = env.MITRA_SOLANA_CLIENT_KEY_FILE ?? env.MITRA_SOLANA_ENGINE_KEY_FILE;
+    if (!env.SOLANA_RPC_URL || !keyFile) return null;
+    let client: Keypair;
+    try {
+      client = readSolanaKeypair(keyFile);
+    } catch {
+      // An unreadable or malformed keyfile is "no rail", not a crash: the route refuses
+      // with ESCROW_RAIL_NOT_CONFIGURED, which is a clearer answer than a 500 from the
+      // rail factory.
+      return null;
+    }
+    try {
+      const solana = new SolanaEscrowRailImpl({
+        rpcUrl: env.SOLANA_RPC_URL,
+        client,
+        commitment: env.SOLANA_ESCROW_COMMITMENT === "finalized" ? "finalized" : "confirmed",
+        ...(env.MITRA_SOLANA_VAULT ? { expectVault: env.MITRA_SOLANA_VAULT } : {}),
+      });
+      return { chain: "solana", network: "devnet", solana };
+    } catch {
+      // Includes SOLANA_VAULT_MISMATCH. A keyfile paired with the wrong vault would derive
+      // a different vault and move lamports from the wrong account, so this must refuse
+      // rather than quietly proceed against whatever the key derives.
+      return null;
+    }
   }
 
   return null;

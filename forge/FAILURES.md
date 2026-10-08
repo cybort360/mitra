@@ -3579,3 +3579,77 @@ wrong thing**:
 
 Both now generate per-run, per-test identities. This is the concrete cost of F78 being open,
 and the argument for closing it.
+
+## F85 — the two rails mean different things by the same field names
+
+**Status:** fixed (2026-10-08), with the Solana rail slice.
+**Found:** 2026-10-08, while wiring `escrowRailFor` for Solana.
+
+The bridge's `EscrowTerms` has one shape and **two meanings**:
+
+| | `client` | `amount` |
+|---|---|---|
+| EVM | a deployed MitraVault address the caller names; the refund returns tokens there | the token in base units |
+| Solana | **fixed by the signing key** — `vaultPda(client)` derives the vault from it and the program checks it as the authority | **lamports**, not a token |
+
+The route built one `EscrowTerms` for both, reading `client` from `requested.contractAddress`.
+On Solana that compares a base58 authority against an EVM-shaped address and reports
+`ESCROW_PROVIDER_DIFFERS` on every probe — so the Solana rail would have appeared to work and
+never once matched its own chain.
+
+Three changes:
+
+- `SolanaEscrowRail.authority` exposes the client the rail will actually sign as, and the
+  route reads it. It cannot be a request field: the vault PDA is *derived* from that key, so
+  a caller-chosen value would address a vault the signer does not control.
+- Amounts are converted per rail.
+- **Lamports are not guessed.** `lamportsFor` accepts only a price of exactly 1 and refuses
+  otherwise with `SOLANA_ESCROW_AMOUNT_UNSUPPORTED`. A devnet placeholder that silently
+  differs from mainnet by nine orders of magnitude is precisely the kind of value that looks
+  fine in testing and is catastrophic live, so "1 USDC == 1 lamport" is stated as a refusal
+  rather than adopted as a conversion.
+
+This is F81's sibling: two rails, one name, two meanings. F81 was the same collision in a
+hash; this is it in a struct.
+
+## F86 — a Solana signature is not evidence that the escrow exists
+
+**Status:** fixed (2026-10-08) in `SolanaEscrowRailImpl`.
+**Found:** 2026-10-08, by reasoning about the transport rather than by a failure — and the
+reasoning is F82's again.
+
+`sendRawTransaction` returns a signature whether or not the transaction took effect. A rail
+that reports that as `locked` produces exactly the failure LP-6 exists to prevent: the
+database records capital escrowed, and nothing is. So `send` **waits for confirmation and
+then re-reads the resulting account**, and treats three observations as failures:
+
+- the signature never confirms → `NOT CONFIRMED`
+- confirmed, but no escrow account exists → `CONFIRMED BUT NO ESCROW EXISTS`
+- confirmed, but the account carries no §15.5 commitment → `CONFIRMED WITHOUT A §15.5 COMMITMENT`
+
+The third is worth separating. The program permits a zero hash in an account created some
+other way, and such an escrow **can never be refunded**. Detecting it at lock time, while the
+route hash was still in hand, is the difference between a loud failure and a job whose
+recovery route silently does not exist.
+
+Also removed while writing it: `getLatestBlockhash` was being called **twice** in `send`, so
+the blockhash on the transaction was not the one paired with `lastValidBlockHeight` for its
+confirmation. That is an intermittent "block height exceeded" on a valid transaction — a bug
+that would have been attributed to the network.
+
+**Evidence.** 6 hermetic tests against an injected `Connection` (a seam, not a
+monkey-patched private field): confirmation awaited after send; unconfirmed refused; confirmed
+-but-absent refused; confirmed-without-commitment refused; the release path reads the provider
+**off the account** and refuses with no escrow at all; the refund needs no vault authority.
+
+**Live.** `jW14aBAbYPZDWPqRG99CHfqRwXfdvyaeAxgnrXMD1Kw1Kf5V9zfLY2wNC1WxbfCqBfkqKhNni3rzcG75gMaHZWZ`
+on devnet: probed `ABSENT` → `lock_escrow` → probed `FUNDED` → the account's
+`refundRouteHash` equals the kernel's derivation → the replay returned `skipped:
+ALREADY_FUNDED` with **no** `txHash`. LP-4 had proved the instruction in isolation via
+`scripts/escrow-devnet.mjs`; this proves the rail the **route** uses speaks the same protocol.
+
+**One test bug worth recording**, because it looked like a product failure: the first live run
+reported `MISMATCH` on a correctly-funded escrow. The probe's timeout was computed a second
+time and had moved by the wall-clock second between the lock and the probe. The guard was
+right; the test was wrong. A term comparison is only as good as the terms, and a timeout
+recomputed mid-test is two different terms.
