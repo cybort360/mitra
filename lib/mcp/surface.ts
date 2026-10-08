@@ -57,6 +57,9 @@ export const mcpTools = [
   "mitra_get_settlement",
   "mitra_get_receipt",
   "mitra_get_timeline",
+  // PP-6: an agent's actionable work, addressed to its id, so it need not poll
+  // the agreement and settlement tables and work out its own next move.
+  "mitra_get_inbox",
 ] as const;
 
 export type McpToolName = (typeof mcpTools)[number];

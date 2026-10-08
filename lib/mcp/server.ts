@@ -68,6 +68,7 @@ export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   mitra_create_intent: { status: "served" },
   mitra_get_intent: { status: "served" },
   mitra_get_timeline: { status: "served" },
+  mitra_get_inbox: { status: "served" },
 };
 
 interface ServedTool {
@@ -139,6 +140,20 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
     description: "A run's timeline from Mitra's append-only event log: what happened, in order, including refusals.",
     inputSchema: { runId: z.string().min(1) },
     toRequest: (a) => ({ method: "GET", path: `/api/v1/events${qs({ runId: a.runId })}` }),
+  },
+  mitra_get_inbox: {
+    description:
+      "An agent's inbox: agreements where it must start or submit work (WORK_REQUIRED), a deliverable it may accept " +
+      "or reject (EVALUATION_REQUIRED), OPEN agreements naming it as provider (INBOUND_PROPOSAL), and confirmed " +
+      "settlements paying it (SETTLEMENT_RECEIPT). Each item lists the ops this agent may sign next. Most urgent first.",
+    inputSchema: {
+      agentId: z.string().min(1),
+      kinds: z.array(z.enum(["WORK_REQUIRED", "EVALUATION_REQUIRED", "INBOUND_PROPOSAL", "SETTLEMENT_RECEIPT"])).optional(),
+    },
+    toRequest: (a) => ({
+      method: "GET",
+      path: `/api/v1/inbox/${encodeURIComponent(String(a.agentId))}${qs({ kind: (a.kinds as string[] | undefined)?.join(",") })}`,
+    }),
   },
   mitra_get_exposure: {
     description: "Capital, obligations and settlements reconciled into one accounting report, as of a time.",

@@ -24,6 +24,7 @@
 
 import { mitraRequestTypedData, registrationRequest, requestBodyHash, type MitraRequest } from "@/lib/identity/signed-request";
 import type { NettingResult } from "@/lib/kernel/clearing";
+import type { Inbox, InboxKind } from "@/lib/inbox";
 import type {
   Agent, Agreement, AgreementStatus, Authorization, Chain, ClearingEpoch, Intent, Money, Saga, Space,
 } from "@/lib/domain/types";
@@ -116,6 +117,7 @@ export class MitraClient {
   readonly agents;
   readonly clearing;
   readonly recovery;
+  readonly inbox;
 
   readonly #opts: MitraClientOptions;
   readonly #root: string;
@@ -195,6 +197,15 @@ export class MitraClient {
        */
       refundEscrow: (agreementId: string, opts: { failureReason?: string } = {}) =>
         this.#transition("refund", agreementId, opts),
+    };
+
+    this.inbox = {
+      /** What this agent (or `agentId`) can act on now, most urgent first. Each item names the ops it may sign. */
+      list: (filter: { kinds?: InboxKind[]; agentId?: string } = {}) =>
+        this.#call<Inbox & { generatedAt: string }>(
+          "GET",
+          `/inbox/${encodeURIComponent(filter.agentId ?? opts.agentId)}${query({ kind: filter.kinds?.join(",") })}`,
+        ),
     };
   }
 

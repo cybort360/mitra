@@ -12,3 +12,4 @@ export {
   type SagaView,
   type TransitionResult,
 } from "./client";
+export { INBOX_KINDS, type Inbox, type InboxItem, type InboxKind } from "@/lib/inbox";

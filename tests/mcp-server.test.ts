@@ -327,6 +327,8 @@ describe("served tools go through the real routes", () => {
       ["mitra_get_agent", { agentId: "agent_buyer_07" }, "/api/v1/agents?agentId=agent_buyer_07"],
       ["mitra_find_agents", { capability: "market_research", chain: "solana" }, "/api/v1/agents?capability=market_research&chain=solana"],
       ["mitra_get_intent", { intentId: "intent_1" }, "/api/v1/intents/intent_1"],
+      ["mitra_get_inbox", { agentId: "agent_data_03" }, "/api/v1/inbox/agent_data_03"],
+      ["mitra_get_inbox", { agentId: "a/b", kinds: ["WORK_REQUIRED", "SETTLEMENT_RECEIPT"] }, "/api/v1/inbox/a%2Fb?kind=WORK_REQUIRED%2CSETTLEMENT_RECEIPT"],
     ] as const) {
       seen = [];
       await client.callTool({ name, arguments: args });

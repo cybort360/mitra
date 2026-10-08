@@ -227,6 +227,7 @@ describe("the SDK surface carries intent verbs only", () => {
       "commerce.acceptDeliverable", "commerce.createAgreement", "commerce.createIntent", "commerce.fund",
       "commerce.getAgreement", "commerce.getIntent", "commerce.listAgreements", "commerce.rejectDeliverable",
       "commerce.startExecution", "commerce.submitDeliverable",
+      "inbox.list",
       "recovery.getSaga", "recovery.listSagas", "recovery.refundEscrow",
     ]);
   });
