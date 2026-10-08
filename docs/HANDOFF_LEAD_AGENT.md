@@ -1,109 +1,154 @@
-# Mitra Lead Coding Agent Handoff (Sprint Wave 2)
-## Active Packages: LP-1 Intent Persistence ✅, LP-2 Decoupled Escrow & Wire ✅, LP-3 Tempo Parity ✅, F65/F68 Fixes ✅, LP-4 Solana Escrow Recovery ✅, LP-5 Arcium MPC [ACTIVE NEXT]
+# Mitra Lead Agent Handoff Specification
+## Phase 4 Commerce & Phase 5 External Marketplace Expansion: Work Packages LP-6, LP-7, & LP-8
 
-**Date:** 2026-10-06  
-**Current Branch:** `feat/mitra-vault-v2-reseed`  
-**Shared Context Tip:** Seq 118 (`ctx_cb399b84759b85c9`, hash `204bb4fe4613f2107c095d19b84843881f8f4d738c94c3fcdb54083854e820ef`)  
-**Keys Location:** `.dev-keys/evm-testnet.key` (EVM: `0xAeA8bc34df7745e35510214147a2F6A5e15Eb26D`), `.dev-keys/solana-testnet.json` (Solana)  
-
----
-
-### Executive State: Completed Packages
-
-1. **LP-1 Intent Persistence Substrate** landed in `656967d`:
-   - `createIntent`/`getIntent`/`listIntents` on `EconomicRepository`, Postgres, and Memory.
-   - `POST/GET /api/v1/intents`, `GET /api/v1/intents/[id]` active.
-   - 6/6 tests passing in `tests/intent-persistence.test.ts`.
-
-2. **LP-2 Decoupled ERC-8183 Job Escrow & Wire** landed in `9d93706`, `003ff74`, `2daf5c5`:
-   - `MitraJobEscrow.sol` deployed and runtime-verified (2,096 bytes) on:
-     - **Base Sepolia (84532)**: `0xc49c93f0a1e5362b38f1c38b8f0ff80c577df3a6` (Block `47740801`)
-     - **Tempo Moderato (42431)**: `0x95ca2170d1021cb9b5ce6809066f094e00c0a583` (Block `38355996`)
-   - `lib/adapters/erc8183-transport.ts`: `ERC8183Transport` with `depositToEscrow`, `completeJob`, `refundJob`, `getJob`.
-   - Verified live in `tests/commerce-escrow-live.test.ts` (6/6 live tests passed under `JOB_ESCROW_LIVE=1`):
-     - Base Sepolia: Fund `0x294ea38fca81c9dff3a3c40156d485b26fd2753d1c36ba9ca0cd73bc6acb8c07` (blk `47742052`), Release `0x8ff9c6d03f2b50bb0d61ef05c5d13ca3940066fcf90c7b8cd50cc4101c1079c9` (blk `47742053`), Refund `0x5ae3a080470aeed0b9d546610e1f3bf2af2952f15f649844e69be75cf686a975` (blk `47742056`).
-     - Tempo Moderato: Fund `0x2ebe2afebcddcce59e47aaf3a63290949b79956907954f884a32e919f6904650` (blk `38360077`), Release `0x22060610c9e22318d3ef66ecf3d2a19c4b099caf9538a7110fbe5dff3a8774dd` (blk `38360078`), Refund `0x324779cd52eb0919bad820627dc3f9f6ff1f5eb7ba012817fba240c8f790765f` (blk `38360095`).
-
-3. **LP-3 Tempo Settlement Parity & Caller Verification** landed in `18bba22`:
-   - `tests/settlement-tempo-caller.test.ts`: Mirrors Base caller suite across 28 tests (happy path, evidence, refusals, capital book movements, nonce boundaries).
-   - Verified live on **Tempo Moderato (42431)** under `TEMPO_LIVE=1`:
-     - Settle Tx: `0x80cccf7863e042a963b6b2bc5eb873fb43d2db1987571479bad2aaa055ac35f3`
-     - Block: `38398243`
-     - Settlement: `set_ag_live_tempo_1791275280833`
-     - Receipt: `rcpt_set_ag_live_tempo_1791275280833`
-     - Status: `CONFIRMED`, Evidence: `TESTNET_PASS`
-     - Memo Topic Verified: `0x57bc7354aa85aed339e000bccffabbc529466af35f0772c8f8ee1145927de7f0` on-chain event carrying EIP-712 settlement commitment.
-
-4. **Purple Sprint Coordination (PP-1..PP-4 Merged; F65 & F68 Resolved)**:
-   - **PP-1**: 19 MCP tools served (backed `/api/v1/intents` and `mitra_start_execution`, closing F66). E2E loop verified over Streamable HTTP and stdio against Postgres.
-   - **PP-2**: `lib/adapters/virtuals.ts` built against real `@virtuals-protocol/acp-node` schemas (closing F67).
-   - **PP-3**: Outbox event worker (`scripts/webhook-worker.ts`), HMAC-SHA256 signatures, socket-level SSRF defenses.
-   - **PP-4**: Operator emergency circuit breaker (`POST /api/v1/admin/pause`) halting value movement while leaving reads, streams, and recovery active (`tests/circuit-breaker.test.ts`).
-   - **F65 Resolved**: `POST /api/v1/intents` and repository `createIntent` enforce first-write-wins. Identical replay returns `200`; mismatched replay returns `409 INTENT_EXISTS`.
-   - **F68 Resolved**: `Agreement.externalJobRefs` typed `ExternalJobRef[] = (ExternalIdentityRef | string)[]`.
-
-5. **LP-4 Solana Job Escrow & Autonomous Recovery (Phase 6)** ✅:
-   - Program upgraded on Solana devnet (`GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY`, slots `508039758` and `508041500`).
-   - `JobEscrow` PDA (154 B, `[b"escrow", vault, job_id]`), `lock_escrow`, `release_escrow`, `refund_escrow` (codes 6019–6023), and three Vault transitions (`lock_to_escrow`, `pay_escrow`, `return_escrow`).
-   - Live devnet proof:
-     - Lock: `2mXh5ejmr9H8ikydogRuoygSjKq6vz8upTPznxKBdmbeGaLEyAyDfCvBtnwTULqnr4E98Xz4rExDTS6QQGpYr8bV` (slot `508042268`)
-     - Release: `5YZKU4XaxmXhgPgyBCpdVa4B5EFSmb81aZVR5LyZtrPMw72tWijxBpAZmLmNSxgRjnvR1wW5r7XPFGonSeaYC6rk` (slot `508042354`)
-     - Autonomous refund: `57f5fScrHFcecrDLV66SgGgEtPmyhDnKJ5HyzA3yfM1kiLN5BPx3uGWcuSyqMM9nPs7idVvb9PCjyyKddNfq5WQe` (slot `508042318`)
-   - Guards: PRD §15.5 pre-commitment enforced (all-zero route rejected `0x1783` at lock and refund), caller cannot redirect payee/amount, pre-deadline stranger refund refused (`0x1784`), single-shot settlement (`0x1785`).
-   - Defect F70 resolved: Reconciled reservation arithmetic with escrowed funds via `Vault::held()` (`total − escrowed`), restoring Phase 2 six-position invariant to the exact lamport.
-   - Defect F69 resolved: Committed program ID bytes pinned in Rust `PROGRAM_ID_BYTES` and test harnesses.
-   - Tests: `cargo test` 147/147 pass; `tests/solana-escrow.test.ts` 19/19 pass (including 3 live); mutation audit 8/8 killed.
+**Date:** 2026-10-08  
+**Active Branch:** `feat/mitra-vault-v2-reseed` (In-Sync with `origin`, Tip: `1155b8b`)  
+**Lead Agent Track:** Pure On-Chain Infrastructure, Dual-Write Reconciliation, External Relayers  
+**Next Free Defect Identifier:** `F81`  
 
 ---
 
-### Ground Rules & Non-Negotiable Invariants
+### Executive State & Separation of Concerns
 
-1. **Repository Files Are Truth**: Prior chat summaries are non-authoritative (`AGENTS.md`).
+Sprint Wave 3 has been strictly bifurcated to prevent developer collision:
+
+```
+┌───────────────────────────────────────────────────┬───────────────────────────────────────────────────┐
+│        💜 PURPLEDNA TRACK (PP-5 to PP-8)          │           👑 LEAD AGENT TRACK (LP-6 to LP-8)      │
+├───────────────────────────────────────────────────┼───────────────────────────────────────────────────┤
+│ • PP-5: Developer Client SDK (@mitra/sdk)         │ • LP-6: On-Chain Escrow Wiring & Idempotency      │
+│ • PP-6: Agent Inbox API & MCP Tool (GET /inbox)   │   (depositToEscrow, lock_escrow, dual-write probe)│
+│ • PP-7: Sandbox CLI & Time-Travel Simulation      │ • LP-7: Hyper-Abstracted Cross-Chain Payout       │
+│ • PP-8: Cognitive Agent Skills (SKILL.md bundles) │   (BNB & X Layer native payouts via relayers)     │
+│                                                   │ • LP-8: Virtuals ACP Outbound Session Transport   │
+└───────────────────────────────────────────────────┴───────────────────────────────────────────────────┘
+```
+
+**Pre-conditions Completed:**
+- **F77 (Atomic Fund Path)**: Completed in commit `1155b8b`. `applyAgreementOpWithSaga` is synchronous and store-free; `commitAgreementOp` enforces `agreement` write before `saga` write.
+- **F79 (Postgres Saga Columns)**: Explicit column list in `saveSaga` updated and dynamically derived in `tests/saga-persistence.test.ts`.
+- **F80 (Committed Route Reconstruction)**: `declareSaga` records committed route bodies beside hashes so refund routes are never reconstructed from incomplete agreement refs.
+- **Baselines**: `tsc` (0 errors), `forge test` (57/57 pass), `cargo test` (147/147 pass), `npx vitest run` (1,128 pass, 81 skipped), PostgreSQL 16 persistence (90/90 pass).
+
+---
+
+### 1. Non-Negotiable Ground Rules (`AGENTS.md`)
+
+1. **Repository Files Are Truth**: Prior chat summaries are non-authoritative.
 2. **The Mechanism to Protect**:
    $$\text{HOW MUCH MAY I SPEND} \longrightarrow \text{WHO AUTHORIZED IT} \longrightarrow \text{MAY THIS EXACT INSTRUCTION MOVE CAPITAL}$$
    $$\text{Mandate} \longrightarrow \text{Policy Engine} \longrightarrow \text{Execution Guard}$$
-   An `ALLOW` decision is never permission to move value. The execution guard independently re-derives whether this exact instruction may move capital.
-3. **Multi-Chain Parity**: Every EVM deployment and rail must support **both Base Sepolia (84532) and Tempo Moderato (42431)**, and Solana Devnet where applicable.
-4. **Pre-Committed Recovery (PRD §15.5)**: Every compensation route must be hash-committed at funding time. Never synthesize post-failure calldata.
-5. **Strict Evidence Discipline (BUILD_FOUNDRY §2)**: Record un-truncated 66-character EVM tx hashes / 88-character Solana signatures and exact block/slot numbers.
+   An `ALLOW` decision is never permission to move value; nonces are single-use.
+3. **Dual-Write Discipline & Zero Stranded Capital**:
+   Never broadcast an on-chain transaction that cannot be reconciled upon failure. Every chain call must be preceded by an idempotency probe.
+4. **Pre-Committed Recovery (PRD §15.5)**:
+   Every escrow deposit must commit `refundRouteHash` at funding time.
+5. **Zero Mocks in Production**:
+   Offline suites test projection and logic. Live suites connect to real testnets (`Base Sepolia`, `Tempo Moderato`, `Solana Devnet`). Production code never returns synthetic transaction hashes.
 
 ---
 
-### Active Next Packages
-
-#### 📦 Task 1: LP-5 — Arcium Confidential Policy Cluster Run (Phase 3d) [ACTIVE NEXT]
-**Context:** SBF circuit `probe.so` is compiled (423 KB) and `tests/arcium-circuit.test.ts` passes 14/14 hermetically. It needs a live Arcium cluster execution to close `FR-VAULT-008` & `FR-VAULT-009`.
-
-**Implementation Plan:**
-1. Check local/devnet Arcium MPC node setup (`arcup`, Docker, Anchor 1.0.2).
-2. Run `evaluate_mandate` against encrypted mandate and proposal inputs.
-3. Verify that the MPC cluster produces the boolean approval and reason code on-chain.
-4. Record execution evidence in `forge/PROOF_LEDGER.md`.
+### 2. Lead Agent Active Queue (Work Packages LP-6 to LP-8)
 
 ---
 
-#### 📦 Task 2: Agreement Route Wiring to On-Chain Escrow (Phase 4/6 Integration)
-**Context:** Escrows are deployed and live on Base Sepolia, Tempo Moderato, and Solana Devnet. The next step is wiring `app/api/v1/agreements/route.ts` so that agreement state transitions invoke on-chain escrow operations:
-- On `fund`: Call `depositToEscrow` on EVM or `lock_escrow` on Solana.
-- On `acceptDeliverable`: Call `completeJob` on EVM or `release_escrow` on Solana.
-- On rejection or expiry: Call `refundJob` on EVM or keeper `refund_escrow` on Solana.
+#### 📦 Package LP-6: On-Chain Escrow Wiring & Idempotency Engine
+- **Context**: PRD §14 & Phase 4 ("Commerce"). The contracts (`MitraJobEscrow.sol` on Base Sepolia `0xc49c93f0...` and Tempo Moderato `0x95ca2170...`, and `programs/mitra-vault` on Solana Devnet `GkQQtmVXtG...`) are deployed and tested in isolation. Currently, `app/api/v1/agreements/route.ts` records `onChainEscrow` in the database but **does not trigger on-chain deposits**.
+- **Deliverables**:
+  1. **Escrow Bridge Module (`lib/commerce/onchain-escrow.ts`)**:
+     - `probeEscrowStatus(repo, agreementId, onChainEscrow)`:
+       - EVM: Uses `ERC8183Transport.getJob(jobId)`. Returns `{ funded: boolean, amount, provider, refundRouteHash }`.
+       - Solana: Derives `escrowPda(vault, jobId)` via `jobIdFor(agreementId)` and inspects account via `connection.getAccountInfo`. Decodes with `decodeJobEscrow`.
+     - `executeEscrowLock(agreement, onChainEscrow, rails)`:
+       - Deterministic `jobId = jobIdFor(agreement.agreementId)`.
+       - **Idempotency Check**: If already funded on-chain with matching terms, returns `{ txHash: "ALREADY_FUNDED", skipped: true }`.
+       - **EVM Execution**:
+         - Spend authorization permit issued via Policy Engine.
+         - Relayer (`MITRA_EVM_SETTLEMENT_KEY_FILE`) submits `spendAuthorized` to move tokens from Vault to Escrow.
+         - Relayer calls `depositToEscrow(jobId, clientVault, provider, evaluator, token, expected, timeout, refundRouteHash)`.
+       - **Solana Execution**:
+         - Client/Authority keypair signs `lock_escrow` transaction creating Escrow PDA and transferring lamports.
+     - `executeEscrowRelease(agreement, rails)`:
+       - On `acceptDeliverable`: Calls `completeJob(jobId)` on EVM or `release_escrow` on Solana.
+     - `executeEscrowRefund(agreement, rails)`:
+       - On `rejectDeliverable` / timeout: Calls `refundJob(jobId)` on EVM or `refund_escrow` on Solana using the pre-committed refund route.
+  2. **Agreement Route Integration (`app/api/v1/agreements/route.ts`)**:
+     - On `op === "fund"` with `body.onChainEscrow`:
+       - Run `executeEscrowLock`.
+       - If on-chain succeeds, invoke `commitAgreementOp(...)`.
+       - If DB commit fails, log error: subsequent retry probes on-chain state, detects existing funding, and heals DB.
+     - On `op === "acceptDeliverable"`: Trigger `executeEscrowRelease`.
+     - On `op === "rejectDeliverable"`: Trigger `executeEscrowRefund`.
+  3. **Tests (`tests/agreement-onchain-escrow.test.ts`)**:
+     - Hermetic suite with mocked transports verifying the read-before-write probe and idempotency recovery on crash.
+     - Opt-in live testnet suite gated on `JOB_ESCROW_LIVE=1`.
 
 ---
 
-#### 📦 Task 3: Virtuals Protocol ACP Outbound On-Chain Transaction Transport (Phase 5)
-**Context:** ACP schemas and translation exist in `lib/adapters/virtuals.ts` (PP-2). Wire outbound transaction submission using agent session keys against Base Sepolia.
+#### 📦 Package LP-7: Hyper-Abstracted Cross-Chain Payout Relayer Adapter
+- **Context**: PRD §16 & Phase 5/8 ("Settlement Rails & External Marketplaces"). Counterparties on external chains (e.g. BNB Chain, X Layer, Polygon) provide services, but Mitra **never deploys unverified vaults on non-canonical chains**. Escrows remain on Base Sepolia, Tempo Moderato, or Solana Devnet. Upon deliverable acceptance, a payout relayer routes native currency to the external counterparty while anchoring canonical receipts on deployed networks.
+- **Deliverables**:
+  1. **Cross-Chain Relayer Adapter (`lib/adapters/cross-chain-payout.ts`)**:
+     - Interface `CrossChainPayoutRelayer`:
+       - `quoteBridgeFee(sourceChain, targetChain, asset, amount)`
+       - `executeCrossChainPayout(input: { agreementId, sourceChain, targetChain, recipientAddress, amount, asset })`
+     - Implements payout bridging via Across / LiFi / CCTP abstracted relayer transport.
+     - Automatically verifies recipient address format (EVM checksum on BNB/X Layer).
+  2. **Canonical Mitra Receipt Anchoring**:
+     - Generates `MitraReceipt` with status `SETTLED_EXTERNALLY`.
+     - Pins the bridge intent transaction hash and destination execution receipt to the Mitra agreement run log on Base/Solana.
+  3. **Settlement Route Integration (`app/api/v1/settlements/route.ts`)**:
+     - Recognizes external payees (`payTo.chain === "bnb" | "xlayer"`).
+     - Debits the canonical vault/escrow on Base/Solana, passes funds to relayer, and anchors external settlement.
+  4. **Tests (`tests/cross-chain-payout.test.ts`)**:
+     - Unit tests verifying external address validation, slippage/fee guards, and canonical receipt hashing.
 
 ---
 
-#### 📦 Task 4: Webhook Worker Postgres Advisory Lock (Phase 10 Hardening)
-**Context:** Purple added outbox worker (`scripts/webhook-worker.ts`). Add `pg_try_advisory_lock` in Postgres repository to prevent concurrent worker instances from double-delivering events.
+#### 📦 Package LP-8: Virtuals ACP Outbound Session Key Transport
+- **Context**: PRD §22 & Phase 5 ("Agent Ecosystem"). `lib/adapters/virtuals.ts` provides complete data translation between Mitra Agreements and Virtuals Agent Communication Protocol (ACP) offerings, but currently requires an injected client.
+- **Deliverables**:
+  1. **Live ACP Transport (`lib/adapters/virtuals-transport.ts`)**:
+     - Class `VirtualsHttpTransport implements VirtualsClient`:
+       - Connects to Virtuals ACP gateway endpoints.
+       - Manages **Session Keys**: signs outbound agent gig proposals and bids using delegated agent session keys without exposing the vault authority key.
+       - Polls / streams ACP job status transitions via SSE.
+       - Implements automatic retries with exponential backoff.
+  2. **Adapter Connection (`lib/adapters/virtuals.ts`)**:
+     - Wires `VirtualsHttpTransport` as default transport when `VIRTUALS_API_KEY` and `VIRTUALS_AGENT_SESSION_KEY` are provided in the environment.
+  3. **Tests (`tests/virtuals-transport.test.ts`)**:
+     - Contract tests against recorded ACP responses and simulated network disconnects.
 
 ---
 
-### Verification Gates Status
-- `npm run typecheck`: **0 errors**
-- `forge test`: **57 passed, 0 failed**
-- `cargo test --manifest-path programs/mitra-vault/Cargo.toml`: **147 passed, 0 failed**
-- `npx vitest run`: **67 files passed, 7 skipped (1103 passed, 74 skipped)**
-- `tests/solana-escrow.test.ts`: **16 passed, 3 skipped (hermetic)**
-- Shared Context Audit: `ok: true, checked: 118, tipHash: 204bb4fe4613...`
+### 3. Execution Sequencing for the Lead Agent
+
+```
+Phase 1: Package LP-6 (Escrow Route Wiring & Idempotency)
+  Step 1.1: Create lib/commerce/onchain-escrow.ts with probeEscrowStatus & executeEscrowLock.
+  Step 1.2: Wire app/api/v1/agreements/route.ts (fund, accept, reject).
+  Step 1.3: Create tests/agreement-onchain-escrow.test.ts & verify dual-write recovery.
+  Step 1.4: Run typecheck, forge test, cargo test, and vitest.
+
+Phase 2: Package LP-7 (Cross-Chain Payout Relayer)
+  Step 2.1: Implement lib/adapters/cross-chain-payout.ts.
+  Step 2.2: Wire external chains into lib/settlement/rails.ts and app/api/v1/settlements/route.ts.
+  Step 2.3: Create tests/cross-chain-payout.test.ts.
+
+Phase 3: Package LP-8 (Virtuals ACP Outbound Transport)
+  Step 3.1: Implement lib/adapters/virtuals-transport.ts with session key signing.
+  Step 3.2: Wire default transport in lib/adapters/virtuals.ts.
+  Step 3.3: Create tests/virtuals-transport.test.ts.
+```
+
+---
+
+### 4. Verification Gate
+
+Every package commit must pass:
+1. `npm run typecheck` $\rightarrow$ 0 errors.
+2. `forge test` $\rightarrow$ 57/57 passed.
+3. `cargo test --manifest-path programs/mitra-vault/Cargo.toml` $\rightarrow$ 147/147 passed.
+4. `npx vitest run` $\rightarrow$ all existing tests green (1,128+ passed).
+5. `npm run test:postgres` $\rightarrow$ 90/90 passed against real PostgreSQL 16.
+6. Record evidence in `forge/PROOF_LEDGER.md` and any newly discovered defects in `forge/FAILURES.md`.
