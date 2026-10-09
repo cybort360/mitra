@@ -26,7 +26,7 @@ import { SolanaEscrowRailImpl, readSolanaKeypair } from "@/lib/adapters/solana-e
 import type { Keypair } from "@solana/web3.js";
 
 /** Chains `onChainEscrow.chain` may name. Anything else is not a rail we have. */
-const EVM_NETWORKS = new Set<string>(["baseSepolia", "moderato", "base", "tempo"]);
+const EVM_NETWORKS = new Set<string>(["baseSepolia", "moderato", "base", "tempo", "local"]);
 
 export function isEvmNetwork(chain: string): boolean {
   return EVM_NETWORKS.has(chain);
@@ -97,6 +97,9 @@ export function escrowRailFor(
       : env.MITRA_EVM_SETTLEMENT_KEY;
     if (!key) return null;
     if (network === "baseSepolia" && !env.BASE_SEPOLIA_RPC && !env.BASE_RPC_URL) return null;
+    // The PP-7 sandbox's anvil chain. Both variables or no rail: half a local config must
+    // not fall through to a public network.
+    if (network === "local" && (!env.MITRA_LOCAL_EVM_RPC || !env.MITRA_LOCAL_JOB_ESCROW)) return null;
     // No cast. F82 existed because `as unknown as EvmEscrowRail` let a `getJob` that
     // returned an array pass as one that returned named fields. If the transport's shape
     // and the bridge's interface ever diverge again, this must fail to compile.

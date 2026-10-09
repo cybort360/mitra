@@ -141,8 +141,11 @@ export class MitraClient {
       startExecution: (agreementId: string) => this.#transition("startExecution", agreementId),
       submitDeliverable: (agreementId: string, deliverable: { artifactRefs: string[]; contentHash: string }) =>
         this.#transition("submitDeliverable", agreementId, deliverable),
-      acceptDeliverable: (agreementId: string) => this.#transition("acceptDeliverable", agreementId),
-      rejectDeliverable: (agreementId: string, opts: { failureReason?: string } = {}) =>
+      /** With `onChainEscrow`, the API also releases the escrow to the provider on chain. */
+      acceptDeliverable: (agreementId: string, opts: { onChainEscrow?: OnChainEscrow } = {}) =>
+        this.#transition("acceptDeliverable", agreementId, opts),
+      /** With `onChainEscrow`, the API also refunds the escrow on chain, by the route committed at funding. */
+      rejectDeliverable: (agreementId: string, opts: { failureReason?: string; onChainEscrow?: OnChainEscrow } = {}) =>
         this.#transition("rejectDeliverable", agreementId, opts),
       createIntent: (draft: IntentDraft) => this.#call<Intent>("POST", "/intents", draft),
       getIntent: (intentId: string) => this.#call<Intent>("GET", `/intents/${encodeURIComponent(intentId)}`),

@@ -123,7 +123,7 @@ export type EscrowChain = "evm" | "solana";
 
 export interface EscrowRail {
   chain: EscrowChain;
-  /** `baseSepolia` | `moderato` | `devnet` — which deployment is being addressed. */
+  /** `baseSepolia` | `moderato` | `local` | `devnet` — which deployment is being addressed. */
   network: string;
   evm?: EvmEscrowRail;
   solana?: SolanaEscrowRail;

@@ -3877,3 +3877,92 @@ the evaluator's signature names the exact deliverable.
 invariants (late refused, empty refused, the signed hash readable afterwards) and
 pass today because the invariants do not hold; vitest flags them the moment they
 do. A plain `it` pins the reachable path: late and empty → SUBMITTED → ACCEPTED.
+
+## F95 — `depositToEscrow` records any balance the contract holds, so a job can be funded with another job's tokens
+
+**Status:** open (found 2026-10-09). Canary test in place; not fixed. Owner: lead (`contracts/src/ERC8183/MitraJobEscrow.sol`, and the fund path in `app/api/v1/agreements/route.ts`).
+**Found:** 2026-10-09, by PurpleDNA's agent building the PP-7 sandbox, the first thing to drive the fund route against a deployed escrow more than once.
+
+`depositToEscrow` measures `balanceOf(address(this))`, the contract's **total**
+balance, and records `min(balance, expected)` as the job's amount. Nothing records how
+much of that balance earlier jobs already own. `tests/commerce-escrow-live.test.ts`
+notes this as a limitation of two jobs funded concurrently. It is not only concurrent:
+once one job is funded and unsettled, every later `depositToEscrow` passes with **no new
+tokens at all**.
+
+The route makes it reachable on every fund. `POST /api/v1/agreements` with `op: "fund"`
+and `onChainEscrow` calls `depositToEscrow` and moves no tokens itself, so a job is
+backed by whatever the contract already holds.
+
+**Impact.** The contract can owe more than it holds. On anvil: agreement C is funded with
+30 tokens sent to the escrow; agreement D is funded with none. Both read `Funded` with
+amount 30, and the escrow holds 30. Whichever settles first takes the other's tokens; the
+second `completeJob`/`refundJob` then reverts or drains a third job.
+
+**Candidate fix (for the lead).** Either pull per job (`transferFrom(clientVault, this,
+expected)` inside `depositToEscrow`), or keep a `totalAllocated` sum and record
+`balance - totalAllocated`, reverting when it is below `expected`. The route should not
+rely on a separate transfer it does not make.
+
+**Evidence.** `tests/sandbox.test.ts`: `it.fails("F95: a second escrow cannot be funded
+by the first escrow's tokens")` and the plain `it("F95 today: …")`, both on anvil against
+the compiled contract.
+
+## F96 — the agreements route passes an agent id as the escrow's on-chain evaluator address
+
+**Status:** open (found 2026-10-09). Canary test in place; not fixed. Owner: lead (`app/api/v1/agreements/route.ts`, `runEscrowStep`).
+**Found:** 2026-10-09, PP-7 sandbox, first route-driven `fund` with an on-chain escrow on a real contract.
+
+`runEscrowStep` builds the EVM lock with
+`evaluator: (agreement.evaluator ?? agreement.provider) as \`0x${string}\``.
+`agreement.evaluator` is a Mitra agent id (`agent_eval_02`), not an address. viem
+refuses to encode it, so `fund` answers `409 BROADCAST_FAILED` (`Address "…" is
+invalid`) for every agreement whose evaluator is not literally an address. The hermetic
+suite never saw it because its fake rail ignores the field, and the live suites call
+`executeEscrowLock` directly with `evaluator: account`.
+
+The same mistake was fixed for the provider in LP-6 (the provider address comes from
+`payTo`). The evaluator has no such term.
+
+**Why the choice matters.** `completeJob` and `refundJob` require `msg.sender` to be the
+escrow's client vault or its evaluator, and the route calls them with the relayer key. So
+release and refund through Mitra work only if the relayer is one of those two addresses.
+The on-chain evaluator is therefore really "the key Mitra acts with". Whether it should be
+the relayer, or the evaluator agent's registered wallet with the evaluator signing on
+chain, is a design call for the lead.
+
+**Sandbox workaround.** The sandbox names its evaluator agent by the relayer's address.
+
+**Evidence.** `tests/sandbox.test.ts`: `it.fails("F96: an agreement whose evaluator is an
+agent id can be escrowed on chain")`; run as a plain `it` it fails with
+`409 BROADCAST_FAILED: Address "sandbox_provider" is invalid`.
+
+## F97 — Mitra's agreement and its on-chain escrow can disagree about whether it was refunded
+
+**Status:** open (found 2026-10-09). Canary tests in place; not fixed. Owner: lead (`app/api/v1/agreements/route.ts`, recovery).
+**Found:** 2026-10-09, PP-7 sandbox, by advancing anvil's clock past an escrow timeout.
+
+Two halves, the same split:
+
+1. **Nothing observes an escrow timeout.** After `refundJob` succeeds on chain (anyone may
+   call it once `block.timestamp >= timeout`), Mitra's agreement stays EXECUTING. It
+   becomes REFUNDED only when the client or evaluator sends the signed `refund` op. There
+   is no keeper. PRD §28.5 names a Recovery Agent / Keeper; none exists.
+2. **The `refund` op never touches the chain.** `ESCROW_ACTION_FOR_OP` maps `fund`,
+   `acceptDeliverable` and `rejectDeliverable` to chain actions and omits `refund`. On an
+   escrowed agreement, `refund` records REFUNDED, sets `escrowReleased`, and returns the
+   price to the Space's headroom, while the escrow on chain is still `Funded`. On anvil:
+   Mitra REFUNDED, headroom back to 100,000, escrow status 1 with 20 tokens locked.
+
+**Impact.** Mitra's books say capital is free that the chain still holds. Until the
+timeout, the relayer key can still call `completeJob` and pay the provider on an
+agreement Mitra reports refunded.
+
+**Candidate fix (for the lead).** Map `refund` to the chain refund in `runEscrowStep`.
+For timeouts, add a keeper that reads `jobs(jobId)` for escrowed agreements past their
+timeout, calls `refundJob`, and moves the agreement through the same path. Record the
+keeper as an actor so the transition is attributable.
+
+**Evidence.** `tests/sandbox.test.ts`: `it.fails("F97: a refund op on an escrowed agreement
+refunds the escrow, so Mitra and the chain agree")` and `it.fails("F97: Mitra notices an
+escrow's timeout refund without a party telling it")`, on anvil.

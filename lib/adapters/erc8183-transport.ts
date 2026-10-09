@@ -47,7 +47,14 @@ export const MITRA_JOB_ESCROW_ABI = parseAbi([
   "event JobRefunded(bytes32 indexed jobId, address indexed clientVault, uint256 amount)",
 ]);
 
-export type EscrowNetwork = "baseSepolia" | "moderato";
+/**
+ * `local` is a throwaway chain (anvil) for the PP-7 sandbox. It has no entry in
+ * deployments.json and no fallback RPC: its RPC and escrow address come only from
+ * MITRA_LOCAL_EVM_RPC and MITRA_LOCAL_JOB_ESCROW, so an unset variable is an error
+ * rather than a silent hop to a public network.
+ */
+export type EscrowNetwork = "baseSepolia" | "moderato" | "local";
+type PublicNetwork = Exclude<EscrowNetwork, "local">;
 
 /** The shape of one `Job` struct, as `jobs()` returns it. */
 export interface JobRow {
@@ -103,17 +110,22 @@ export interface EscrowJob {
   refundRouteHash: Hex;
 }
 
-const RPC: Record<EscrowNetwork, string | undefined> = {
+const RPC: Record<PublicNetwork, string | undefined> = {
   baseSepolia: process.env.BASE_SEPOLIA_RPC,
   moderato: process.env.TEMPO_RPC,
 };
-const FALLBACK_RPC: Record<EscrowNetwork, string> = {
+const FALLBACK_RPC: Record<PublicNetwork, string> = {
   baseSepolia: "https://sepolia.base.org",
   moderato: "https://rpc.moderato.tempo.xyz",
 };
 
 /** Reads deployments.json fresh, so a redeploy is picked up by a long-lived process. */
 export function jobEscrowAddress(network: EscrowNetwork): Address {
+  if (network === "local") {
+    const addr = process.env.MITRA_LOCAL_JOB_ESCROW;
+    if (!addr) throw new Error("jobEscrow.local: MITRA_LOCAL_JOB_ESCROW is not set");
+    return addr as Address;
+  }
   const raw = readFileSync("lib/evm/deployments.json", "utf8");
   const db = JSON.parse(raw) as { jobEscrow?: Partial<Record<EscrowNetwork, { address?: string }>> };
   const addr = db.jobEscrow?.[network]?.address;
@@ -128,6 +140,11 @@ export class ERC8183Transport {
   ) {}
 
   private get url() {
+    if (this.network === "local") {
+      const url = process.env.MITRA_LOCAL_EVM_RPC;
+      if (!url) throw new Error("ERC8183Transport.local: MITRA_LOCAL_EVM_RPC is not set");
+      return url;
+    }
     return RPC[this.network] ?? FALLBACK_RPC[this.network];
   }
   get address(): Address {
