@@ -1,0 +1,16 @@
+# .mailmap — consolidate duplicate / machine-default git identities so that
+# `git shortlog -sne`, `git log`, and GitHub's contributor stats attribute
+# each person (or agent) to a single identity.
+#
+# Format:  Proper Name <canonical@email>  <alias@email>
+# Docs:    https://git-scm.com/docs/gitmailmap
+
+# Cline (AI coding agent) — one commit used a typo'd address
+# (cline@users.noreplygithub.com, missing the dot). Fold it into the canonical.
+Cline <cline@users.noreply.github.com> <cline@users.noreplygithub.com>
+
+# TODO(identity): the "Ubuntu <ubuntu@ip-172-31-14-153.us-west-2.compute.internal>"
+# identity is an AWS EC2 instance's default git config, not a real name. It is a
+# DISTINCT contributor (its commits hand work off to PurpleDNA, so it is not
+# PurpleDNA). Once we know who owns that box, map it here, e.g.:
+#   Real Name <real@email> <ubuntu@ip-172-31-14-153.us-west-2.compute.internal>
