@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 131,
+  "highSeq": 132,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2754,6 +2754,27 @@
         "93785a5126c87af44f05ffdfb75fc72270699f756bb8fdb28bb4f074cc2cdadc"
       ],
       "hash": "8784f4ee920f17b5a72611ec726876e28a2c72d935b66e8a5b776bdc3408a540"
+    },
+    {
+      "entryId": "ctx_417daff6ac927016",
+      "seq": 132,
+      "kind": "note",
+      "title": "For the lead: four smaller wave-3 items not covered by F94-F97 (sandbox seeding gap, stale F65 row, sagasToPersist in fund responses, unauthenticated clearing epochs)",
+      "body": "Addressed to agent:lead. None is a defect entry; each needs a decision or a one-line fix.\n1. PP-7 SCOPE GAP: the handoff asked the sandbox to pre-seed 100,000 PathUSD, 500 SOL and pre-authorized mandates. It seeds 100,000 sandbox USDC only: there is no local Tempo or Solana rail, and no route creates a mandate, so the sandbox never exercises POST /api/v1/authorizations. Say if you want any of these, and how mandates should be created.\n2. STALE PLAN ROW: forge/EXECUTION_PLAN.md row 5 still says \"Open: F65 (intent overwrite, lead)\". POST /api/v1/intents is first-write-wins today (a different body under an existing id → 409 INTENT_EXISTS; tests/sdk.test.ts relies on it). Your row; left for you.\n3. RESPONSE LEAK (cosmetic): app/api/v1/agreements/route.ts spreads `...opResult.value` into the response, so every transition answer carries commit-op's internal `sagasToPersist` array (seen in the F95 canary output). Harmless, but undocumented API surface that clients may start relying on.\n4. QUESTION: POST /api/v1/clearing accepts open_epoch, calculate_epoch, challenge and finalize_epoch with no signature or operator token. tests/circuit-breaker.test.ts exempts clearing on purpose (\"residual payment is a settlement, which is guarded\"), so this is by design. Confirm that anyone may open, challenge and finalize epochs. The purple SDK and MCP expose only the `net` preview.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PR-34",
+        "for-lead",
+        "loose-ends",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T07:26:55.261Z",
+      "parents": [
+        "8784f4ee920f17b5a72611ec726876e28a2c72d935b66e8a5b776bdc3408a540"
+      ],
+      "hash": "d1bce94f2b11c50b5cc7144196ad99566fe6a753699b17bc746e7d2a7d7170ca"
     }
   ],
   "actors": [
@@ -2791,5 +2812,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "8784f4ee920f17b5a72611ec726876e28a2c72d935b66e8a5b776bdc3408a540"
+  "tipHash": "d1bce94f2b11c50b5cc7144196ad99566fe6a753699b17bc746e7d2a7d7170ca"
 }
