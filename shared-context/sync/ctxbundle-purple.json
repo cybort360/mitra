@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 127,
+  "highSeq": 130,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2663,6 +2663,76 @@
       ],
       "hash": "f7fffc908dfbc59fd279ed9fbc0e08f131340b88f27d5b43a8b2fc317de74e28",
       "supersedesId": "ctx_6e2474b6758cc469"
+    },
+    {
+      "entryId": "ctx_b7be743703904ede",
+      "seq": 128,
+      "kind": "decision",
+      "title": "PP-7 decided by human:purple: the sandbox runs Mitra against a local anvil chain with the real MitraJobEscrow; time travel is evm_increaseTime",
+      "body": "Answers ctx_d3eaff6172c8b596 (option a). Decided by human:purple, 2026-10-09.\n- Time travel moves the CHAIN clock only (evm_increaseTime + mine). Mitra's off-chain clock stays real; nothing off-chain depends on time today (F94).\n- Mitra has no timeout keeper. After the timeout, the sandbox's keeper calls refundJob (anyone may), and the client's signed refund op then reconciles the agreement. A production keeper is still missing; this will be recorded in FAILURES.\n- LEAD FILES TOUCHED (approved by human:purple, flagged here and in the PR): lib/adapters/erc8183-transport.ts and lib/commerce/escrow-rail.ts gain an additive `local` EVM network, live only when MITRA_LOCAL_EVM_RPC and MITRA_LOCAL_JOB_ESCROW are set. No change to baseSepolia/moderato behaviour.\n- Solana timeouts are out of scope for now (would need solana-test-validator with slot warp).\n- The sandbox refuses any chain id other than 31337 and announces itself as a simulation on a throwaway chain.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PP-7",
+        "anvil",
+        "for-lead",
+        "sandbox",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T06:52:03.870Z",
+      "parents": [
+        "f7fffc908dfbc59fd279ed9fbc0e08f131340b88f27d5b43a8b2fc317de74e28"
+      ],
+      "hash": "c80265e633c5a9dde970fd7d4ce4c0b9641bf14f4320fe3856a439a9d6323183"
+    },
+    {
+      "entryId": "ctx_e0e621664a0e9d10",
+      "seq": 129,
+      "kind": "finding",
+      "title": "PP-7 sandbox exposed three escrow defects on a real contract: F95 over-commitment, F96 agent id as evaluator address, F97 Mitra/escrow refund split",
+      "body": "Addressed to agent:lead. All found by driving POST /api/v1/agreements against the compiled MitraJobEscrow on anvil (commit 7b7633e, feat/purple-pp). Full entries in forge/FAILURES.md; it.fails canaries in tests/sandbox.test.ts, each confirmed to fail for the stated reason.\nF95 (contracts/src/ERC8183/MitraJobEscrow.sol + fund path): depositToEscrow records min(total balance, expected). Once one job is funded, a second is recorded Funded with no new tokens. On anvil: C funded with 30, D funded with 0, both Funded/30, escrow holds 30. Not only concurrent, as the commerce-escrow-live comment says. The route moves no tokens itself. Fix: transferFrom inside depositToEscrow, or a totalAllocated sum.\nF96 (route runEscrowStep): evaluator is (agreement.evaluator ?? agreement.provider) cast to an address; an agent id gives 409 BROADCAST_FAILED (viem: Address \"sandbox_provider\" is invalid). The relayer calls completeJob/refundJob, so it must be the clientVault or the on-chain evaluator; which key the evaluator should be is your design call.\nF97 (route + recovery): ESCROW_ACTION_FOR_OP omits refund, so a refund op on an escrowed agreement gives Mitra REFUNDED, escrowReleased=true and headroom returned, while the escrow stays Funded on chain. Also no keeper: after an on-chain timeout refundJob, Mitra stays EXECUTING until a party sends refund.\nThe sandbox works around F94 and F96 and supplies its own keeper; those workarounds are documented in lib/sandbox/index.ts.",
+      "status": "active",
+      "scope": "commerce",
+      "tags": [
+        "F95",
+        "F96",
+        "F97",
+        "escrow",
+        "for-lead",
+        "sandbox"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T07:06:14.811Z",
+      "parents": [
+        "c80265e633c5a9dde970fd7d4ce4c0b9641bf14f4320fe3856a439a9d6323183"
+      ],
+      "hash": "d1f636224c8cda6c3c69358eb30052d71f12fffa50122bd41841c5750f714255"
+    },
+    {
+      "entryId": "ctx_1573131722a40ab6",
+      "seq": 130,
+      "kind": "handoff",
+      "title": "Wave 3 purple complete: PP-5..PP-8 on feat/purple-pp in PR #34; PP-7 sandbox E2E_VERIFIED on anvil; F94-F97 open for the lead",
+      "body": "Supersedes seq 127. PR https://github.com/cybort360/mitra/pull/34 into feat/mitra-vault-v2-reseed now also carries PP-7 (7b7633e).\nDONE: PP-5 SDK, PP-6 inbox, PP-8 skills (TESTED in-memory); PP-7 sandbox (npm run sandbox; E2E_VERIFIED on anvil, EVM only). Lead files touched by PP-7, additive and approved by human:purple: a 'local' network in lib/adapters/erc8183-transport.ts and lib/commerce/escrow-rail.ts. tsc clean; vitest 1330 pass / 0 fail; next build ok.\nOPEN for the lead: F94 (deliverable discarded), F95 (escrow over-commit), F96 (agent id as evaluator address), F97 (refund split; no keeper). Next free failure id: F98.\nNEXT for purple: Postgres runs of sdk/inbox/sandbox suites; an LLM-agent run of a skill; Tempo/Solana in the sandbox if wanted. When the lead fixes F94/F96, remove the matching sandbox and skill workarounds; tests/skills.test.ts and the canaries will say when.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PP-5",
+        "PP-6",
+        "PP-7",
+        "PP-8",
+        "handoff",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T07:06:14.839Z",
+      "parents": [
+        "d1f636224c8cda6c3c69358eb30052d71f12fffa50122bd41841c5750f714255",
+        "f7fffc908dfbc59fd279ed9fbc0e08f131340b88f27d5b43a8b2fc317de74e28"
+      ],
+      "hash": "93785a5126c87af44f05ffdfb75fc72270699f756bb8fdb28bb4f074cc2cdadc",
+      "supersedesId": "ctx_6a900c24299d1cb4"
     }
   ],
   "actors": [
@@ -2700,5 +2770,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "f7fffc908dfbc59fd279ed9fbc0e08f131340b88f27d5b43a8b2fc317de74e28"
+  "tipHash": "93785a5126c87af44f05ffdfb75fc72270699f756bb8fdb28bb4f074cc2cdadc"
 }
