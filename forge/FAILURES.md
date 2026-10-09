@@ -3281,3 +3281,47 @@ today's behaviour would have made the repair look like a regression.
 into the fund path means an irreversible chain call in exactly this window. A strand
 that costs one unreachable saga would instead cost capital moved with no durable
 record of it. Fix F77 before any capital moves.
+
+## F78 — a submitted deliverable is neither checked nor kept
+
+**Status:** open (found 2026-10-09). Canary test in place; not fixed. Owner: lead (`lib/kernel/`, `lib/store/`, the agreements route).
+**Found:** 2026-10-09, by PurpleDNA's agent while writing the PP-8 evaluator skill, asking where an evaluator reads what it is meant to judge.
+
+`POST /api/v1/agreements` with `op: "submitDeliverable"` accepts `artifactRefs` and
+`contentHash`, the provider signs over both (`bodyHash`), and the route passes them
+to `applyAgreementOpWithSaga` (`app/api/v1/agreements/route.ts:291-292`).
+`applyAgreementOp` takes them in its `opts` type (`lib/kernel/commerce.ts:164`) and
+never reads them. Nothing persists them: not the agreement, not the deliverables
+table (the repository has `listDeliverables` and no write), not the saga, not the
+event log. No read returns them.
+
+The checks that should run on submit exist and are unreachable.
+`evaluateDeliverable` (`lib/kernel/commerce.ts:277`) refuses `WRONG_AGREEMENT`,
+`DELIVERABLE_EMPTY`, `DELIVERABLE_LATE` and `DELIVERABLE_HAS_NO_ARTIFACTS`, and has
+no production caller. So through the API:
+
+- a submission six years past its deadline, with no hash and no artifacts, moves the
+  agreement to SUBMITTED, and the evaluator can then accept it to ACCEPTED;
+- an evaluator has no record in Mitra of what was submitted, so its verdict is tied
+  to nothing the provider signed. A provider can show the evaluator one artifact and
+  have signed another, and nothing can tell.
+
+**Why it matters for value.** ACCEPTED releases escrow toward settlement. Acceptance
+is meant to be the evidence that the work met its terms (PRD §13/§14; the lead's
+seq 54 answer: deliverables "must be explicitly SUBMITTED first with contentHash and
+artifactRefs, verified against acceptance criteria"). Today that evidence is
+discarded at the moment it is offered.
+
+**Also corrected by this finding.** The PP-7 question (`ctx_d3eaff6172c8b596`) and the
+PP-6 inbox comment said `commerce.ts:284` refuses late submission. It does not run.
+
+**Candidate fix (for the lead).** On submit, build a `Deliverable` from the parsed
+body, run `evaluateDeliverable` and refuse on failure, persist it (a repository
+write, in-memory and Postgres), and record its id on the agreement. Then have
+`acceptDeliverable` and `rejectDeliverable` carry the `contentHash` they judged, so
+the evaluator's signature names the exact deliverable.
+
+**Evidence.** `tests/deliverable-binding-probe.test.ts`: three `it.fails` assert the
+invariants (late refused, empty refused, the signed hash readable afterwards) and
+pass today because the invariants do not hold; vitest flags them the moment they
+do. A plain `it` pins the reachable path: late and empty → SUBMITTED → ACCEPTED.

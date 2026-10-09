@@ -50,7 +50,7 @@ export interface InboxAgreementItem {
   client: string;
   price: Money;
   deadline: string;
-  /** The deadline has passed. A late `submitDeliverable` is refused (DELIVERABLE_LATE). */
+  /** The deadline has passed. Late work fails the agreement's terms; the API does not yet refuse it (F78). */
   overdue: boolean;
   acceptanceCriteria: string[];
 }
