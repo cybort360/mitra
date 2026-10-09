@@ -58,7 +58,9 @@ export type SagaStatus =
   | "CONTAINED"
   | "ABORTED";
 export type ClearingStatus = "OPEN" | "FROZEN" | "CALCULATING" | "CHALLENGE" | "FINALIZED" | "SETTLING" | "SETTLED";
-export type SettlementStatus = "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "REVERSED";
+export type SettlementStatus = "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED" | "REVERSED"  // LP-7: settled to a payee on a chain Mitra holds no vault on; the receipt anchors
+  // the external destination to the internal agreement.
+  | "SETTLED_EXTERNALLY";
 export type RunStatus = "RUNNING" | "WAITING" | "RECOVERING" | "CLEARING" | "SETTLING" | "SETTLED" | "CONTAINED" | "FAILED";
 
 export interface Money {
@@ -499,6 +501,26 @@ export interface Saga {
    * commitment.
    */
   routeCommitments?: Record<string, string>;
+  /**
+   * The committed route BODIES, keyed by `routeId`. **F80.**
+   *
+   * F76 recorded a hash of each route so compensation could verify it was running the
+   * committed one. That left the kernel rebuilding the route at REJECT time out of
+   * whatever the agreement happened to carry — and an agreement funded with an on-chain
+   * escrow only stores `escrowRef` (the job id), so the rebuilt string came out as
+   * `evm:refundEscrow:0x<jobId>` while the committed one was
+   * `evm:refundEscrow:<chain>:<contract>:<jobId>`. Different string, so the commitment
+   * check refused with `COMPENSATION_ROUTE_REDIRECTED` — correctly, and permanently: no
+   * on-chain escrow could ever be refunded.
+   *
+   * The in-memory suites missed it because they passed `onChainEscrow` again on the
+   * reject call, reconstructing the full route by hand at the call site.
+   *
+   * §15.5's point is that the route is fixed BEFORE failure. Reconstructing it after
+   * failure is exactly the thing the section forbids, so the saga now carries the
+   * committed bodies and the refund consults those and nothing else.
+   */
+  committedRoutes?: Record<string, string>;
   timeoutPolicy: string;
   status: SagaStatus;
   recoveredValue: number;

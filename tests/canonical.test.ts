@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { canonicalize, chainHash, contentHash, typedHash } from "@/lib/domain/canonical";
+import { canonicalize, chainHash, contentHash, routeCommitment, typedHash } from "@/lib/domain/canonical";
 
 /**
  * Canonical serialization, pinned.
@@ -128,5 +129,43 @@ describe("receipt chaining (PRD §17.3)", () => {
     const b = chainHash(a, receipt(2));
     const forged = chainHash(b, receipt(1));
     expect(forged).not.toBe(a);
+  });
+});
+
+/**
+ * F81 — the two rails must commit to the SAME 32 bytes.
+ *
+ * `routeCommitment` (domain, added with F76) and `routeHashFor` (Solana rail) were
+ * independent implementations that produced different values for the same route. Both
+ * are 32 bytes and both contracts only check non-zero, so nothing on chain noticed;
+ * the disagreement only became real when LP-6 needed to hand one value to both rails.
+ */
+describe("F81 — one commitment definition for both rails", () => {
+  const route = "evm:refundEscrow:baseSepolia:0xabc:0xdef";
+
+  it("is 32 bytes and 0x-prefixed, so it fits bytes32 and a PDA field", () => {
+    const c = routeCommitment(route);
+    expect(c).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(Buffer.from(c.slice(2), "hex")).toHaveLength(32);
+  });
+
+  it("is domain-separated, so the same route cannot collide with another purpose", () => {
+    // The prefix is load-bearing. Dropping it makes a route commitment byte-identical
+    // to a bare hash of the same string, which is the collision `typedHash` prevents.
+    expect(routeCommitment(route)).not.toBe(
+      `0x${createHash("sha256").update(route, "utf8").digest("hex")}`,
+    );
+    expect(routeCommitment(route)).toBe(
+      `0x${createHash("sha256").update(`mitra-recovery-route-v1:${route}`, "utf8").digest("hex")}`,
+    );
+  });
+
+  it("agrees with the Solana rail's helper, byte for byte", async () => {
+    const { routeHashFor } = await import("@/lib/solana/vault-program");
+    expect(routeHashFor(route).toString("hex")).toBe(routeCommitment(route).slice(2));
+  });
+
+  it("a caller cannot smuggle in an all-zero commitment", () => {
+    expect(routeCommitment(route)).not.toBe(`0x${"0".repeat(64)}`);
   });
 });

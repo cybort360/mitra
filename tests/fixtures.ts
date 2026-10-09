@@ -5,6 +5,9 @@ import { __resetLedgerForTests } from "@/lib/store/ledger";
 import { __resetStoreForTests } from "@/lib/store/provider";
 
 /** Shared fixtures for the API wiring tests. Before mandate expiry, inside the window. */
+import type { EvmEscrowRail, EscrowRail } from "@/lib/commerce/onchain-escrow";
+import { normalizeJobRow } from "@/lib/adapters/erc8183-transport";
+
 export const NOW = "2026-10-01T12:00:00.000Z";
 
 export const goodProposal = {
@@ -127,3 +130,38 @@ export async function prepareStore(): Promise<void> {
     await pool.end();
   }
 }
+
+/**
+ * A recording fake EVM escrow rail.
+ *
+ * LP-6's guarantees are mostly about what did NOT happen — a replay must not broadcast, a
+ * mismatch must not overwrite — so a fake that cannot show an absence cannot test them.
+ * Every call is appended to `calls`, and `job` is the chain's answer to `getJob`.
+ */
+export function fakeEvmEscrowRail(over: {
+  job?: Awaited<ReturnType<EvmEscrowRail["getJob"]>>;  // a JobRow, or undefined for "never funded"
+  txPrefix?: string;
+} = {}) {
+  const calls: string[] = [];
+  let job = over.job;
+  const rail = {
+    calls,
+    address: "0x00000000000000000000000000000000000000ea" as const,
+    async depositToEscrow() { calls.push("depositToEscrow"); job = over.job; return `0x${over.txPrefix ?? "ab".repeat(32)}`; },
+    async completeJob() { calls.push("completeJob"); return `0x${over.txPrefix ?? "cd".repeat(32)}`; },
+    async refundJob() { calls.push("refundJob"); return `0x${over.txPrefix ?? "ef".repeat(32)}`; },
+    // Resolves to `undefined` to mean "never funded". `normalizeJobRow` is applied so
+    // the fake answers with the SAME named shape the real transport now does — the F82
+    // lesson, encoded in the fixture so a future shape change breaks here too.
+    async getJob() { calls.push("getJob"); return job === undefined ? undefined : normalizeJobRow(job); },
+  } satisfies EvmEscrowRail & { calls: string[] };
+  return Object.assign(rail, {
+    setJob(j: typeof job) { job = j; },
+    /** Counts how many times a mutating call was made — the idempotency assertion. */
+    count(call: string) { return calls.filter((c) => c === call).length; },
+  });
+}
+
+/** The rail object shape `resolveEscrowRail` must return. */
+export const asEvmRail = (evm: EvmEscrowRail) =>
+  ({ chain: "evm", network: "baseSepolia", evm }) satisfies EscrowRail;

@@ -38,12 +38,24 @@ import { typedHash } from "@/lib/domain/canonical";
 import { fail, pass, type Result } from "@/lib/kernel/commerce";
 
 /** The rule set this adapter operates under. Recorded so drift is detectable. */
+import { privateKeyToAccount } from "viem/accounts";
+import {
+  SimulatedVirtualsTransport, VirtualsHttpTransport,
+  type SessionDelegation,
+} from "@/lib/adapters/virtuals-transport";
+
 export const VIRTUALS_RULE_SET = {
   ref: "virtuals:acp:v1",
   digest: "sha256:virtuals-acp-v1",
 } as const;
 
 export interface VirtualsClient {
+  /**
+   * Which transport this is. Added by LP-8 so a resolved client is inspectable: a caller
+   * holding a `VirtualsClient` must be able to tell a live transport from the simulator
+   * without reaching for a private field or a cast.
+   */
+  readonly name?: string;
   /** Providers, as the MARKETPLACE lists them. Not filtered by us. */
   listProviders(capability: string): Promise<Array<{ id: string; name: string; capabilities: string[]; priceUsd?: number }>>;
   openJob(input: { providerId: string; objective: string; agreementId: string; maxUsd: number }): Promise<{ jobId: string; state: string }>;
@@ -574,4 +586,67 @@ export function acpPhaseToAgreementStatus(phase: number, opts: { reachedEvaluati
 export function reachedEvaluation(job: Pick<AcpApiJob, "phase" | "memos">): boolean {
   return job.phase === AcpJobPhase.EVALUATION || job.phase === AcpJobPhase.COMPLETED
     || (job.memos ?? []).some((m) => m.nextPhase === AcpJobPhase.EVALUATION || m.nextPhase === AcpJobPhase.COMPLETED);
+}
+
+/**
+ * Default ACP client resolution (LP-8).
+ *
+ * ## Why this returns `undefined` rather than always returning something
+ *
+ * A session key is only usable under a **delegation**, and a delegation is signed by the
+ * agent's own wallet. So there is no configuration in which this can produce a working
+ * client without one — and a function that returned a "best effort" client anyway would
+ * reintroduce exactly the defect `UnconfiguredAdapterError` was written for: a 2xx that
+ * looks like a marketplace call and performed none.
+ *
+ * So the resolution has three outcomes and no fourth:
+ *
+ * - API key **and** session key **and** a delegation → the live HTTP transport.
+ * - A delegation and session key but no API key → the **simulator**, which announces
+ *   `isSimulated: true` / `LOCAL_PASS` and performs the identical scope check.
+ * - No delegation, or no session key → `undefined`, so the adapter raises
+ *   `UnconfiguredAdapterError`.
+ *
+ * ## The space's rule digest is threaded through, not re-derived
+ *
+ * ADR-0011 says this adapter runs under the *marketplace's* rule set. The delegation
+ * commits to that digest, and the Space's digest is checked against it on every call — so a
+ * Virtuals ACP session inside a Mitra-ruled Space is refused rather than quietly accepted.
+ * Passing the Space's digest in, rather than reading a global, keeps the check on the value
+ * that actually governs this agreement.
+ */
+export function virtualsClientFromEnv(input: {
+  delegation: SessionDelegation;
+  /** Hex private key for the SESSION key. Never the vault key. */
+  sessionKeyHex?: string;
+  /** The Space's rule digest, when the call runs inside a governed Space. */
+  spaceRuleDigest?: string;
+  testnet?: boolean;
+  now?: () => number;
+  fetchImpl?: typeof fetch;
+}, env: Record<string, string | undefined> = process.env): VirtualsClient | undefined {
+  const { delegation, sessionKeyHex, spaceRuleDigest } = input;
+  if (!delegation || !sessionKeyHex) return undefined;
+
+  const sessionKey = (() => {
+    try {
+      return privateKeyToAccount((sessionKeyHex.startsWith("0x") ? sessionKeyHex : `0x${sessionKeyHex}`) as `0x${string}`);
+    } catch {
+      return null;
+    }
+  })();
+  if (!sessionKey) return undefined;
+
+  const shared = { delegation, sessionKey, ...(spaceRuleDigest !== undefined ? { spaceRuleDigest } : {}), ...(input.now ? { now: input.now } : {}) };
+
+  const apiKey = env.VIRTUALS_API_KEY;
+  if (apiKey) {
+    return new VirtualsHttpTransport({
+      ...shared,
+      apiKey,
+      testnet: input.testnet ?? true,
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+    });
+  }
+  return new SimulatedVirtualsTransport(shared);
 }

@@ -3225,7 +3225,7 @@ route, so this makes the commitment correct but does not move capital — see
 
 ## F77 — the saga write and the agreement write are not atomic, stranding an ARMED saga
 
-**Status:** open (found 2026-10-06). Canary test in place; not fixed.
+**Status:** FIXED (2026-10-06), Option 1 — `commerce-recovery.ts` is store-free.
 **Found:** 2026-10-06, immediately after F76, while asking whether an irreversible chain call could safely live in the fund path.
 
 `applyAgreementOpWithSaga` persists the ARMED saga and **returns**
@@ -3277,19 +3277,571 @@ ARMED saga is never left unreachable"), so the suite is green today and vitest r
 a failure the moment someone makes the fund path atomic. A plain `it` asserting
 today's behaviour would have made the repair look like a regression.
 
-**Why this blocks the obvious next step.** Wiring `depositToEscrow`/`lock_escrow`
-into the fund path means an irreversible chain call in exactly this window. A strand
-that costs one unreachable saga would instead cost capital moved with no durable
-record of it. Fix F77 before any capital moves.
+**The fix (Option 1, approved by the lead).** `applyAgreementOpWithSaga` no longer
+takes a repository: it is synchronous, reads nothing, writes nothing, and returns
+`sagasToPersist` alongside the agreement and space. It also takes the agreement's
+current saga as an argument instead of fetching it — a kernel that looks up its own
+state cannot be tested against a state the test did not choose.
 
-## F78 — a submitted deliverable is neither checked nor kept
+The write happens in `lib/commerce/commit-op.ts`, in this order:
+
+```
+agreement FIRST — it is what NAMES the saga — then the sagas
+```
+
+The reverse leaves an agreement naming a saga that is not there, which the kernel
+already treats as a broken link rather than an error (`commerce-recovery.ts:173`). The
+cheap failure, chosen because it costs a saga and never strands capital. **The route
+and the test suite both go through `commitAgreementOp`**, deliberately: the ordering IS
+the guarantee, so if each caller assembled its own writes the copy in the tests would be
+the one that stopped being maintained — and a test that persists sagas before
+agreements would keep passing while the product did the opposite.
+
+**Evidence.** `tests/torn-write-probe.test.ts` rewritten from `it.fails` to a plain
+`it` (3 tests): a lost agreement write leaves NO saga; both writes succeed and the
+agreement's `sagaIds` names the ARMED saga; a store missing the optional write methods
+refuses with `AgreementStoreIncomplete` before writing anything. **Mutation audit 5/5
+killed**, plus M5 for a `this`-losing bug this refactor introduced itself (see below).
+
+**Two bugs this work found in itself, both worth naming.**
+
+- *A guard that could not fire.* The first version checked `saveSaga`, which is
+  **required** on `EconomicRepository` — so the check was unreachable dead code that
+  read like protection. Now it checks only `updateAgreement`/`updateSpace`, which really
+  are optional, and its test asserts the error **class** rather than the message: a
+  `/updateSpace/` regex also matches the raw `TypeError` you get with the guard removed,
+  and that weak assertion let the "drop the guard" mutation survive a full round.
+- *Losing `this`.* Writing `const { updateAgreement } = repo; await updateAgreement(…)`
+  drops the receiver and dies on `this.agreementsMap`. Caught by the existing tests, not
+  by reasoning. The comment in `commit-op.ts` says so, because it is the obvious
+  "tidier" edit and it is wrong.
+
+**Why this unblocked the obvious next step.** Wiring `depositToEscrow`/`lock_escrow`
+into the fund path means an irreversible chain call. That is now safe from the tear, and
+the §15.5 commitment it will carry is genuinely reachable. Two more defects surfaced
+while proving it against a real database — see F79 and F80.
+
+## F79 — `saveSaga` names its columns explicitly, so a new `Saga` field is silently dropped
+
+**Status:** fixed (2026-10-06).
+**Found:** 2026-10-06, while running the F77 suites against real PostgreSQL.
+
+`PostgresRepository.saveSaga` writes an explicit column list. Adding
+`routeCommitments` to the `Saga` type and enforcing it in the kernel was therefore not
+enough — the field reached the database call and vanished. The next `compensate` on that
+saga failed with `COMPENSATION_ROUTE_NOT_COMMITTED`.
+
+**It failed CLOSED, which is exactly why it survived.** The in-memory store keeps whole
+objects, so 1128 in-memory assertions stayed green while the only backend that runs in
+production quietly lost the §15.5 commitment. A guarantee that is enforced in the kernel
+and absent in the datastore is not a guarantee; it is a check that happens to fail
+loudly instead of silently passing, which is better than the reverse and still a defect.
+
+**The test that should have caught it did not, because it was a hardcoded list.**
+`tests/saga-persistence.test.ts` asserted that `mitra.sagas` contains eleven columns
+named out by hand. Adding a twelfth field to the type did not touch that list, so it
+could not fail. It now derives the expected columns from a representative `Saga`'s own
+key set against an explicit camelCase→column mapping, so a new field cannot be added
+without the test noticing.
+
+Two more gaps in the same method, both closed at once: the parameter array was not
+extended when the column was added to the SQL (the query would have failed loudly, but
+only at runtime against a real database), and the `ON CONFLICT DO UPDATE` clause needs
+the column too or every saga that advances once loses it.
+
+**The general lesson, which is the reason this is recorded rather than just patched.**
+Any `Saga`/`Agreement` field added to a domain type must be added to the Postgres write
+list, the row mapper and the migration in the same commit. Three of the four repositories
+store whole documents as JSONB and need nothing; `sagas` is the odd one out with named
+columns, which makes it the one place this failure can happen. The derived-column test
+now guards exactly that place.
+
+**Evidence.** `tests/saga-persistence.test.ts`: the derived column assertion, plus an
+F79 test that persists `routeCommitments`, re-reads through a **fresh** `getSaga` —
+reading back the object the kernel returned would prove nothing — checks it equals
+`keccak256` of the refund route, checks the agreement carries the identical value, and
+then drives the saga all the way to compensation **from reloaded state**.
+
+## F80 — the refund route was rebuilt after the failure, so no on-chain escrow could ever be refunded
+
+**Status:** fixed (2026-10-06).
+**Found:** 2026-10-06, by F76's commitment check refusing a legitimate refund.
+
+At `rejectDeliverable` the kernel reconstructed the refund route from
+`agreement.escrowRef`, which is only the job id:
+
+```
+funded as     evm:refundEscrow:baseSepolia:0x6a73…:0x7c7c…
+rebuilt as    evm:refundEscrow:0x7c7c…
+```
+
+F76 hashes the committed route and re-derives the hash of the route about to run, so this
+failed with `COMPENSATION_ROUTE_REDIRECTED` — **correctly, and permanently**. The string
+being executed was not the string that was agreed, and no amount of retrying helps. Every
+agreement funded against an on-chain escrow would have reached REJECTED and been
+permanently unrefundable, with the capital sitting in the escrow until its timeout.
+
+This is §15.5's actual prohibition, arrived at from the other direction: the rule is not
+only "do not invent a route", it is **"do not reconstruct one"**. The refund was reading
+whatever the agreement happened to still carry, and an agreement only ever stored the
+job id — the chain and contract lived in the caller's request and nowhere else. The
+recovery path's correctness depended on the caller happening to resend `onChainEscrow`.
+
+**Why every suite missed it.** `tests/commerce-saga.test.ts` passes `onChainEscrow`
+again on the reject call, which reconstructs the full route by hand at the call site and
+makes the kernel's reconstruction agree with the commitment by coincidence. The bug only
+appears when the caller does NOT resend it — which is the realistic case and the one a
+timeout refund takes, since nothing is driving the request.
+
+**The fix.** `declareSaga` now records `committedRoutes` (routeId → route body) next to
+the hashes, taken from the same declaration, so the two cannot disagree. The reject path
+builds `availableRoutes` from those committed bodies and consults nothing else. The
+pre-F80 reconstruction survives only as the fallback for a saga declared before the field
+existed, where the commitment check will refuse anything that does not match — the right
+outcome for an unverifiable route.
+
+**Evidence.** `tests/saga-persistence.test.ts` (F79 suite) asserts the committed body
+survives the round trip **and** that a reloaded saga can still reach compensation.
+Mutation audit: reverting to the `escrowRef` reconstruction → 1 failure; dropping
+`committedRoutes` from the `Saga` mapper → 1 failure; dropping it from `declareSaga` → 8
+failures.
+
+## F78 — the in-memory backend silently tolerates what PostgreSQL refuses
+
+**Status:** open (recorded 2026-10-06). Not fixed; it is a property of the test backend.
+**Found:** 2026-10-06, four times in one hour, while making the F77 suites pass on both backends.
+
+`InMemoryRepository` and `PostgresRepository` do not agree on the contract, in the same
+direction every time: **the cheap backend accepts things the real one rejects.**
+
+| Call | In-memory | Postgres |
+|---|---|---|
+| `updateAgreement` | `Map.set` — upsert, silently creates | strict `UPDATE`, throws `AGREEMENT_NOT_FOUND` |
+| `saveAgreement` | `Map.set` — overwrites a duplicate id | `INSERT`, throws on the primary key |
+| `agreement_spaces` FK | not represented, so never enforced | enforced; a missing Space fails the write |
+
+Every one of these produced a green in-memory suite and a red Postgres run on a fixture
+that had been quietly relying on the tolerance. Three test files needed real changes for
+this reason alone.
+
+**Why it matters beyond test convenience.** 68 of 77 test files run against the in-memory
+backend by default. A suite can therefore be green while the production backend would
+refuse the same calls — which is precisely what happened to F79, and what made F80
+invisible. The divergence is not a test bug; it is the reason the whole `DATABASE_URL`
+matrix exists, and the reason approving the devbox Postgres privileges (lead, this
+session) was worth more than it looked.
+
+**Also surfaced, and fixed here.** Two fixtures assumed a clean slate that only exists
+in memory: `__resetStoreForTests` resets nothing in Postgres, so ids generated from a
+counter that restarts at 1 collide with the previous run's rows. Both now carry a
+per-process nonce, without which the second run of a suite fails with
+`duplicate key value violates unique constraint "agreements_pkey"` — a failure that looks
+like a product bug and is not.
+
+**Open, deliberately.** Making `InMemoryRepository.updateAgreement` strict like Postgres
+would catch more of this in the default suite, but it would change behaviour for every
+test that passes an unpersisted agreement, and that is a bigger call than this entry.
+
+## F81 — the two rails computed the §15.5 commitment differently
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, LP-6, before writing a line of escrow code.
+
+Two functions derived "the hash of a refund route" and they did not agree:
+
+| | definition |
+|---|---|
+| `routeCommitment` (`lib/domain/canonical.ts`, added with F76) | `keccak256(route)` |
+| `routeHashFor` (`lib/solana/vault-program.ts`) | `sha256("mitra-recovery-route-v1:" + route)` |
+
+Both produce 32 bytes, and neither contract can read a hash — `MitraJobEscrow.sol` and
+the Solana `JobEscrow` program only check it is non-zero. So the disagreement was
+**invisible on chain** and only became real when LP-6 needed to hand *one* value to both
+rails and store it on the agreement, and there was no single value to hand.
+
+The Solana definition won: it is what LP-4's live devnet proof actually committed, so it is
+the deployed reality; and a domain prefix is the correct construction, because without one
+the same route string hashed for another purpose yields the same commitment — exactly the
+collision `typedHash`'s domain prefixes exist to prevent. `routeHashFor` now delegates to
+`routeCommitment`, so there is one implementation.
+
+Note the direction of the near-miss: F76's own comment argued for keccak256 *because* it
+must equal what the escrow stores, and would have been right had both rails used it. The
+defect was not the choice of digest, it was having two choices.
+
+**Evidence.** `tests/canonical.test.ts` (F81): 32 bytes and `0x`-prefixed; domain-separated
+(compared against a bare hash of the same route); and byte-for-byte agreement with
+`routeHashFor`, imported from the Solana module so the two cannot drift again.
+
+## F82 — `ERC8183Transport.getJob` returned an array, so every named field was `undefined`
+
+**Status:** fixed (2026-10-08). Found by the LP-6 live suite on its first run.
+**Found:** 2026-10-08, LP-6, `JOB_ESCROW_LIVE=1`.
+
+`jobs(...)` declares its return as a **flat list** — `returns (bytes32 jobId, address
+clientVault, ...)`. viem therefore returns an **array indexed 0..8**, so every named access
+(`job.amount`, `job.status`, `job.provider`) was `undefined`.
+
+It went unnoticed for two independent reasons, and both had to be removed for the bug to
+die:
+
+1. **The function had no callers.** Nothing had ever exercised it against a deployed
+   contract. `tests/commerce-escrow-live.test.ts` *did* read it — but positionally,
+   `job[7]` and `job[8]` — so the array shape was observed and worked around rather than
+   fixed, and the workaround read like knowledge of the struct.
+2. **Every caller cast its way past it.** `as unknown as EvmEscrowRail` in
+   `escrowRailFor` — written during LP-6 — made an array-returning `getJob` type-check as a
+   named-returning one. That cast is removed, so a shape divergence now fails to compile;
+   the removal immediately caught two further mismatches (`status` as `bigint` vs `number`,
+   and `getJob` resolving to `undefined`).
+
+**Why it matters more than a decode bug.** `getJob` is the input to the probe that decides
+whether to move capital. With `amount === undefined`, the absence test
+(`job.amount === 0n`) was **false**, so a job id that had never been funded fell through
+to comparing terms made of `undefined`s and reported `MISMATCH`. The live suite hit this
+within a second of running: `expected [ 'ABSENT', 'FUNDED' ] to include 'MISMATCH'` on a
+freshly generated agreement id. **A probe that cannot distinguish "no escrow" from
+"malformed answer" is not a safety mechanism** — it is a coin flip that happens to land on
+"refuse", which is the safe side for a *mismatch* and catastrophic for an *absence*.
+
+**The fix.** `normalizeJobRow` maps positionally onto named fields, accepts an
+already-named row, and **throws `UNREADABLE_RETURN_SHAPE`** on anything else — because a
+malformed answer must never be read as "no escrow".
+
+**Evidence.** `tests/agreement-onchain-escrow.test.ts` (F82) pins the *observed wire shape*
+captured from the deployed contract — a fixture written to match the code rather than the
+chain would have passed while the probe was still broken, which is how this survived. Four
+tests: positional mapping; the zeroed row reads as ABSENT (the actual bug); idempotent on
+a named row; and throws on `undefined`, a short array, and a string. A fifth asserts the
+concrete transport assigns to the bridge interface without a cast.
+
+**Verified live.** `0x75dbc74252698faa3aa2a583bc79cea90b4598cbb8a00dad1bba3fd9763fb928` on
+Base Sepolia: `depositToEscrow` → receipt `success`, `JobFunded` emitted from
+`0xc49c93f0…` with `topic1` equal to `sha256(agreementId)`, and the repaired `getJob`
+reading `amount 1, status 1`.
+
+**One observation, not a defect.** Immediately after that receipt the same `getJob` read
+`amount 0` on the public endpoint, then read `amount 1` a minute later — RPC state
+propagation on a load-balanced provider. The safety property does not depend on this: the
+contract refuses a second deposit for a live `jobId` (`MitraJobEscrow.sol:89`,
+`AlreadySettled`), so a stale-ABSENT retry reverts rather than double-funding. The probe is
+an optimisation against that revert, not the guarantee — which is worth stating, because
+"probe first" reads like the load-bearing control and is not.
+
+## F83 — an agreement had no on-chain provider to escrow for
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, LP-6, while writing the route integration.
+
+The escrow step derived the escrow's provider from `agreement.provider`, which is a Mitra
+**agent id** (`agent_data_03`) — not an EVM address and not a Solana pubkey. Every probe
+would have reported `ESCROW_PROVIDER_DIFFERS` against any real escrow, and the fund path
+could never have escrowed anything.
+
+The correct source is `agreement.payTo`, the term `assertSettlementBinding` records
+precisely so the payee cannot be chosen by whoever calls settle — the F51 caller-chosen-payee
+defect, already fixed on the settlement side and reintroduced here by reaching for the
+nearest-looking field.
+
+Two guards now refuse rather than guess:
+
+- `ESCROW_PROVIDER_ADDRESS_MISSING` — no `payTo`, so there is no on-chain party.
+- `ESCROW_CHAIN_DISAGREES_WITH_PAYTO` — the escrow's chain and the agreement's `payTo` chain
+  must agree. A `payTo` recorded for Solana cannot receive a Base Sepolia payout: the address
+  is a base58 pubkey where the contract wants 20 bytes. The Space already refuses a `payTo`
+  on a chain it does not settle (`SETTLEMENT_CHAIN_NOT_ALLOWED_IN_SPACE`), which is why this
+  surfaced during test setup — but that check is about the Space, not about the escrow being
+  requested, and neither substitutes for the other.
+
+**Evidence.** `tests/agreements-api.test.ts` (LP-6): both refusals, plus the caller-chosen
+`ESCROW_JOB_ID_MISMATCH` — the escrow identity is derived from the agreement, so a request
+naming a different `jobId` is refused rather than funding an escrow the §15.5 commitment does
+not cover. Mutation: removing any of the three guards turns the suite red.
+
+## F84 — two fixtures asserted a clean database that only exists in memory
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, running `npm run test:postgres` for LP-6.
+
+Instances of F78 found by the matrix, both of which **passed in memory and asserted the
+wrong thing**:
+
+- `tests/intent-persistence.test.ts` — `prepareStore()` in `beforeEach` resets the in-memory
+  store and nothing else. Against Postgres a shared `intentId` made the second test's create
+  an idempotent **replay (200)** where it asserted a fresh create (201). Worse, the F65 case
+  ("refuses to overwrite an existing intent with a different body") compared against an
+  intent left over from a **previous run**, so the refusal was not being exercised at all.
+  Its fixed `i0`/`i1` ids had the same effect: the "refuses a zero budget" assertions were
+  passing because the create was refused for being a duplicate.
+- `tests/commerce-saga.test.ts` — a second `openAgreement` call site that bypassed the helper
+  fixed in F77, still using the literal `ag_1` and never persisting, so `commitAgreementOp`'s
+  strict `UPDATE` raised `AGREEMENT_NOT_FOUND`.
+
+Both now generate per-run, per-test identities. This is the concrete cost of F78 being open,
+and the argument for closing it.
+
+## F85 — the two rails mean different things by the same field names
+
+**Status:** fixed (2026-10-08), with the Solana rail slice.
+**Found:** 2026-10-08, while wiring `escrowRailFor` for Solana.
+
+The bridge's `EscrowTerms` has one shape and **two meanings**:
+
+| | `client` | `amount` |
+|---|---|---|
+| EVM | a deployed MitraVault address the caller names; the refund returns tokens there | the token in base units |
+| Solana | **fixed by the signing key** — `vaultPda(client)` derives the vault from it and the program checks it as the authority | **lamports**, not a token |
+
+The route built one `EscrowTerms` for both, reading `client` from `requested.contractAddress`.
+On Solana that compares a base58 authority against an EVM-shaped address and reports
+`ESCROW_PROVIDER_DIFFERS` on every probe — so the Solana rail would have appeared to work and
+never once matched its own chain.
+
+Three changes:
+
+- `SolanaEscrowRail.authority` exposes the client the rail will actually sign as, and the
+  route reads it. It cannot be a request field: the vault PDA is *derived* from that key, so
+  a caller-chosen value would address a vault the signer does not control.
+- Amounts are converted per rail.
+- **Lamports are not guessed.** `lamportsFor` accepts only a price of exactly 1 and refuses
+  otherwise with `SOLANA_ESCROW_AMOUNT_UNSUPPORTED`. A devnet placeholder that silently
+  differs from mainnet by nine orders of magnitude is precisely the kind of value that looks
+  fine in testing and is catastrophic live, so "1 USDC == 1 lamport" is stated as a refusal
+  rather than adopted as a conversion.
+
+This is F81's sibling: two rails, one name, two meanings. F81 was the same collision in a
+hash; this is it in a struct.
+
+## F86 — a Solana signature is not evidence that the escrow exists
+
+**Status:** fixed (2026-10-08) in `SolanaEscrowRailImpl`.
+**Found:** 2026-10-08, by reasoning about the transport rather than by a failure — and the
+reasoning is F82's again.
+
+`sendRawTransaction` returns a signature whether or not the transaction took effect. A rail
+that reports that as `locked` produces exactly the failure LP-6 exists to prevent: the
+database records capital escrowed, and nothing is. So `send` **waits for confirmation and
+then re-reads the resulting account**, and treats three observations as failures:
+
+- the signature never confirms → `NOT CONFIRMED`
+- confirmed, but no escrow account exists → `CONFIRMED BUT NO ESCROW EXISTS`
+- confirmed, but the account carries no §15.5 commitment → `CONFIRMED WITHOUT A §15.5 COMMITMENT`
+
+The third is worth separating. The program permits a zero hash in an account created some
+other way, and such an escrow **can never be refunded**. Detecting it at lock time, while the
+route hash was still in hand, is the difference between a loud failure and a job whose
+recovery route silently does not exist.
+
+Also removed while writing it: `getLatestBlockhash` was being called **twice** in `send`, so
+the blockhash on the transaction was not the one paired with `lastValidBlockHeight` for its
+confirmation. That is an intermittent "block height exceeded" on a valid transaction — a bug
+that would have been attributed to the network.
+
+**Evidence.** 6 hermetic tests against an injected `Connection` (a seam, not a
+monkey-patched private field): confirmation awaited after send; unconfirmed refused; confirmed
+-but-absent refused; confirmed-without-commitment refused; the release path reads the provider
+**off the account** and refuses with no escrow at all; the refund needs no vault authority.
+
+**Live.** `jW14aBAbYPZDWPqRG99CHfqRwXfdvyaeAxgnrXMD1Kw1Kf5V9zfLY2wNC1WxbfCqBfkqKhNni3rzcG75gMaHZWZ`
+on devnet: probed `ABSENT` → `lock_escrow` → probed `FUNDED` → the account's
+`refundRouteHash` equals the kernel's derivation → the replay returned `skipped:
+ALREADY_FUNDED` with **no** `txHash`. LP-4 had proved the instruction in isolation via
+`scripts/escrow-devnet.mjs`; this proves the rail the **route** uses speaks the same protocol.
+
+**One test bug worth recording**, because it looked like a product failure: the first live run
+reported `MISMATCH` on a correctly-funded escrow. The probe's timeout was computed a second
+time and had moved by the wall-clock second between the lock and the probe. The guard was
+right; the test was wrong. A term comparison is only as good as the terms, and a timeout
+recomputed mid-test is two different terms.
+
+## F87 — the LP-7 fee ceiling was 100× too small
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-7, by the boundary test at the cap.
+
+`maxFeeFor` computed the proportional 1% as
+
+```ts
+(BigInt(Math.round(amount.amount * 1_000_000)) * MAX_FEE_BPS) / (BPS * 100n)   // ← extra /100n
+```
+
+which yields **1/100th** of the intended ceiling: `$10` payout → allowed fee `$0.001`
+instead of `$0.10`. It failed **closed** — every real quote was refused — which is why the
+tests that mattered were the *boundary* ones ("accepts a quote exactly at the ceiling") and
+not the refusal ones, which all passed regardless of what the limit was.
+
+The arithmetic is now in micro-units throughout with a single division by `BPS`. **Recorded
+because the failure mode is worth naming: a fee ceiling that is too small looks exactly like
+a working one.** Every "REFUSES a quote above the ceiling" test passed. Only the test that
+asked what the ceiling *was* caught it. A limit needs an assertion on its own value, not only
+on the refusals it produces.
+
+Two fixture consequences worth recording, because both would have hidden the bug rather than
+revealing it:
+
+- The default test quote was `USDC(0.5)` on a `$10` payout — which is 500% of the *correct*
+  ceiling and only passed while the ceiling was 100× too small. A fixture can quietly depend
+  on a bug.
+- `maxFeeFor(USDC(3))` was asserted as `$0.03`, i.e. "min(1%, $2) does not eat a small
+  payout". Under the broken formula it was `$0.0003`, and the assertion failed for a reason
+  that had nothing to do with the property being tested.
+
+## F88 — two guards in the cross-chain settlement path, only one of which was load-bearing
+
+**Status:** fixed (2026-10-08).
+**Found:** 2026-10-08, LP-7, by mutation audit.
+
+The recipient checksum was validated **twice** in `settleCrossChainAgreement`: once after the
+store reads, once before the quote. Deleting the first changed nothing, because the second
+caught it — so the mutation survived, and surviving is the signal. Two identical checks read
+as defence in depth and are in fact one check with a maintenance cost: the next edit that
+moves or removes "the redundant one" removes the guard entirely.
+
+Reduced to a single check, placed **before any store read**, which is both the cheapest
+ordering and the one that survives mutation. Re-audited: deleting it now fails 3 tests.
+
+The same audit found a genuine gap next to it: **no end-to-end test for insufficient
+headroom**. The policy arithmetic was tested, the settlement path was not — so replacing
+`remainingHeadroom` with `Number.MAX_SAFE_INTEGER` in the settlement path was invisible,
+because the fixture's vault had 100 against a 10.05 debit and the guard passed either way.
+Added, and the mutation now fails 3 tests.
+
+The general lesson, which is F78's again in a different costume: **a guard is only verified
+by the path that reaches it.** Both survivors were guards that existed, were correct, and
+were never consulted by the test suite.
+
+## F89 — a live relayer that can quote but cannot broadcast
+
+**Status:** avoided by construction (2026-10-08).
+**Found:** 2026-10-08, LP-7, while writing the route dispatch.
+
+The first version of the route's relayer selection was: live if `LIFI_API_KEY` is set,
+otherwise simulate. That produced a configuration in which the canonical leg settles, the
+quote passes the fee and slippage guards, and then the bridge throws — **on every attempt**,
+because nothing was ever going to broadcast.
+
+The ordering makes that failure *recoverable* rather than fatal (funds sit in the relayer's
+account on a chain Mitra operates, reconcilable the way LP-6 reconciles escrows), which is
+the right property. But "recoverable, every time" is not the same as working, and a
+configuration that silently converts into that on the strength of one env var is a trap.
+
+Now the live path requires a key **and** a broadcaster **and** a relayer address. Absent any
+of them, the process uses the simulator, which announces itself on every result. There is
+deliberately no third option: never falling back to the canonical path, because paying a BNB
+Chain address from a Base vault is a transfer to an address on the wrong chain, not a
+settlement.
+
+## F90 — a session-key delegation that is only *read* makes the scope mechanism theatre
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, while writing the scope check.
+
+The obvious way to build a delegated session key is to carry a `delegation` object and check
+its `allowedActions` before each call. That reads like authorisation and is none: a
+delegation is just data, so **anyone can mint one** with `allowedActions: ["settle"]` and a
+generous `maxSpendUsd`, and every check downstream passes. The scope machinery would be a
+speed bump in front of an attacker who simply writes their own permit.
+
+The fix is to make the delegation a **signature over the exact tuple that is enforced**:
+
+```
+sessionAddress · ruleDigest · allowedActions (order-insensitive, hashed) · maxSpendUsd · expiresAt
+```
+
+EIP-712, verified by recovery **before use**. Two properties follow that a data-only
+delegation does not have:
+
+- no field can be edited after signing — each mutation either changes the recovered signer or
+  makes recovery fail;
+- the actions are hashed **sorted**, so a reorder cannot change meaning while keeping the
+  same string.
+
+This is the same lesson as F51 (caller-chosen payee) and F55 (a signature must prove *who*,
+not just *that*): an authorisation that is not cryptographically bound to the authority is a
+preference.
+
+**Evidence.** `tests/virtuals-transport.test.ts`: recovery matches the signer; five
+post-signature mutations each break verification; a self-declared delegator with someone
+else's signature is refused `SESSION_KEY_DELEGATOR_MISMATCH`; an unparseable signature is
+refused `SESSION_KEY_DELEGATION_UNVERIFIABLE` rather than skipped. **Mutation:** replacing
+recovery with `d.delegator` — trusting the field — fails 4 tests.
+
+## F91 — the allowlist must be an enum, not only a delegation's contents
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, by mutation audit.
+
+The first scope check asked only "is this action in `delegation.allowedActions`?" — which is
+the delegation's own list consulted by the code it authorises. A delegator (compromised, buggy,
+or simply wrong) could therefore widen the executable surface to include `settle` or
+`claim_dispute`, and every check would pass.
+
+Now the action is checked against `ACP_PERMITTED_ACTIONS` **first**, as an enum, and only then
+against the delegation. Both halves are load-bearing and they refuse for different reasons,
+so both are tested:
+
+- a **genuine** delegation, signed by the agent's own wallet, listing `settle` → refused
+  `SESSION_KEY_ACTION_NOT_PERMITTED`. Only the code can widen the surface, never a delegator.
+- a **forged** delegation edited to list `settle` → refused earlier at
+  `SESSION_KEY_DELEGATOR_MISMATCH`, because it is not a delegation at all.
+
+**The control is also the ABSENCE of verbs.** `ACP_PERMITTED_ACTIONS` is five actions and
+none of them moves capital: `openJob` proposes a spend against a cap, it does not disburse,
+and settlement stays on a canonical rail through the machinery that already governs it. A test
+asserts no permitted action matches `/spend|settle|dispute|claim|withdraw|transfer/`.
+
+**Mutation:** removing the enum check and consulting only the delegation fails **9** tests —
+the largest kill in this package, which is what a load-bearing guard looks like.
+
+## F92 — scope checked once at construction is scope checked until the process dies
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, by mutation audit.
+
+The failure mode session keys exist to prevent is a long-lived process holding a scope that
+was valid when it started. A transport that called `assertSessionScope` once in its
+constructor would keep signing **for its entire lifetime** after the delegation expired — which
+is precisely the window an attacker wants.
+
+`assertSessionScope` therefore takes a clock and is called immediately before **every**
+signature, in both transports and the simulator. The test proves the live case by advancing an
+injected clock past `expiresAt` on a running transport and asserting the next call refuses.
+
+**Mutation:** freezing the clock to wall-time at construction fails 1 test. Only 1, because
+the test is the only thing that distinguishes "checks on every call" from "checks once" — a
+gap worth naming, since the guard is load-bearing and thin.
+
+## F93 — a test helper that signed first and mutated second tested nothing
+
+**Status:** fixed 2026-10-08, before commit.
+**Found:** 2026-10-08, LP-8, while writing the scope tests.
+
+The first `delegation(over)` helper called `signSessionDelegation({...defaults})` and then
+spread `over` onto the result — so `delegation({ maxSpendUsd: 0.3 })` produced a delegation
+whose signature covered `25` while the object said `0.3`. Every such test then failed at
+`SESSION_KEY_DELEGATOR_MISMATCH`, which is correct behaviour and has nothing to do with the
+rule being exercised.
+
+Four tests failed for reasons unrelated to their subject, and the tempting response — to
+assert the mismatch instead — would have left the spend ceiling, the rule-digest binding and
+the expiry boundary entirely untested while the suite was green.
+
+The helper now signs **over** every field it is given. Worth recording because the failure is
+invisible: a fixture that quietly invalidates its own signature converts every downstream
+assertion into a test of the signature check, and the suite still reports failures rather than
+passing. Green suites hide this; loud failures merely misattribute it.
+
+The same class as F87's fixture, which depended on a 100×-wrong fee ceiling: **a fixture can
+depend on a bug and keep asserting the right words.**
+
+## F94 — a submitted deliverable is neither checked nor kept
 
 **Status:** open (found 2026-10-09). Canary test in place; not fixed. Owner: lead (`lib/kernel/`, `lib/store/`, the agreements route).
 **Found:** 2026-10-09, by PurpleDNA's agent while writing the PP-8 evaluator skill, asking where an evaluator reads what it is meant to judge.
 
 `POST /api/v1/agreements` with `op: "submitDeliverable"` accepts `artifactRefs` and
 `contentHash`, the provider signs over both (`bodyHash`), and the route passes them
-to `applyAgreementOpWithSaga` (`app/api/v1/agreements/route.ts:291-292`).
+to `applyAgreementOpWithSaga` (`app/api/v1/agreements/route.ts:331-332`).
 `applyAgreementOp` takes them in its `opts` type (`lib/kernel/commerce.ts:164`) and
 never reads them. Nothing persists them: not the agreement, not the deliverables
 table (the repository has `listDeliverables` and no write), not the saga, not the

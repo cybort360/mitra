@@ -703,8 +703,9 @@ export class PostgresRepository implements EconomicRepository {
     await this.pool.query(
       `INSERT INTO mitra.sagas
          (saga_id, run_id, intent_id, status, recovered_value, contained_value,
-          steps, compensation_routes, route_attempts, timeout_policy, version)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)
+          steps, compensation_routes, route_attempts, route_commitments, committed_routes,
+          timeout_policy, version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13)
        ON CONFLICT (saga_id) DO UPDATE SET
          status              = EXCLUDED.status,
          recovered_value     = EXCLUDED.recovered_value,
@@ -714,13 +715,21 @@ export class PostgresRepository implements EconomicRepository {
          -- F47: route_attempts is overwritten from the caller's copy, so a persisted
          -- spent attempt can never be resurrected by a stale write.
          route_attempts      = EXCLUDED.route_attempts,
+         -- F79: without this the §15.5 commitment is dropped on every advance, so a
+         -- saga that has moved once can no longer be compensated at all.
+         route_commitments   = EXCLUDED.route_commitments,
+         -- F80: same reason — the committed route bodies must survive every advance.
+         committed_routes    = EXCLUDED.committed_routes,
          timeout_policy      = EXCLUDED.timeout_policy,
          version             = EXCLUDED.version`,
       [
         saga.sagaId, saga.runId, saga.intentId, saga.status,
         saga.recoveredValue, saga.containedValue,
         JSON.stringify(saga.steps), JSON.stringify(saga.compensationRoutes),
-        JSON.stringify(saga.routeAttempts ?? {}), saga.timeoutPolicy, saga.version,
+        JSON.stringify(saga.routeAttempts ?? {}),
+        JSON.stringify(saga.routeCommitments ?? {}),
+        JSON.stringify(saga.committedRoutes ?? {}),
+        saga.timeoutPolicy, saga.version,
       ],
     );
   }
@@ -828,6 +837,10 @@ function rowToSaga(r: Record<string, unknown>): Saga {
     steps: (Array.isArray(r.steps) ? r.steps : []) as Saga["steps"],
     compensationRoutes: (Array.isArray(r.compensation_routes) ? r.compensation_routes : []) as string[],
     routeAttempts: (r.route_attempts && typeof r.route_attempts === "object" ? r.route_attempts : {}) as Record<string, number>,
+    // F76: absent on rows written before the column existed, which is exactly the
+    // "no commitment" case `compensate` refuses rather than waves through.
+    routeCommitments: (r.route_commitments && typeof r.route_commitments === "object" ? r.route_commitments : {}) as Record<string, string>,
+    committedRoutes: (r.committed_routes && typeof r.committed_routes === "object" ? r.committed_routes : {}) as Record<string, string>,
     timeoutPolicy: String(r.timeout_policy ?? ""),
     recoveredValue: Number(r.recovered_value ?? 0),
     containedValue: Number(r.contained_value ?? 0),

@@ -30,7 +30,6 @@
  * likely to regress silently.
  */
 import { createHash } from "node:crypto";
-import { keccak256, toHex } from "viem";
 
 export type Canonical = null | boolean | number | string | Canonical[] | { [k: string]: Canonical };
 
@@ -156,17 +155,31 @@ export function settlementReceiptHash(receipt: {
 }
 
 /**
- * The PRD §15.5 commitment for a compensation route: `keccak256` of the route string.
+ * The PRD §15.5 commitment for a compensation route: 32 bytes over the route string,
+ * domain-separated.
  *
- * ## Why keccak256 and not the `sha256:` used above
+ * ## Why this is sha256 with a domain prefix, and not keccak256 (F81)
  *
- * The other hashes in this module are Mitra's own — they name Mitra objects and
- * nothing reads them off a chain. This one has to be the **same value** the escrow
- * contract stores in `refundRouteHash`, because that is the whole point of it: the
- * kernel verifies the route it is about to run against a commitment recorded at
- * funding time, and the contract refuses an escrow whose commitment is zero. Two
- * different digests over the same route would make those two independent checks
- * agree about nothing.
+ * Two definitions of "the route hash" existed, and they disagreed:
+ *
+ * - `routeCommitment` here, added with F76, was `keccak256(route)`.
+ * - `routeHashFor` in `lib/solana/vault-program.ts` was
+ *   `sha256("mitra-recovery-route-v1:" + route)`.
+ *
+ * Both are 32 bytes and both rails accept either, because neither contract can read a
+ * hash — `MitraJobEscrow.sol` and the Solana `JobEscrow` program only check it is
+ * non-zero. So the disagreement was invisible on chain and only mattered at the one
+ * place where it decides something: LP-6 has to hand **one** value to both rails and
+ * store it on the agreement, and there was no single value to hand.
+ *
+ * The Solana definition wins, for two reasons. It is what LP-4's live devnet proof
+ * actually committed, so it is the deployed reality. And a domain prefix is the
+ * correct construction: without one, the same route string hashed for another purpose
+ * would produce the same commitment, which is the cross-protocol collision the
+ * `mitra.settlement-receipt.v1` / `typedHash` prefixes above exist to prevent.
+ *
+ * `routeHashFor` now delegates here, so there is one implementation and the two rails
+ * cannot drift again.
  *
  * ## Why the route is hashed at all
  *
@@ -174,15 +187,12 @@ export function settlementReceiptHash(receipt: {
  * bodies from a caller-supplied `availableRoutes` array. So a caller could hand back
  * the committed id with entirely different instructions behind it — the same id
  * pointing at a different contract, a different job, a different payee — and the
- * engine would run it. §15.5 says *"never let the recovery engine invent arbitrary
- * compensation calldata after failure"*; without this, the engine is not inventing
- * any, it is faithfully executing what it was handed. Hashing the route at
- * declaration makes the id and the body one value, so substituting the body breaks
- * the check instead of satisfying it.
+ * engine would run it. Hashing the route at declaration makes the id and the body one
+ * value, so substituting the body breaks the check instead of satisfying it (F76).
  *
- * The empty string hashes to a real non-zero digest, so callers must refuse an empty
- * route themselves; `armSaga` already does (`r.route.length > 0`).
+ * The empty string still hashes to a real non-zero digest, so callers must refuse an
+ * empty route themselves; `armSaga` already does (`r.route.length > 0`).
  */
 export function routeCommitment(route: string): string {
-  return keccak256(toHex(route));
+  return `0x${createHash("sha256").update(`mitra-recovery-route-v1:${route}`, "utf8").digest("hex")}`;
 }

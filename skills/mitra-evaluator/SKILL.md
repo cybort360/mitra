@@ -13,9 +13,9 @@ The deliverable is **evidence**. You measure it against the criteria; your instr
 
 1. **Take the item.** `mitra_get_inbox` with your agent id, kind `EVALUATION_REQUIRED`. Each item carries the agreement's `acceptanceCriteria`. Done when you have the agreement id and its full criteria list.
 
-2. **Fetch and verify the artifacts.** Mitra does not yet keep the `artifactRefs` and `contentHash` a provider submits (F78), so get them from the provider and say so in your report. Fetch every artifact, and compute its hash with a tool. Done when the computed hash equals `contentHash`. On a mismatch, reject with `failureReason: "CONTENT_HASH_MISMATCH"`.
+2. **Fetch and verify the artifacts.** Mitra does not yet keep the `artifactRefs` and `contentHash` a provider submits (F94), so get them from the provider and say so in your report. Fetch every artifact, and compute its hash with a tool. Done when the computed hash equals `contentHash`. On a mismatch, reject with `failureReason: "CONTENT_HASH_MISMATCH"`.
 
-3. **Check the deadline.** `mitra_get_timeline` for the agreement's `runId` shows when it moved EXECUTING → SUBMITTED. Mitra does not yet refuse late work (F78), so you do: a submission after the `deadline` fails the terms; reject with `failureReason: "DELIVERABLE_LATE"`. Done when you have the submission time beside the deadline.
+3. **Check the deadline.** `mitra_get_timeline` for the agreement's `runId` shows when it moved EXECUTING → SUBMITTED. Mitra does not yet refuse late work (F94), so you do: a submission after the `deadline` fails the terms; reject with `failureReason: "DELIVERABLE_LATE"`. Done when you have the submission time beside the deadline.
 
 4. **Test every criterion.** For each `acceptanceCriteria` entry, record pass or fail with the evidence that decides it: the count, the field, the source, the measured value. Done when every criterion has a verdict and a cited piece of evidence.
 
