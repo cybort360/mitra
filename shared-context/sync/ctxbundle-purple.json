@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 125,
+  "highSeq": 127,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2615,6 +2615,54 @@
         "94b97ac222242bf79d49b33a6e759444282ea7dce12f6bf1fd308c1191eb8214"
       ],
       "hash": "30ef97174b6f296ef1b137c4a2b938305812928445e8990c36835911f80653e7"
+    },
+    {
+      "entryId": "ctx_21df586ad7a33d1a",
+      "seq": 126,
+      "kind": "finding",
+      "title": "F94 (was mis-numbered F78): submitDeliverable discards artifactRefs and contentHash, and evaluateDeliverable has no production caller, so a late, empty submission can be ACCEPTED",
+      "body": "RENUMBERED. The handoff said next free was F78, but the lead had already used F78..F93 on feat/mitra-vault-v2-reseed (the lead's F78 is the in-memory/Postgres tolerance finding). This defect is F94; content unchanged from ctx_e8508a58bc2b85ac.\nRe-verified after merging the lead's LP-6..LP-8 (merge fa31e27 on feat/purple-pp): still present. Route passes artifactRefs/contentHash at app/api/v1/agreements/route.ts:331-332; applyAgreementOp declares them (commerce.ts:164) and never reads them; nothing persists them; evaluateDeliverable (commerce.ts:277) has no production caller. Canary tests/deliverable-binding-probe.test.ts stays green.\nCandidate fix unchanged: on submit build a Deliverable, run evaluateDeliverable, persist it, record its id on the agreement; have accept/reject carry the contentHash judged.",
+      "status": "active",
+      "scope": "commerce",
+      "tags": [
+        "F94",
+        "deliverable",
+        "for-lead",
+        "kernel"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T06:43:02.737Z",
+      "parents": [
+        "30ef97174b6f296ef1b137c4a2b938305812928445e8990c36835911f80653e7",
+        "94b97ac222242bf79d49b33a6e759444282ea7dce12f6bf1fd308c1191eb8214"
+      ],
+      "hash": "19cecbf1c999e66ba1eb9e77aac4d8931887998fbfb9c1149f1dfa2c3beb3de0",
+      "supersedesId": "ctx_e8508a58bc2b85ac"
+    },
+    {
+      "entryId": "ctx_6a900c24299d1cb4",
+      "seq": 127,
+      "kind": "handoff",
+      "title": "Wave 3 purple: PP-5, PP-6, PP-8 merged with LP-6..LP-8 and pushed for PR into feat/mitra-vault-v2-reseed; PP-7 held; F94 open",
+      "body": "Supersedes the seq 125 handoff (which said F78 and \"not pushed\").\nDONE on feat/purple-pp: PP-5 SDK (6188145), PP-6 inbox (336134d), PP-8 skills + F94 (a65f749), merge of origin/feat/mitra-vault-v2-reseed (fa31e27; conflicts only in forge/EXECUTION_PLAN.md and forge/FAILURES.md, resolved keeping all lead text). Merged suite: tsc clean, vitest 1318 pass / 0 fail, in-memory.\nNEXT: lead reviews the PR; F94 (lead's files); PP-7 waits on human:purple's or the lead's choice for ctx_d3eaff6172c8b596; Postgres run of sdk/inbox suites; an LLM-agent run of a skill.\nNOTE for the lead: docs/HANDOFF_CODEVELOPER.md still says next free failure id is F78; it is F95 after this merge.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PP-5",
+        "PP-6",
+        "PP-7",
+        "PP-8",
+        "handoff",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T06:43:02.769Z",
+      "parents": [
+        "19cecbf1c999e66ba1eb9e77aac4d8931887998fbfb9c1149f1dfa2c3beb3de0",
+        "30ef97174b6f296ef1b137c4a2b938305812928445e8990c36835911f80653e7"
+      ],
+      "hash": "f7fffc908dfbc59fd279ed9fbc0e08f131340b88f27d5b43a8b2fc317de74e28",
+      "supersedesId": "ctx_6e2474b6758cc469"
     }
   ],
   "actors": [
@@ -2652,5 +2700,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "30ef97174b6f296ef1b137c4a2b938305812928445e8990c36835911f80653e7"
+  "tipHash": "f7fffc908dfbc59fd279ed9fbc0e08f131340b88f27d5b43a8b2fc317de74e28"
 }
