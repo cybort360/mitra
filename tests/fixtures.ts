@@ -8,6 +8,12 @@ import { __resetStoreForTests } from "@/lib/store/provider";
 import type { EvmEscrowRail, EscrowRail } from "@/lib/commerce/onchain-escrow";
 import { normalizeJobRow } from "@/lib/adapters/erc8183-transport";
 
+/**
+ * The token the EVM job escrow holds. Required since F96 — the route used to default it to
+ * the **zero address**, which is an escrow holding nothing at an address that exists.
+ */
+export const ESCROW_TOKEN = "0x036cbd53842c5426634e7929541ec2318f3dcf7e" as const;
+
 export const NOW = "2026-10-01T12:00:00.000Z";
 
 export const goodProposal = {
@@ -147,6 +153,9 @@ export function fakeEvmEscrowRail(over: {
   const rail = {
     calls,
     address: "0x00000000000000000000000000000000000000ea" as const,
+    // F96: the route needs somewhere honest to name as evaluator when the agreement's is a
+    // Mitra agent id. Present on the real transport whenever a signing key is configured.
+    evaluatorFallback: "0x000000000000000000000000000000000000000e" as const,
     async depositToEscrow() { calls.push("depositToEscrow"); job = over.job; return `0x${over.txPrefix ?? "ab".repeat(32)}`; },
     async completeJob() { calls.push("completeJob"); return `0x${over.txPrefix ?? "cd".repeat(32)}`; },
     async refundJob() { calls.push("refundJob"); return `0x${over.txPrefix ?? "ef".repeat(32)}`; },

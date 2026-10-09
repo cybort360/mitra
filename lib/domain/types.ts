@@ -375,6 +375,31 @@ export interface Agreement {
    * about nothing.
    */
   refundRouteHash?: string;
+  /**
+   * The chain this agreement's escrow lives on (F97).
+   *
+   * **`escrowRef` alone is not enough.** It holds only the job id, because `onChainEscrow`
+   * arrives as a request field and nothing persisted it. So an agreement that was funded on
+   * one chain could not say which — and reconciliation, which has to ask the CHAIN what
+   * happened to the capital, had nowhere to ask. That is why a keeper's timeout refund was
+   * invisible: nothing in the stored agreement could locate the escrow to notice it.
+   *
+   * Set once at `fund`, beside `escrowRef`, and never changed: an escrow cannot be moved
+   * between chains without becoming a different escrow with a different identity.
+   */
+  escrowChain?: string;
+  /** The escrow contract (EVM) or the reference the rail used (Solana). */
+  escrowContract?: string;
+  /**
+   * The deadline the escrow was actually OPENED with, in unix seconds (F97).
+   *
+   * Persisted rather than re-derived because it is not the agreement's `deadline`: a request
+   * may set `onChainEscrow.timeout` to anything, and the sandbox's chain clock differs from
+   * wall time entirely. Every later probe reconstructs the terms and compares them, so a
+   * wrong timeout is not a cosmetic mismatch — it is `ESCROW_TIMEOUT_DIFFERS`, which refuses
+   * the refund that was supposed to release the capital.
+   */
+  escrowTimeout?: number;
   failurePolicy: string;
   status: AgreementStatus;
   /**

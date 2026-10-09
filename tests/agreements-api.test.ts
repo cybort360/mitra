@@ -3,7 +3,7 @@ import { GET, POST } from "@/app/api/v1/agreements/route";
 import { bindTestParties, prepareStore, signedTransition } from "./fixtures";
 import { routeCommitment } from "@/lib/domain/canonical";
 import { __setEscrowRailResolverForTests } from "@/lib/commerce/escrow-rail";
-import { fakeEvmEscrowRail, asEvmRail } from "./fixtures";
+import { ESCROW_TOKEN, fakeEvmEscrowRail, asEvmRail } from "./fixtures";
 import { escrowIdFor } from "@/lib/commerce/onchain-escrow";
 import { onChainRefundRouteFor } from "@/lib/kernel/commerce-recovery";
 import { getStore } from "@/lib/store/provider";
@@ -203,7 +203,11 @@ describe("Commercial Agreements API (Prometheus Vertical Agency Surface)", () =>
  * agreement whose capital is not actually escrowed.
  */
 describe("§15.5 — funding an on-chain escrow commits its refund route", () => {
-  beforeEach(async () => { await bindTestParties(); await ensureEscrowSpace(); });
+  beforeEach(async () => {
+    await bindTestParties();
+    await ensureEscrowSpace();
+    process.env.MITRA_ESCROW_TOKEN_ADDRESS = ESCROW_TOKEN;
+  });
 
   // DERIVED, not chosen: LP-6 refuses a caller-supplied jobId that is not the one this
   // agreement's §15.5 commitment covers, so the test must use the same narrowing.
@@ -268,7 +272,11 @@ describe("LP-6 — the agreement route drives real escrow, chain before database
   const contractAddress = "0x6a731a654423d64afb9839742c3e48c6c54eea9c";
   const NONCE = Math.random().toString(36).slice(2, 8);
 
-  beforeEach(async () => { __setEscrowRailResolverForTests(null); await ensureEscrowSpace(); });
+  beforeEach(async () => {
+    __setEscrowRailResolverForTests(null);
+    await ensureEscrowSpace();
+    process.env.MITRA_ESCROW_TOKEN_ADDRESS = ESCROW_TOKEN;
+  });
 
   const openAgreementVia = async (agreementId: string, payToChain: "base" | "solana" = "base") => {
     const res = await POST(new Request("http://localhost/api/v1/agreements", {

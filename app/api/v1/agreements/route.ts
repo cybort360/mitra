@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { refuseIfPaused } from "@/lib/admin/incident";
 import { z } from "zod";
+import { isAddress } from "viem";
 import { getStore } from "@/lib/store/provider";
 import {
   openAgreement,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/commerce/onchain-escrow";
 import { resolveEscrowRail } from "@/lib/commerce/escrow-rail";
 import { onChainRefundRouteFor } from "@/lib/kernel/commerce-recovery";
+import { reconcileEscrow } from "@/lib/commerce/escrow-reconcile";
 import { routeCommitment } from "@/lib/domain/canonical";
 import { recordEvent } from "@/lib/store/events";
 import { requestBodyHash, verifySignedRequest } from "@/lib/identity/signed-request";
@@ -32,9 +34,16 @@ export async function GET(req: Request) {
   const { repo, backend } = await getStore();
 
   if (agreementId) {
-    const agreement = repo.getAgreement
+    const loaded = repo.getAgreement
       ? await repo.getAgreement(agreementId)
       : (await repo.listAgreements()).find((a) => a.agreementId === agreementId) ?? null;
+    // F97: an escrow may have been refunded by someone who is not a party — a keeper after
+    // a timeout, a client changing their mind — and Mitra learns of it from the chain rather
+    // than from a message. A read that can heal is normally wrong; returning a KNOWN-STALE
+    // status to whoever asked is worse, because the caller cannot tell which number is stale.
+    // Bounded to agreements that HAVE an escrow, healed only in the refunded direction, and
+    // every heal records an event so the write is visible in the audit log.
+    const agreement = loaded ? await reconcileOnRead(repo, loaded) : loaded;
 
     if (!agreement) {
       return NextResponse.json(
@@ -43,10 +52,17 @@ export async function GET(req: Request) {
       );
     }
 
+    // F94: the deliverable travels WITH the agreement. An evaluator deciding whether to
+    // accept needs the content hash and artifact refs the provider actually signed — and
+    // before this they existed only in a request body that was discarded, so "accept"
+    // accepted an assertion about work nobody could inspect.
+    const deliverables = (await repo.listDeliverables()).filter((d) => d.agreementId === agreement.agreementId);
+
     return NextResponse.json({
       data: {
         ...agreement,
         availableOps: availableAgreementOps(agreement.status),
+        deliverables,
       },
       backend,
       evidenceLevel: "LOCAL_PASS",
@@ -166,6 +182,9 @@ export async function POST(req: Request) {
   const paused = pauseScope ? await refuseIfPaused(pauseScope) : null;
   if (paused) return paused;
   const { repo, backend } = await getStore();
+  // F94: the deliverable deadline check needs a clock, and one taken here is the same
+  // instant used for the event log — two clocks would make "late" depend on which one ran.
+  const now = new Date();
 
   // These writes used to be skipped with `if (repo.saveAgreement)`, so a store
   // without them answered 2xx and persisted nothing (the Postgres repository had
@@ -332,6 +351,9 @@ export async function POST(req: Request) {
       contentHash: body.contentHash,
       failureReason: body.failureReason,
       onChainEscrow: body.onChainEscrow,
+      // F94: the deadline check needs a clock, and a kernel must be given one rather than
+      // reading `Date.now()` — otherwise whether a submission counts is not testable.
+      now,
     },
   );
 
@@ -396,15 +418,37 @@ export async function POST(req: Request) {
 async function runEscrowStep(
   agreement: Agreement,
   op: AgreementOp,
-  requested?: { chain: string; contractAddress: string; jobId: string; timeout?: number },
+  /** The request's escrow ref, when the caller supplied one. */
+  requestedFromRequest?: { chain: string; contractAddress: string; jobId: string; timeout?: number },
 ): Promise<
   | { refused?: undefined; performed?: EscrowOutcome & { ok: true } }
   | { refused: { action: string; reason: string; detail?: string }; performed?: undefined }
 > {
-  if (!requested) return {};
-
   const action = ESCROW_ACTION_FOR_OP[op];
   if (!action) return {}; // open/startExecution/submit are not chain moments.
+
+  // **The escrow comes from the AGREEMENT unless the caller restates it.**
+  //
+  // Every op after `fund` needs to reach the escrow, and `onChainEscrow` is a request field
+  // a client has no reason to still be carrying — `recovery.refundEscrow` sends `{ op:
+  // "refund", agreementId }` and nothing else, because the agreement's own terms are where
+  // the escrow is described. Requiring the caller to restate the chain made F97's refund op
+  // a database-only transition: Mitra recorded `REFUNDED` while the chain kept the capital.
+  //
+  // The agreement records `escrowChain`, `escrowContract` and `escrowRef` (F97 added the
+  // first two, precisely so this lookup is possible). A restated ref is still checked against
+  // the agreement's — the jobId mismatch guard is unchanged — so restating cannot redirect.
+  const requested = requestedFromRequest ?? (
+    agreement.escrowRef && agreement.escrowChain
+      ? {
+          chain: agreement.escrowChain,
+          contractAddress: agreement.escrowContract ?? agreement.payTo?.address ?? "",
+          jobId: agreement.escrowRef,
+          timeout: agreement.escrowTimeout ?? (Number.isFinite(Date.parse(agreement.deadline)) ? Math.floor(Date.parse(agreement.deadline) / 1000) : undefined),
+        }
+      : undefined
+  );
+  if (!requested) return {};
 
   const rail = resolveEscrowRail(requested.chain);
   if (!rail) {
@@ -499,7 +543,10 @@ async function runEscrowStep(
       return { refused: { action, reason: "SOLANA_ESCROW_AMOUNT_UNSUPPORTED", detail: (e as Error).message } };
     }
   }
-  const timeout = BigInt(requested.timeout ?? Math.floor(new Date(agreement.deadline).getTime() / 1000));
+  // The agreement's own `escrowTimeout` is preferred over the deadline: it is what the
+  // escrow was opened with, and every probe compares these terms exactly.
+  const timeoutSeconds = agreement.escrowTimeout ?? requested.timeout ?? Math.floor(new Date(agreement.deadline).getTime() / 1000);
+  const timeout = BigInt(timeoutSeconds);
   const intended: EscrowTerms = rail.solana
     ? {
         amount: lamports!,
@@ -515,15 +562,17 @@ async function runEscrowStep(
       };
 
   if (action === "locked") {
+    // `rail.evm` decides whether there IS an EVM leg; `escrowEvmTerms` decides whether the
+    // parties for that leg can be named. Both must hold before anything is broadcast.
+    let evmTerms: { clientVault: `0x${string}`; token: `0x${string}`; evaluator: `0x${string}` } | undefined;
+    if (rail.evm) {
+      const terms = escrowEvmTerms(agreement, requested, rail);
+      if (!terms.ok) return { refused: { action, reason: terms.reason, detail: terms.detail } };
+      evmTerms = terms.value;
+    }
     const outcome = await executeEscrowLock({
       agreement, intended, refundRouteHash, rail,
-      evm: rail.evm
-        ? {
-            clientVault: requested.contractAddress as `0x${string}`,
-            token: (process.env.MITRA_ESCROW_TOKEN_ADDRESS as `0x${string}`) ?? (`0x${"0".repeat(40)}` as `0x${string}`),
-            evaluator: (agreement.evaluator ?? agreement.provider) as `0x${string}`,
-          }
-        : undefined,
+      evm: evmTerms,
     });
     return outcome.ok ? { performed: outcome } : { refused: outcome };
   }
@@ -534,6 +583,115 @@ async function runEscrowStep(
   return outcome.ok ? { performed: outcome } : { refused: outcome };
 }
 
+/**
+ * Heal an agreement whose escrow has been refunded by a third party (F97).
+ *
+ * Never throws: reconciliation is an enrichment of a read, and a chain that cannot be reached
+ * must degrade to "the number we already had" rather than fail the request. It is also
+ * strictly one-directional — see `lib/commerce/escrow-reconcile.ts` for why a
+ * chain-COMPLETED escrow is not advanced here.
+ */
+async function reconcileOnRead(repo: Awaited<ReturnType<typeof getStore>>["repo"], agreement: Agreement): Promise<Agreement> {
+  if (!agreement.escrowRef || !agreement.payTo) return agreement;
+  // The ESCROW's chain, not the payee's. They are not always the same string — a testnet
+  // escrow pays a `base` payTo — and the escrow is where the capital is.
+  const rail = resolveEscrowRail(agreement.escrowChain ?? agreement.payTo.chain);
+  if (!rail) return agreement;
+  try {
+    const intended: EscrowTerms = {
+      amount: agreementOnChainAmount(agreement),
+      provider: agreement.payTo.address,
+      client: rail.solana ? rail.solana.authority : (agreement.escrowContract ?? agreement.payTo.address),
+      // The probe compares terms, so the timeout has to be the one the escrow was opened
+      // with. It is not stored on the agreement, so an absent value means the agreement has
+      // no escrowed terms to compare and there is nothing to reconcile against.
+      timeout: escrowTimeoutOf(agreement),
+    };
+    const outcome = await reconcileEscrow({ agreement, rail, intended });
+    if (!outcome.changed) return agreement;
+
+    const healed: Agreement = { ...agreement, status: outcome.to, escrowReleased: true, version: agreement.version + 1 };
+    await repo.updateAgreement!(healed);
+    await recordEvent(repo, {
+      runId: agreement.runId, kind: "RECOVERY",
+      title: `Agreement ${outcome.from} → REFUNDED (escrow refunded on chain)`,
+      status: "WARNING",
+      description: `The escrow for ${agreement.agreementId} was refunded on chain by a party other than Mitra. ` +
+        `The agreement was reconciled to match; without this it would keep reporting ${outcome.from} over capital that has already been returned.`,
+      objectRef: agreement.agreementId,
+      metadata: { agreementId: agreement.agreementId, from: outcome.from, to: outcome.to, escrowId: escrowIdFor(agreement.agreementId), reconciled: true },
+    });
+    return healed;
+  } catch {
+    // A chain that cannot be reached is not a reason to fail a read.
+    return agreement;
+  }
+}
+
+/**
+ * The deadline the escrow was opened with, as unix seconds.
+ *
+ * `runEscrowStep` uses `requested.timeout ?? deadline`, so a request may have set its own.
+ * The agreement does not record which, so the deadline is used and, when an agreement has an
+ * escrow but no deadline-derived timeout, reconciliation simply finds no terminal divergence
+ * rather than guessing. Guessing a timeout here would let a live escrow read as timed out.
+ */
+function escrowTimeoutOf(agreement: Agreement): bigint {
+  const parsed = Date.parse(agreement.deadline);
+  return Number.isFinite(parsed) ? BigInt(Math.floor(parsed / 1000)) : 0n;
+}
+
+/**
+ * The EVM-only escrow terms, resolved or refused (F96).
+ *
+ * ## Why this is not a cast
+ *
+ * `MitraJobEscrow` takes `evaluator` as an `address` and treats it as an **authority**: it is
+ * one of the two callers permitted to `refundJob` for a failed verdict. The agreement names
+ * its evaluator as a Mitra **agent id** — `sandbox_provider`, `agent_eval_02` — so the first
+ * implementation cast the string and let viem fail inside the ABI encode, surfacing as
+ * `BROADCAST_FAILED` with a viem error message and no indication that the evaluator had never
+ * been an address at all.
+ *
+ * So the resolution is explicit: use the agreement's evaluator **only if it is an address**,
+ * otherwise fall back to the relayer's own address — which is the party this transport has
+ * actually authorised to execute verdicts — and if neither exists, **refuse**. A placeholder
+ * address here would silently confer refund authority on nobody, which is worse than an
+ * error because the escrow would still fund.
+ *
+ * `token` is resolved the same way for the same reason: the old code defaulted it to the
+ * **zero address** when unset, which is an escrow holding nothing at an address that exists.
+ */
+function escrowEvmTerms(
+  agreement: Agreement,
+  requested: { chain: string; contractAddress: string },
+  rail: { evm?: { evaluatorFallback?: `0x${string}` } },
+): { ok: true; value: { clientVault: `0x${string}`; token: `0x${string}`; evaluator: `0x${string}` } } | { ok: false; reason: string; detail: string } {
+  if (!isAddress(requested.contractAddress)) {
+    return { ok: false, reason: "ESCROW_CLIENT_VAULT_NOT_AN_ADDRESS", detail: requested.contractAddress };
+  }
+  const token = process.env.MITRA_ESCROW_TOKEN_ADDRESS;
+  if (!token || !isAddress(token)) {
+    return {
+      ok: false,
+      reason: "ESCROW_TOKEN_NOT_CONFIGURED",
+      detail: `MITRA_ESCROW_TOKEN_ADDRESS is ${token ?? "absent"}; refusing to fund an escrow at the zero address`,
+    };
+  }
+  const named = agreement.evaluator ?? agreement.provider;
+  const evaluator = isAddress(named)
+    ? named
+    : rail.evm?.evaluatorFallback;
+  if (!evaluator) {
+    return {
+      ok: false,
+      reason: "ESCROW_EVALUATOR_UNRESOLVABLE",
+      detail: `evaluator "${named}" is a Mitra agent id, not an address, and this rail has no fallback address`,
+    };
+  }
+  return { ok: true, value: { clientVault: requested.contractAddress as `0x${string}`, token: token as `0x${string}`, evaluator } };
+}
+
 /** True when the rail's chain can carry a payout to an address recorded for `payToChain`. */
 function railMatchesPayTo(rail: EscrowRail, payToChain: string): boolean {
   if (rail.chain === "solana") return payToChain === "solana";
@@ -541,11 +699,18 @@ function railMatchesPayTo(rail: EscrowRail, payToChain: string): boolean {
   return payToChain === "base" || payToChain === "tempo";
 }
 
-/** Which ops move value on chain. Everything else is database-only by design. */
+/**
+ * Which ops move value on chain. Everything else is database-only by design.
+ *
+ * `refund` was missing (F97): a client changing their mind about a funded escrow left the
+ * chain holding capital while Mitra said `FUNDED`, and a timeout refund performed by a keeper
+ * — who is not a party and tells nobody — was invisible to the agreement entirely.
+ */
 const ESCROW_ACTION_FOR_OP: Partial<Record<AgreementOp, "locked" | "released" | "refunded">> = {
   fund: "locked",
   acceptDeliverable: "released",
   rejectDeliverable: "refunded",
+  refund: "refunded",
 };
 
 /**

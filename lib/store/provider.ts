@@ -70,6 +70,8 @@ export class InMemoryRepository implements EconomicRepository {
   private readonly spacesMap = new Map<string, Space>();
   private readonly agreementsMap = new Map<string, Agreement>();
   private readonly settlementsMap = new Map<string, Settlement>();
+  /** F94 — deliverables written this session, alongside the seeded fixtures. */
+  private readonly writtenDeliverables = new Map<string, Deliverable>();
   /** Per run, oldest first. Appends are synchronous, so the chain cannot fork. */
   private readonly receiptsByRun = new Map<string, Receipt[]>();
   private readonly intentsMap = new Map<string, Intent>();
@@ -264,7 +266,14 @@ export class InMemoryRepository implements EconomicRepository {
   }
 
   async listDeliverables(): Promise<Deliverable[]> {
-    return deliverables.map((d) => ({ ...d }));
+    // Seeded fixtures plus anything written this session (F94). A reader that returned only
+    // the seed would have reported "no deliverable" for one that was submitted moments ago.
+    return [...deliverables.map((d) => ({ ...d })), ...this.writtenDeliverables.values()].map((d) => ({ ...d }));
+  }
+
+  /** F94: the writer `listDeliverables` was missing, so a submission was kept by nobody. */
+  async saveDeliverable(deliverable: Deliverable): Promise<void> {
+    this.writtenDeliverables.set(deliverable.deliverableId, { ...deliverable });
   }
 
   async listReservations(vaultId?: string): Promise<Reservation[]> {

@@ -197,6 +197,24 @@ export class PostgresRepository implements EconomicRepository {
   }
 
   /**
+   * F94: the writer `listDeliverables` was missing.
+   *
+   * Upsert on `deliverable_id` so a retried submission — same agreement, same content —
+   * converges rather than failing on the primary key. A submission is not an event that can
+   * legitimately happen twice, but a network retry is not a second submission.
+   */
+  async saveDeliverable(deliverable: Deliverable): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.deliverables (deliverable_id, agreement_id, accepted, document)
+       VALUES ($1, $2, $3, $4::jsonb)
+       ON CONFLICT (deliverable_id) DO UPDATE SET
+         accepted = EXCLUDED.accepted,
+         document = EXCLUDED.document`,
+      [deliverable.deliverableId, deliverable.agreementId, deliverable.accepted, JSON.stringify(deliverable)],
+    );
+  }
+
+  /**
    * Integration + evidence declarations (PRD §52 Phase 10).
    *
    * These are declarations ABOUT THIS REPOSITORY, not ledger state. There is no

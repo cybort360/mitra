@@ -55,6 +55,18 @@ contract MitraJobEscrow is ReentrancyGuard {
 
     mapping(bytes32 => Job) public jobs;
 
+    /// F95: tokens committed to jobs, per token. NOT the balance.
+    ///
+    /// The escrow's balance is the sum of every live job PLUS whatever surplus a caller
+    /// over-sent, so it cannot answer "how much did THIS deposit bring?". `depositToEscrow`
+    /// used `balanceOf(this)` for that, which meant a second job could be funded entirely out
+    /// of the first job's tokens: the contract would then owe twice what it held, and the
+    /// shortfall would surface on the first payout rather than at the over-commitment.
+    ///
+    /// Surplus a caller over-sent is deliberately left UNALLOCATED, so it remains available as
+    /// headroom for a later deposit. A deposit is credited `received`, never the delta.
+    mapping(address => uint256) public totalAllocated;
+
     event JobFunded(bytes32 indexed jobId, address indexed clientVault, address indexed provider, uint256 received, bytes32 refundRouteHash);
     event JobCompleted(bytes32 indexed jobId, address indexed provider, uint256 amount);
     event JobRefunded(bytes32 indexed jobId, address indexed clientVault, uint256 amount);
@@ -66,6 +78,8 @@ contract MitraJobEscrow is ReentrancyGuard {
     error BeforeTimeout();
     error ZeroAmount();
     error NothingReceived();
+    /// F95: the tokens this call brought are fewer than the job it was funding.
+    error InsufficientDeposit(uint256 expected, uint256 available);
 
     /**
      * Record a funded job.
@@ -90,20 +104,20 @@ contract MitraJobEscrow is ReentrancyGuard {
         if (expected == 0) revert ZeroAmount();
         if (refundRouteHash == bytes32(0)) revert NoCommitment();
 
-        uint256 before = IERC20(token).balanceOf(address(this));
-        // The capital is already here (spent by the vault). Measure it.
-        received = IERC20(token).balanceOf(address(this)) - before; // == 0 unless caller sent first
         // NOTE: pull-tokens must be transferred by the caller before this call.
-        // The delta is zero unless the caller already sent; a zero delta reverts
-        // rather than recording an empty obligation.
-        received = expected;
-        {
-            uint256 bal = IERC20(token).balanceOf(address(this));
-            if (bal == 0) revert NothingReceived();
-            // Fee-on-transfer: record what arrived, not what was promised.
-            received = bal > expected ? expected : bal;
-        }
-        if (received == 0) revert NothingReceived();
+        //
+        // F95: the delta is measured against what is ALREADY COMMITTED, not against zero.
+        // The previous version compared against `balanceOf(this)` — the whole balance, which
+        // includes every other live job — so funding a second job with zero tokens arriving
+        // still recorded it as funded, and the contract over-promised what it owed.
+        uint256 allocated = totalAllocated[token];
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        uint256 delta = bal > allocated ? bal - allocated : 0;
+        if (delta == 0) revert NothingReceived();
+        // Fee-on-transfer: record what arrived, not what was promised. Capped at `expected`
+        // so an over-send leaves headroom for a later deposit instead of being swallowed.
+        received = delta > expected ? expected : delta;
+        totalAllocated[token] = allocated + received;
 
         jobs[jobId] = Job({
             jobId: jobId,
@@ -125,6 +139,10 @@ contract MitraJobEscrow is ReentrancyGuard {
         if (j.status != JobStatus.Funded) revert AlreadySettled();
         if (msg.sender != j.clientVault && msg.sender != j.evaluator) revert NotAuthorised();
         j.status = JobStatus.Completed;
+        // F95: releasing the job releases its commitment, so the freed tokens become
+        // headroom for a later deposit. Without this, `totalAllocated` would only ever grow
+        // and a long-lived escrow would refuse every future deposit.
+        totalAllocated[j.token] -= j.amount;
         IERC20(j.token).safeTransfer(j.provider, j.amount);
         emit JobCompleted(jobId, j.provider, j.amount);
     }
@@ -149,6 +167,8 @@ contract MitraJobEscrow is ReentrancyGuard {
         bool isEvaluator = msg.sender == j.evaluator;
         if (!timedOut && !isClient && !isEvaluator) revert NotAuthorised();
         j.status = JobStatus.Refunded;
+        // F95: as `completeJob` — a refund frees the commitment.
+        totalAllocated[j.token] -= j.amount;
         IERC20(j.token).safeTransfer(j.clientVault, j.amount);
         emit JobRefunded(jobId, j.clientVault, j.amount);
     }

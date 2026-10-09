@@ -97,5 +97,14 @@ export async function commitAgreementOp(
     await repo.saveSaga(saga);
   }
 
+  // F94: the deliverable is written AFTER the agreement, on the same reasoning — the
+  // agreement is what the deliverable belongs to. A store that cannot write one is
+  // refused up front rather than accepting a submission it would then drop: an
+  // evaluator asked to judge a submission that does not exist anywhere.
+  if (applied.value.deliverable) {
+    if (!repo.saveDeliverable) throw new AgreementStoreIncomplete(["saveDeliverable"]);
+    await repo.saveDeliverable(applied.value.deliverable);
+  }
+
   return applied;
 }

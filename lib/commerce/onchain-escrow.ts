@@ -74,6 +74,13 @@ export const escrowIdFor = (agreementId: string): string =>
  */
 export interface EvmEscrowRail {
   readonly address: `0x${string}`;
+  /**
+   * An address this rail will accept as the escrow's evaluator when the agreement names one
+   * as a Mitra agent id. **Optional on purpose** (F96): the evaluator is an authority — the
+   * party permitted to refund for a failed verdict — so the route must refuse when there is
+   * no honest candidate rather than substitute a placeholder address.
+   */
+  readonly evaluatorFallback?: `0x${string}`;
   depositToEscrow(job: {
     jobId: Hex;
     clientVault: `0x${string}`;

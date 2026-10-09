@@ -10,7 +10,7 @@
  * Only the CHAIN clock moves. Mitra's off-chain clock is the wall clock.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import {
@@ -27,8 +27,12 @@ const ANVIL_MNEMONIC = "test test test test test test test test test test test j
 
 const ROOT = process.cwd();
 const ARTIFACTS = {
-  escrow: join(ROOT, "contracts/out/MitraJobEscrow.sol/MitraJobEscrow.json"),
-  token: join(ROOT, "contracts/out/MitraJobEscrow.t.sol/PlainToken.json"),
+  // `out/` is foundry.toml's `out`. It was previously `contracts/out`, which is a STALE
+  // duplicate: nothing writes it any more, and it silently shadowed a rebuilt contract, so
+  // a Solidity fix compiled cleanly and the sandbox kept deploying the old bytecode. F95
+  // looked "not fixed" for that reason and nothing else.
+  escrow: join(ROOT, "out/MitraJobEscrow.sol/MitraJobEscrow.json"),
+  token: join(ROOT, "out/MitraJobEscrow.t.sol/PlainToken.json"),
 };
 
 export const SANDBOX_TOKEN_ABI = parseAbi([
@@ -125,12 +129,51 @@ export async function startLocalChain(opts: { anvilBin?: string } = {}): Promise
   }
 }
 
-/** Builds the contracts if their artifacts are absent (contracts/out is gitignored). */
+/**
+ * Builds the contracts unless the artifacts are present AND newer than their sources.
+ *
+ * **Staleness matters as much as absence.** The previous version built only when an artifact
+ * was missing, so after a Solidity fix the sandbox deployed the previous bytecode and the
+ * fix appeared to do nothing. Comparing mtimes against the source is what turns "the file
+ * exists" into "the file is current".
+ */
 function ensureArtifacts(): void {
-  if (Object.values(ARTIFACTS).every((p) => existsSync(p))) return;
-  const r = spawnSync("forge", ["build", "--root", "contracts"], { cwd: ROOT, stdio: "inherit" });
+  if (artifactsAreCurrent()) return;
+  const r = spawnSync("forge", ["build"], { cwd: ROOT, stdio: "inherit" });
   if (r.status !== 0 || !Object.values(ARTIFACTS).every((p) => existsSync(p))) {
     throw new SandboxChainError("forge build did not produce the MitraJobEscrow artifacts");
+  }
+}
+
+function artifactsAreCurrent(): boolean {
+  if (!Object.values(ARTIFACTS).every((p) => existsSync(p))) return false;
+  let newestSource = 0;
+  for (const dir of ["contracts/src", "contracts/test"]) {
+    for (const file of walk(join(ROOT, dir))) {
+      newestSource = Math.max(newestSource, mtime(file));
+    }
+  }
+  const oldestArtifact = Math.min(...Object.values(ARTIFACTS).map(mtime));
+  return oldestArtifact >= newestSource;
+}
+
+/** Every `.sol` under `dir`, recursively. A build artefact is not a source. */
+function walk(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walk(full));
+    else if (entry.name.endsWith(".sol")) out.push(full);
+  }
+  return out;
+}
+
+function mtime(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
   }
 }
 

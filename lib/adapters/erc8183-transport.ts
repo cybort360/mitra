@@ -151,6 +151,25 @@ export class ERC8183Transport {
     return jobEscrowAddress(this.network);
   }
 
+  /**
+   * An address this transport is willing to have act as the escrow's evaluator.
+   *
+   * The relayer's own address, and only when a signing key is configured. The evaluator is
+   * the party permitted to call `refundJob` for a failed verdict
+   * (`MitraJobEscrow.sol:146`), so it is an authority — and an agreement names its evaluator
+   * as a **Mitra agent id** (`sandbox_provider`, `agent_eval_02`), which is not an address.
+   * F96 cast one of those to `0x${string}` and let viem fail deep inside the encode.
+   *
+   * Exposed as an optional on the interface so the route must handle its absence, rather
+   * than substituting a placeholder address that would silently make the wrong party
+   * authorised to refund.
+   */
+  get evaluatorFallback(): Address | undefined {
+    if (!this.accountKey) return undefined;
+    const raw = this.accountKey.startsWith("0x") ? this.accountKey : `0x${this.accountKey}`;
+    return privateKeyToAccount(raw as Hex).address;
+  }
+
   private public() {
     return createPublicClient({ transport: http(this.url) });
   }

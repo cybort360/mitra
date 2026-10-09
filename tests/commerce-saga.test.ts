@@ -85,7 +85,14 @@ async function opened(repo: Awaited<ReturnType<typeof getStore>>["repo"]) {
 // path the route does. Calling the pure kernel here would test a write order the
 // product does not use, and would keep passing when the route's did.
 const drive = async (repo: Awaited<ReturnType<typeof getStore>>["repo"], s: Space, a: Awaited<ReturnType<typeof opened>>["agreement"], op: AgreementOp, extra = {}) => {
-  const r = await commitAgreementOp(repo, s, a, op, { capability: "research", amount: USDC(10), ...extra });
+  // A submission now carries its evidence (F94), so a `submitDeliverable` here supplies a
+  // content hash and one artifact by default. These fixtures previously passed nothing and
+  // were accepted only because no guard existed — the same shape as F77's fixtures, which
+  // passed because the agreement write did not happen yet.
+  const deliverable = op === "submitDeliverable"
+    ? { contentHash: "sha256:test", artifactRefs: ["ipfs://test"] }
+    : {};
+  const r = await commitAgreementOp(repo, s, a, op, { capability: "research", amount: USDC(10), ...deliverable, ...extra });
   if (!r.ok) throw new Error(`${op}: ${r.reason}`);
   return r.value;
 };

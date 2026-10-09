@@ -101,9 +101,15 @@ describe.skipIf(!anvilAvailable() || !!process.env.DATABASE_URL)("the sandbox on
     expect(await sb.escrowStatus("sb_timeout")).toBe(ESCROW.REFUNDED);
     expect(await sb.chain.tokenBalance(sb.client.account.address)).toBe(clientBefore);
 
-    // Mitra records it when the client says so: the signed refund op.
-    const refunded = await sb.client.mitra.recovery.refundEscrow("sb_timeout", { failureReason: "PROVIDER_TIMEOUT" });
-    expect(refunded.agreement.status).toBe("REFUNDED");
+    // F97: Mitra now learns of it from the CHAIN, on the read that asks. The keeper is not a
+    // party and told nobody, so this used to keep reporting FUNDED over returned capital.
+    const seen = await sb.client.mitra.commerce.getAgreement("sb_timeout");
+    expect(seen.status, "reconciled against the chain, with no message from any party").toBe("REFUNDED");
+
+    // And the client's own refund op is now correctly terminal rather than re-refunding.
+    await expect(
+      sb.client.mitra.recovery.refundEscrow("sb_timeout", { failureReason: "PROVIDER_TIMEOUT" }),
+    ).rejects.toThrow(/AGREEMENT_TERMINAL/);
   }, 60_000);
 
   it("a garbage delivery is rejected by the evaluator and the escrow is refunded on chain by the committed route", async () => {
@@ -126,7 +132,11 @@ describe.skipIf(!anvilAvailable() || !!process.env.DATABASE_URL)("the sandbox on
 
   // ── canaries: defects the sandbox exposed (forge/FAILURES.md) ─────────────────
 
-  it.fails("F95: a second escrow cannot be funded by the first escrow's tokens", async () => {
+  // F95, fixed: `depositToEscrow` measures the deposit against `totalAllocated` rather
+  // than the contract's whole balance, so a second job cannot be funded out of the first
+  // job's tokens. The companion `test_second_deposit_requires_its_own_tokens` in
+  // contracts/test/MitraJobEscrow.t.sol pins the same property at the contract boundary.
+  it("F95: a second escrow cannot be funded by the first escrow's tokens", async () => {
     await sb.openAgreement({ agreementId: "sb_f95_a", price: 30 });
     await sb.openAgreement({ agreementId: "sb_f95_b", price: 30 });
     await sb.fund("sb_f95_a");
@@ -135,18 +145,7 @@ describe.skipIf(!anvilAvailable() || !!process.env.DATABASE_URL)("the sandbox on
     expect(err).toBeInstanceOf(Error);
   }, 60_000);
 
-  it("F95 today: B is recorded FUNDED on chain with no tokens of its own, so the contract owes more than it holds", async () => {
-    await sb.openAgreement({ agreementId: "sb_f95_c", price: 30 });
-    await sb.openAgreement({ agreementId: "sb_f95_d", price: 30 });
-    const held = await sb.chain.tokenBalance(sb.chain.escrow);
-    await sb.fund("sb_f95_c");
-    await sb.client.mitra.commerce.fund("sb_f95_d", { onChainEscrow: sb.escrowRef("sb_f95_d") });
-    expect(await sb.escrowStatus("sb_f95_c")).toBe(ESCROW.FUNDED);
-    expect(await sb.escrowStatus("sb_f95_d")).toBe(ESCROW.FUNDED);
-    expect(await sb.chain.tokenBalance(sb.chain.escrow)).toBe(held + units(30));
-  }, 60_000);
-
-  it.fails("F96: an agreement whose evaluator is an agent id can be escrowed on chain", async () => {
+  it("F96: an agreement whose evaluator is an agent id can be escrowed on chain", async () => {
     await sb.client.mitra.commerce.createAgreement({
       spaceId: "space_sandbox",
       draft: {
@@ -163,7 +162,7 @@ describe.skipIf(!anvilAvailable() || !!process.env.DATABASE_URL)("the sandbox on
     expect(funded.agreement.status).toBe("FUNDED");
   }, 60_000);
 
-  it.fails("F97: a refund op on an escrowed agreement refunds the escrow, so Mitra and the chain agree", async () => {
+  it("F97: a refund op on an escrowed agreement refunds the escrow, so Mitra and the chain agree", async () => {
     await sb.openAgreement({ agreementId: "sb_f97_split", price: 20 });
     await sb.fund("sb_f97_split");
     const refunded = await sb.client.mitra.recovery.refundEscrow("sb_f97_split", { failureReason: "CHANGED_MIND" });
@@ -171,7 +170,7 @@ describe.skipIf(!anvilAvailable() || !!process.env.DATABASE_URL)("the sandbox on
     expect(await sb.escrowStatus("sb_f97_split")).toBe(ESCROW.REFUNDED);
   }, 60_000);
 
-  it.fails("F97: Mitra notices an escrow's timeout refund without a party telling it", async () => {
+  it("F97: Mitra notices an escrow's timeout refund without a party telling it", async () => {
     await sb.openAgreement({ agreementId: "sb_f97", provider: "adversary", price: 5, timeoutSeconds: 60 });
     await sb.fund("sb_f97");
     await sb.tick();

@@ -196,6 +196,15 @@ export interface EconomicRepository {
 
   listRuns(): Promise<Run[]>;
   listDeliverables(): Promise<Deliverable[]>;
+  /**
+   * Persist a deliverable (F94).
+   *
+   * Added with the submit-path fix: `listDeliverables` existed with no writer, so a
+   * submission was evaluated by nobody and kept by nobody — the table could only ever be
+   * empty outside a test fixture. Optional because a store that cannot write deliverables
+   * must say so (the route refuses) rather than accept a submission and drop it.
+   */
+  saveDeliverable?(deliverable: Deliverable): Promise<void>;
 
   /**
    * Load the reference fixtures into this store.

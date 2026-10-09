@@ -3966,3 +3966,157 @@ keeper as an actor so the transition is attributable.
 **Evidence.** `tests/sandbox.test.ts`: `it.fails("F97: a refund op on an escrowed agreement
 refunds the escrow, so Mitra and the chain agree")` and `it.fails("F97: Mitra notices an
 escrow's timeout refund without a party telling it")`, on anvil.
+
+## F94 — `evaluateDeliverable` was called from tests and nowhere else
+
+**Status:** fixed 2026-10-07. Canaries flipped in `tests/deliverable-binding-probe.test.ts`.
+**Found:** 2026-10-07, PP sandbox probe.
+
+`evaluateDeliverable` has carried four guards since before the submit path existed: the right
+agreement, a non-empty `contentHash`, inside the deadline, at least one `artifactRef`. **No
+production code called it.** A submission therefore reached `SUBMITTED` with no evidence, or
+made long after the deadline, and could then be `ACCEPTED` — so "accept" accepted an
+assertion about work nobody could inspect, and `listDeliverables` had no writer at all.
+
+Three changes:
+
+1. **`applyAgreementOpWithSaga` evaluates on `submitDeliverable`**, before the transition is
+   allowed to succeed, and returns the `Deliverable` in its result. In the kernel rather than
+   the route, because it is a predicate about the work and it must be reachable by every
+   caller.
+2. **`now` is an input.** `evaluateDeliverable` takes a clock, and a kernel that read
+   `Date.now()` would decide "late" by means nobody could test. The route supplies one, taken
+   next to the store open so the deadline check and the event log share an instant — two
+   clocks would make lateness depend on which ran.
+3. **`saveDeliverable` exists.** `listDeliverables` had a reader and no writer, so the table
+   could only ever be empty outside a fixture. Optional on the interface, and
+   `commitAgreementOp` **refuses** a store that cannot write one rather than accepting a
+   submission it would drop.
+
+The deliverable id is derived from the binding fields, so a retry converges on one row rather
+than accumulating duplicates, and a provider cannot name another agreement's submission.
+
+**A positive test was added.** All three canaries are refusals, so a submit path that
+refused *everything* would satisfy them. `a valid submission is accepted and kept` pins the
+other direction.
+
+**Fixtures again.** Eight `commerce-saga` tests submitted with no `contentHash` and passed
+only because no guard existed — the same shape as F77's fixtures (which passed because the
+agreement write did not happen yet) and F87's (which depended on a 100×-wrong ceiling).
+**Three defects in one session, all the same shape: a fixture relying on a control not yet
+existing.** That is now a pattern worth naming rather than fixing three times.
+
+## F95 — `depositToEscrow` measured a deposit against the contract's whole balance
+
+**Status:** fixed 2026-10-07. `test/MitraJobEscrow.t.sol` 7 → 13 tests, mutation 4/4.
+**Found:** 2026-10-07, PP sandbox probe.
+
+The delta was computed as:
+
+```solidity
+uint256 before = IERC20(token).balanceOf(address(this));
+received = IERC20(token).balanceOf(address(this)) - before;   // always 0 — `before` read twice
+received = expected;                                          // overwritten
+uint256 bal = IERC20(token).balanceOf(address(this));
+if (bal == 0) revert NothingReceived();
+received = bal > expected ? expected : bal;                   // ← the WHOLE balance
+```
+
+`bal` includes every other live job. So a second job could be funded with **zero tokens
+arriving**: it read the first job's tokens as its own, and the contract over-promised by that
+amount. The shortfall surfaced on the first payout — by which point it was unrecoverable and
+attributable to neither job. `before` was dead code and the second `received` assignment was
+dead.
+
+`totalAllocated[token]` now tracks commitments, and the delta is measured against that. Three
+consequences that are easy to get wrong and are each tested:
+
+- **Settlement frees the commitment** (`completeJob` and `refundJob` both decrement). Without
+  it `totalAllocated` only grows and a long-lived escrow refuses every future deposit.
+- **An over-send stays unallocated.** A deposit is credited `received` (capped at `expected`),
+  never the delta, so surplus remains headroom for a later job instead of being swallowed.
+- **`test_obligations_never_exceed_the_balance`** states the invariant directly, so the suite
+  fails if any future change to this accounting breaks it rather than if one particular
+  sequence does.
+
+## F96 — a Mitra agent id was cast to an EVM address for the escrow's evaluator
+
+**Status:** fixed 2026-10-07. Canary flipped in `tests/sandbox.test.ts:149`.
+**Found:** 2026-10-07, PP sandbox probe.
+
+`evaluator: (agreement.evaluator ?? agreement.provider) as \`0x${string}\``. Both are Mitra
+**agent ids** (`sandbox_provider`, `agent_eval_02`), and the contract treats `evaluator` as an
+**authority** — it is one of the two callers permitted to `refundJob` for a failed verdict. So
+this was not a type error that happened to be inconvenient: it was a caller-chosen authority,
+F51's defect on a new surface. viem failed inside the ABI encode, surfacing as
+`BROADCAST_FAILED` with no indication that the evaluator had never been an address.
+
+`escrowEvmTerms` now resolves it explicitly: use the agreement's evaluator **only if
+`isAddress`**, else the relayer's own address (`ERC8183Transport.evaluatorFallback`, present
+whenever a signing key is), else **refuse**. A placeholder address would have silently
+conferred refund authority on nobody while the escrow still funded.
+
+`token` got the same treatment: it defaulted to the **zero address**, which is an escrow
+holding nothing at an address that exists. Now `ESCROW_TOKEN_NOT_CONFIGURED`. Both existing
+LP-6 route tests had been passing *because of* the zero-address default.
+
+## F97 — the escrow's chain, contract and timeout were not on the agreement, so nothing could notice a keeper's refund
+
+**Status:** fixed 2026-10-07. Both canaries flipped in `tests/sandbox.test.ts`.
+**Found:** 2026-10-07, PP sandbox probe.
+
+Three separate defects, all invisible from the agreement alone:
+
+1. **`refund` was missing from `ESCROW_ACTION_FOR_OP`.** A client changing their mind left the
+   chain holding capital while Mitra recorded `REFUNDED`.
+2. **Nothing observed a third-party refund.** On Solana a keeper — nobody in particular — may
+   refund a timed-out escrow. No party is told, so no message, so the agreement kept saying
+   `FUNDED` over capital already returned. It would still count as outstanding, could be
+   `acceptDeliverable`d into a release against an escrow that no longer exists, and its §15.5
+   route stayed "committed" to a refund that had already happened.
+3. **The agreement could not say WHERE its escrow was.** `escrowRef` held only the job id;
+   `onChainEscrow` arrived as a request field and nothing persisted it. So reconciliation had
+   no chain to probe — which is *why* nothing noticed. `escrowChain`, `escrowContract` and
+   `escrowTimeout` are now set at `fund`.
+
+The third is the load-bearing one, and the fourth defect was downstream of it: every later op
+**re-derived** the timeout from `agreement.deadline`, which is not the escrow's timeout. The
+first attempt failed with `ESCROW_TIMEOUT_DIFFERS` — refusing the refund that was supposed to
+release the capital — because a request may set `onChainEscrow.timeout` to anything and the
+chain clock is not wall time. Persisting the terms the escrow was **opened with** is what
+makes the comparison meaningful.
+
+Reconciliation runs on the agreement read path, which is a read that writes, and that is
+deliberate and bounded: only agreements that HAVE an escrow, only when the probe reports a
+terminal divergence, only in the **refunded** direction. A chain-completed escrow is
+deliberately *not* advanced to `ACCEPTED`, because acceptance has to drive the settlement saga
+— seeing `COMPLETED` here means that op ran and only its database half failed. And a chain
+that cannot be reached degrades to the status we already had rather than failing the request.
+
+`runEscrowStep` also falls back to the agreement's recorded escrow when the request does not
+restate one, because `recovery.refundEscrow` sends `{ op: "refund", agreementId }` and nothing
+else. A restated ref is still checked against the agreement's, so restating cannot redirect.
+
+## F98 — a stale duplicate build directory shadowed a rebuilt contract
+
+**Status:** fixed 2026-10-07.
+**Found:** 2026-10-07, while trying to verify F95 and finding it "not fixed".
+
+`lib/sandbox/chain.ts` deployed from `contracts/out/…`, but `foundry.toml` sets `out = "out"`
+and nothing had written `contracts/out` for some time. The F95 contract fix compiled cleanly,
+`forge test` passed 13/13, the sandbox artifact check found the files **present**, and the
+sandbox went on deploying the previous bytecode. The canary kept failing and the obvious
+conclusion — "my fix is wrong" — was wrong.
+
+Two causes, both about **presence being mistaken for currency**:
+
+- the sandbox read a directory nothing writes;
+- `ensureArtifacts` built only when an artifact was **absent**, never when one was **stale**.
+
+Now it reads `out/` and compares artifact mtimes against every `.sol` under `contracts/src` and
+`contracts/test`, rebuilding when any source is newer. A test can only exist or not; a build
+artefact can be present and wrong, and only mtime distinguishes the two.
+
+Recorded because the symptom was a **silently ineffective fix**: everything green, nothing
+wrong, and the one thing that would have caught it — checking the deployed bytecode — is the
+step a test suite cannot take.

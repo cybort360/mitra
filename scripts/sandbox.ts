@@ -40,9 +40,19 @@ async function main() {
     const t1 = await sb.clock.advanceSeconds(7200);
     console.log(`   chain clock +${t1 - t0}s`);
     console.log(`   keeper refundJob ${await sb.keeper.refundTimedOut("demo_timeout")}`);
-    await show(sb, "demo_timeout", "before the client tells Mitra (F97)");
-    await sb.client.mitra.recovery.refundEscrow("demo_timeout", { failureReason: "PROVIDER_TIMEOUT" });
-    await show(sb, "demo_timeout", "after the client's refund op");
+    // F97. Before the fix this read "Mitra EXECUTING, escrow refunded": the keeper is not a
+    // party and tells nobody, so the agreement kept claiming capital it had already lost.
+    // The read now reconciles against the chain, so the FIRST observation is already correct.
+    await show(sb, "demo_timeout", "Mitra learns of it from the chain (F97)");
+    // And the client's own refund op is now correctly refused as terminal rather than
+    // re-refunding. Demonstrating the idempotence, not the transition.
+    try {
+      await sb.client.mitra.recovery.refundEscrow("demo_timeout", { failureReason: "PROVIDER_TIMEOUT" });
+      await show(sb, "demo_timeout", "client refund op (unexpected)");
+    } catch (e) {
+      console.log(`   client's refund op: ${(e as { code?: string }).code ?? "refused"} — already REFUNDED, no second refund`);
+    }
+    await show(sb, "demo_timeout", "unchanged");
     console.log("");
 
     console.log("3. garbage, rejected");

@@ -34,12 +34,12 @@
  * has moved with no record, which is not.
  */
 
-import type { Agreement, Saga, Space } from "@/lib/domain/types";
+import type { Agreement, Deliverable, Saga, Space } from "@/lib/domain/types";
 import {
   armSaga, beginCompensation, compensate, declareSaga, recordStep, startSaga,
   type CompensationRoute, type SagaDeclaration,
 } from "@/lib/kernel/recovery";
-import { applyAgreementOp, type AgreementOp } from "@/lib/kernel/commerce";
+import { applyAgreementOp, evaluateDeliverable, type AgreementOp } from "@/lib/kernel/commerce";
 import { routeCommitment } from "@/lib/domain/canonical";
 import { fail, pass, type Result } from "@/lib/kernel/commerce";
 
@@ -67,6 +67,15 @@ const unwrap = <T>(r: Result<T>, what: string): T => {
 export interface CoupledResult {
   space: Space;
   agreement: Agreement;
+  /**
+   * The deliverable this op evaluated and produced (F94).
+   *
+   * Returned rather than saved, for the same reason the saga is: the kernel is store-free
+   * and the caller persists. Before F94 nothing here existed — a submission was evaluated
+   * by nobody and kept by nobody, so a late or empty one reached `SUBMITTED` and could then
+   * be `ACCEPTED`.
+   */
+  deliverable?: Deliverable;
   /**
    * The saga as it stands after this op. For the API response.
    *
@@ -135,6 +144,15 @@ export interface CommercialSagaOptions {
   compensationRoutes?: CompensationRoute[];
   compensationRouteId?: string;
   onChainEscrow?: OnChainEscrowRef;
+  /**
+   * The clock, for the deadline check on `submitDeliverable` (F94).
+   *
+   * Passed in rather than read, for the same reason every other kernel takes its inputs:
+   * a kernel that reads `Date.now()` cannot be tested against a deadline it chooses. The
+   * submit path is the one place a wall-clock read would silently decide whether a
+   * submission counts.
+   */
+  now?: Date;
 }
 
 /**
@@ -219,6 +237,14 @@ export function applyAgreementOpWithSaga(input: {
               // handed to `depositToEscrow`/`lock_escrow` and the value the kernel
               // verifies against are one number.
               refundRouteHash: onChainRefundRoute ? routeCommitment(onChainRefundRoute) : undefined,
+              // F97: the chain and contract of the escrow. `escrowRef` holds only the job
+              // id, so without these the agreement cannot say where its capital is and
+              // reconciliation has nothing to probe.
+              escrowChain: opts.onChainEscrow.chain,
+              escrowContract: opts.onChainEscrow.contractAddress,
+              // The terms the escrow was OPENED with, not the agreement's deadline: a
+              // request may set its own timeout, and the chain clock is not wall time.
+              escrowTimeout: opts.onChainEscrow.timeout,
             }
           : {}),
       },
@@ -236,6 +262,37 @@ export function applyAgreementOpWithSaga(input: {
   }
 
   const loaded = current;
+
+  // ── submitDeliverable: evaluate the work BEFORE recording it (F94) ──────────
+  //
+  // `evaluateDeliverable` has carried all four guards — right agreement, a content hash,
+  // inside the deadline, at least one artifact — since before this path existed. It was
+  // called from tests and from nowhere else, so a submission with no evidence, or one made
+  // after the deadline, was accepted into `SUBMITTED` and could then be accepted outright.
+  //
+  // It runs HERE, in the kernel, before the transition is allowed to succeed: a refusal
+  // returns a `Result` failure, so the agreement never reaches `SUBMITTED` and no
+  // deliverable is produced for anyone to judge.
+  if (op === "submitDeliverable") {
+    const now = opts.now ?? new Date(0);
+    const deliverable: Deliverable = {
+      // Derived from the agreement, so a provider cannot overwrite another agreement's
+      // submission by naming it. `deliverableId` is a hash of the binding fields, so a retry
+      // of the SAME submission converges on one row instead of accumulating duplicates.
+      deliverableId: `dlv_${routeCommitment(`${agreement.agreementId}:${opts.contentHash ?? ""}:${(opts.artifactRefs ?? []).join(",")}`).slice(3, 19)}`,
+      agreementId: agreement.agreementId,
+      provider: agreement.provider,
+      artifactRefs: opts.artifactRefs ?? [],
+      contentHash: opts.contentHash ?? "",
+      evidenceRefs: [],
+      submittedAt: now.toISOString(),
+      accepted: false,
+      version: 1,
+    };
+    const judged = evaluateDeliverable(agreement, deliverable, now);
+    if (!judged.ok) return fail(judged.reason);
+    return pass({ space: nextSpace, agreement: nextAgreement, deliverable, sagasToPersist: [] });
+  }
 
   // ── startExecution: ARMED -> EXECUTING ────────────────────────────────────
   if (op === "startExecution") {
