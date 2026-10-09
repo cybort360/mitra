@@ -2843,8 +2843,9 @@ to be the code in the repository. Record the runtime-code check with the address
 
 ## F65 — `POST /api/v1/intents` overwrites an existing intent under the same id
 
-**Status:** open. The fix belongs to the lead (`app/api/v1/intents/`, `lib/store/` are lead-owned);
-contained on the MCP surface by purple, 2026-10-06 (decision `ctx_6341370a88640c6e`).
+**Status:** fixed (2026-10-06, first write wins with `409 INTENT_EXISTS`).
+Contained on the MCP surface by purple, 2026-10-06 (decision `ctx_6341370a88640c6e`); fixed on
+the HTTP route by lead, 2026-10-09 during Horizon 1 reconciliation.
 **Found:** 2026-10-06, wiring `mitra_create_intent` (PP-1).
 
 The route accepts a caller-chosen `intentId`, and both backends upsert on it: Postgres
@@ -2860,9 +2861,21 @@ has no caller identity on this route, so anyone who can reach it can rewrite any
 `tests/mcp-server.test.ts` "never forwards a caller-chosen intentId (F65 …)", which is killed by
 the mutation that forwards it.
 
-**Suggested fix:** first write wins. Replaying an identical body returns the stored intent;
-a different body under an existing id returns `409 INTENT_EXISTS`. Add a test that posts a
-different body under the same id and asserts the original survives.
+**Fix, as suggested.** `app/api/v1/intents/route.ts` reads the existing intent before writing
+and compares the whole body: identical → `200` with the STORED intent, different → `409
+INTENT_EXISTS`. The `ON CONFLICT DO UPDATE` on the Postgres side is never reached for a
+conflicting body, which is why leaving it there is harmless — the route is the guard, not the
+store.
+
+Pinned by `tests/intent-persistence.test.ts` "refuses to overwrite an existing intent with a
+different body (F65)", which asserts the 409 **and** that the original objective survives.
+
+**What this does NOT fix, recorded so the entry is not over-claimed.** The route still has no
+caller identity. An attacker who can reach it can therefore still *reserve* an `intentId`
+before its rightful owner does — a denial, not a rewrite. First write wins changed the second
+from "silently replace anyone's principal, budget and mandate" to "stop the first requester",
+which is a real reduction and not the same as authorisation. Closing that needs a caller on the
+route, which is a larger change than this reconciliation.
 
 ## F66 — PRD §10.2's tool list had no way for a provider to start work
 
@@ -3969,7 +3982,7 @@ escrow's timeout refund without a party telling it")`, on anvil.
 
 ## F94 — `evaluateDeliverable` was called from tests and nowhere else
 
-**Status:** fixed 2026-10-07. Canaries flipped in `tests/deliverable-binding-probe.test.ts`.
+**Status:** fixed 2026-10-07 in `75e4864`. Canaries flipped in `tests/deliverable-binding-probe.test.ts`.
 **Found:** 2026-10-07, PP sandbox probe.
 
 `evaluateDeliverable` has carried four guards since before the submit path existed: the right
@@ -4008,7 +4021,7 @@ existing.** That is now a pattern worth naming rather than fixing three times.
 
 ## F95 — `depositToEscrow` measured a deposit against the contract's whole balance
 
-**Status:** fixed 2026-10-07. `test/MitraJobEscrow.t.sol` 7 → 13 tests, mutation 4/4.
+**Status:** fixed 2026-10-07 in `75e4864`. `test/MitraJobEscrow.t.sol` 7 → 13 tests, mutation 4/4.
 **Found:** 2026-10-07, PP sandbox probe.
 
 The delta was computed as:
@@ -4041,7 +4054,7 @@ consequences that are easy to get wrong and are each tested:
 
 ## F96 — a Mitra agent id was cast to an EVM address for the escrow's evaluator
 
-**Status:** fixed 2026-10-07. Canary flipped in `tests/sandbox.test.ts:149`.
+**Status:** fixed 2026-10-07 in `75e4864`. Canary flipped in `tests/sandbox.test.ts:149`.
 **Found:** 2026-10-07, PP sandbox probe.
 
 `evaluator: (agreement.evaluator ?? agreement.provider) as \`0x${string}\``. Both are Mitra
@@ -4062,7 +4075,7 @@ LP-6 route tests had been passing *because of* the zero-address default.
 
 ## F97 — the escrow's chain, contract and timeout were not on the agreement, so nothing could notice a keeper's refund
 
-**Status:** fixed 2026-10-07. Both canaries flipped in `tests/sandbox.test.ts`.
+**Status:** fixed 2026-10-07 in `75e4864`. Both canaries flipped in `tests/sandbox.test.ts`.
 **Found:** 2026-10-07, PP sandbox probe.
 
 Three separate defects, all invisible from the agreement alone:
@@ -4099,7 +4112,7 @@ else. A restated ref is still checked against the agreement's, so restating cann
 
 ## F98 — a stale duplicate build directory shadowed a rebuilt contract
 
-**Status:** fixed 2026-10-07.
+**Status:** fixed 2026-10-07 in `75e4864`.
 **Found:** 2026-10-07, while trying to verify F95 and finding it "not fixed".
 
 `lib/sandbox/chain.ts` deployed from `contracts/out/…`, but `foundry.toml` sets `out = "out"`
@@ -4120,3 +4133,48 @@ artefact can be present and wrong, and only mtime distinguishes the two.
 Recorded because the symptom was a **silently ineffective fix**: everything green, nothing
 wrong, and the one thing that would have caught it — checking the deployed bytecode — is the
 step a test suite cannot take.
+
+---
+
+## Closure evidence for F94–F98 (`75e4864`, re-verified 2026-10-09)
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | 0 errors |
+| `forge test` | **63/63** (was 57 — six Solidity tests added for F95) |
+| `cargo test --manifest-path programs/mitra-vault/Cargo.toml` | 147/147 |
+| `npx vitest run` | 1329 passed, 83 skipped |
+| `npm run test:postgres` | 1377 passed, 35 skipped (PostgreSQL 16) |
+| `npm run sandbox` | end-to-end on anvil against the real `MitraJobEscrow` |
+
+All six canaries flipped from `it.fails` to `it`. The two tests that documented the
+fixed-away behaviour — "F95 today" and "today: a late, empty submission is SUBMITTED" — were
+**removed** rather than inverted: asserting a defect that no longer exists is a test that
+will fail for the wrong reason the next time something adjacent changes.
+
+## F99 — the sandbox seeded the root of the authority tree with nothing
+
+**Status:** fixed 2026-10-09.
+**Found:** 2026-10-09, Horizon 1 polish, Task 3.
+
+The sandbox seeded 100,000 USDC and **zero** Mandates, so every flow it exercised skipped
+`Mandate → Authorization → Intent → Agreement` and went straight to the agreement. Nothing in
+the sandbox ever had to prove a spend was AUTHORISED — the root of the tree was assumed.
+
+Two gaps, and the second is the same shape as F94's:
+
+1. `listMandates` existed with **no writer**, so a Mandate could only ever be a seeded
+   fixture. `saveMandate` is now on the repository (optional, Postgres + in-memory) with the
+   upsert guarded on `mandate_id`.
+2. The in-memory `getMandate` read the **seed array only**, so `saveMandate` would have
+   written to a map nothing read and `getMandate` would have returned the fixture instead. A
+   write that is accepted and then invisible — worse than having no writer, because it looks
+   like it worked. `getMandate` now prefers written mandates, and `listMandates` includes them.
+
+`seedMandates()` in the sandbox reads back after writing and throws if the Mandate did not
+persist, so a store that silently drops the write fails at the seed rather than much later.
+
+**Deliberately not done.** There is no `mandates` HTTP route and no `mitra.mandates` SDK
+namespace, so "a client can query its mandate" is not reachable today. The tests read through
+the store and say so; adding a public surface to a polish packet would be scope creep, and the
+PP-5 row already records `getMandate` as withheld for want of a route.

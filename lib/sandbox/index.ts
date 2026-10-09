@@ -12,14 +12,16 @@
  * refuses to start with DATABASE_URL set, so it cannot write to a real store or a real
  * network. Nothing it reports is a settlement on any public chain.
  *
- * Two workarounds, each recorded in forge/FAILURES.md and removed when fixed:
- *  - F94: Mitra does not keep a submitted deliverable, so the scripted provider hands
- *    its artifact refs and hash to the evaluator through `handover`.
- *  - F96: the agreements route uses `agreement.evaluator` (an agent id) as the escrow's
- *    on-chain evaluator ADDRESS, so the sandbox's evaluator agent is named by the
- *    relayer's address. The relayer is the account that calls completeJob/refundJob.
+ * Both earlier workarounds are gone, and their absence is the point:
+ *  - F94: the evaluator reads the deliverable from the AGREEMENT now. It used to receive it
+ *    through an in-process `handover` map, which meant the sandbox judged work Mitra had
+ *    never stored — so a real deployment, where no such map exists, was never exercised.
+ *  - F96: the route resolves an agent-id evaluator to the relayer's own address, so the
+ *    sandbox no longer has to name the evaluator by its on-chain address.
  */
 import { createHash } from "node:crypto";
+import { getStore } from "@/lib/store/provider";
+import type { Mandate } from "@/lib/domain/types";
 import { createWalletClient, http, toHex, type Hex } from "viem";
 import type { HDAccount } from "viem/accounts";
 import { MITRA_JOB_ESCROW_ABI } from "@/lib/adapters/erc8183-transport";
@@ -71,6 +73,7 @@ export interface Sandbox {
   adversary: SandboxParty & { behaviour: ProviderBehaviour };
   evaluator: SandboxParty;
   /** F94 workaround: what each provider submitted, so the evaluator can judge it. */
+  /** Kept for test introspection of what a provider submitted, NOT for the evaluator. */
   handover: Map<string, Handover>;
   /** Artifact bytes by ref, as a provider published them. */
   artifacts: Map<string, Uint8Array>;
@@ -87,6 +90,15 @@ export interface Sandbox {
   /** The escrow's on-chain status: 0 none, 1 funded, 2 completed, 3 refunded. */
   escrowStatus(agreementId: string): Promise<number>;
   escrowRef(agreementId: string): OnChainEscrow;
+  /**
+   * The Mandates seeded for the client (F99).
+   *
+   * The authority tree is Mandate → Authorization → Intent → Agreement, and until F99 the
+   * sandbox exercised only the last of those: it seeded 100,000 USDC but **zero** Mandates,
+   * so nothing in the sandbox ever had to prove that a spend was authorised — the root of
+   * the tree was assumed. A Mandate is now seeded and exposed so the hierarchy is reachable.
+   */
+  mandates: Mandate[];
   stop(): Promise<void>;
 }
 
@@ -135,6 +147,47 @@ export async function startSandbox(opts: { adversary?: ProviderBehaviour } = {})
 
   const handover = new Map<string, Handover>();
   const artifacts = new Map<string, Uint8Array>();
+  /**
+   * Seeds the client's Mandate so the authority tree has a root (F99).
+   *
+   * `maxTransaction` is well above the sandbox's largest agreement price and `budget` well
+   * above the total, so the guards are exercised as PASSING rather than as refusals — a
+   * seeded Mandate too small would make every sandbox agreement fail at the ceiling, which
+   * would look like a product bug.
+   */
+  async function seedMandates(): Promise<Mandate[]> {
+    const { repo } = await getStore();
+    const mandate: Mandate = {
+      mandateId: `mandate_sandbox_${client.agentId}`,
+      name: "Sandbox trading mandate",
+      version: 1,
+      principal: "Mitra Labs (sandbox)",
+      agentId: client.agentId,
+      vaultId: "vault_1",
+      asset: "USDC",
+      budget: 100_000,
+      maxTransaction: 10_000,
+      velocityLimit: { amount: 50_000, windowMinutes: 60 },
+      allowedCounterparties: [],
+      allowedCapabilities: ["research", "payment", "deliverable_evaluation"],
+      prohibitedCapabilities: ["internal_dispute_adjudication"],
+      approvedChains: ["base", "solana"],
+      policyVersion: "sandbox-v1",
+      expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+      // A fresh nonce, so the seeded mandate cannot replay a spent one, and `ACTIVE` so the
+      // guards below it are exercised as PASSING rather than as refusals.
+      nonce: 1,
+      status: "ACTIVE",
+      confidentialPolicy: false,
+    };
+    await repo.saveMandate!(mandate);
+    // Read back rather than trusting the object we just wrote, so a store that silently
+    // dropped the write would fail here instead of surfacing as a later "not found".
+    const stored = await repo.getMandate(mandate.mandateId);
+    if (!stored) throw new Error("sandbox: the Mandate did not persist");
+    return [stored];
+  }
+
   const escrowRefs = new Map<string, OnChainEscrow>();
   const prices = new Map<string, number>();
 
@@ -162,7 +215,6 @@ export async function startSandbox(opts: { adversary?: ProviderBehaviour } = {})
         const contentHash = `sha256:${createHash("sha256").update(body).digest("hex")}`;
         artifacts.set(ref, body);
         await p.mitra.commerce.submitDeliverable(item.agreementId, { artifactRefs: [ref], contentHash });
-        handover.set(item.agreementId, { artifactRefs: [ref], contentHash });
         log.push(`${p.agentId}: submitted ${item.agreementId} (${behaviour})`);
       }
     }
@@ -175,10 +227,15 @@ export async function startSandbox(opts: { adversary?: ProviderBehaviour } = {})
     for (const item of (await evaluator.mitra.inbox.list({ kinds: ["EVALUATION_REQUIRED"] })).items) {
       if (item.kind !== "EVALUATION_REQUIRED") continue;
       const id = item.agreementId;
-      const given = handover.get(id);
+      // Read from the AGREEMENT, not from a side channel (F94). The deliverable is what the
+      // provider signed and Mitra kept, and it is what an evaluator in a real deployment
+      // would see — so the sandbox now judges the same thing a production evaluator would.
+      const agreement = await evaluator.mitra.commerce.getAgreement(id);
+      const given = agreement.deliverables?.[agreement.deliverables.length - 1];
       const bytes = given && artifacts.get(given.artifactRefs[0]);
       let failure: string | undefined;
-      if (!given || !bytes) failure = "NO_DELIVERABLE_HANDED_OVER";
+      if (!given) failure = "NO_DELIVERABLE_RECORDED";
+      else if (!bytes) failure = "ARTIFACT_NOT_READABLE";
       else if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== given.contentHash) failure = "CONTENT_HASH_MISMATCH";
       else {
         const verdicts = (JSON.parse(new TextDecoder().decode(bytes)) as { criteria?: Record<string, boolean> }).criteria ?? {};
@@ -198,6 +255,7 @@ export async function startSandbox(opts: { adversary?: ProviderBehaviour } = {})
 
   return {
     banner: SANDBOX_BANNER, chain, clock: chain.clock, client, provider, adversary, evaluator, handover, artifacts,
+    mandates: await seedMandates(),
 
     async openAgreement(o) {
       const who = o.provider === "adversary" ? adversary : provider;

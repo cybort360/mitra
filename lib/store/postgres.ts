@@ -706,6 +706,33 @@ export class PostgresRepository implements EconomicRepository {
     const { rows } = await this.pool.query("SELECT * FROM mitra.mandates ORDER BY mandate_id");
     return rows.map(rowToMandate);
   }
+
+  /**
+   * F99: the writer `listMandates` was missing.
+   *
+   * Upsert on `mandate_id` with the version guarded, so re-registering a mandate cannot
+   * silently downgrade one that a newer version already wrote.
+   */
+  async saveMandate(mandate: Mandate): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO mitra.mandates
+         (mandate_id, name, version, principal, agent_id, vault_id, asset, budget,
+          max_transaction, allowed_counterparties, allowed_capabilities,
+          prohibited_capabilities, approved_chains, policy_version, expires_at, document)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
+       ON CONFLICT (mandate_id) DO UPDATE SET
+         name = EXCLUDED.name, version = EXCLUDED.version,
+         budget = EXCLUDED.budget, max_transaction = EXCLUDED.max_transaction,
+         expires_at = EXCLUDED.expires_at, document = EXCLUDED.document`,
+      [
+        mandate.mandateId, mandate.name, mandate.version, mandate.principal, mandate.agentId,
+        mandate.vaultId, mandate.asset, mandate.budget, mandate.maxTransaction,
+        JSON.stringify(mandate.allowedCounterparties), JSON.stringify(mandate.allowedCapabilities),
+        JSON.stringify(mandate.prohibitedCapabilities), JSON.stringify(mandate.approvedChains),
+        mandate.policyVersion, mandate.expiresAt, JSON.stringify(mandate),
+      ],
+    );
+  }
   // ── Sagas (F49) ─────────────────────────────────────────────────────────────
 
   /**

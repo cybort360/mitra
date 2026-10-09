@@ -29,6 +29,31 @@ re-derives the binding: exact action digest, amount, asset, chain, expiry, and
 a single-use nonce. This separation is the product's core claim, and it is
 implemented and tested rather than asserted.
 
+### Clearing epochs are permissionless on purpose
+
+`open_epoch`, `calculate_epoch`, `challenge` and `finalize_epoch` take no caller
+identity and do not check one, and that is deliberate rather than an omission.
+
+The netting result is a **deterministic function of the obligations**. Anyone can
+recompute it, so letting only a privileged party compute it would add no
+security while adding a chokepoint: a party who could open and finalize an epoch
+could compute a *different* result from the same inputs and nobody could check
+without the very permission being questioned. Permissionlessness here is what makes
+the challenge window meaningful — a disputed cycle can be recomputed independently
+by whoever disputes it.
+
+**Capital protection is therefore not at epoch finalization.** Finalizing an epoch
+computes what *would* be owed and to whom; it moves nothing. The residual payments
+are executed as ordinary reservations, and there the guards above apply in full:
+`validateExecutionBinding` re-derives the action digest, amount, asset, chain and
+nonce, and the vault re-checks headroom and freeze at spend time. A stale or
+forged epoch therefore produces payments that the execution guard refuses, rather
+than payments that bypass it.
+
+Stated explicitly because "the clearing endpoints are unauthenticated" otherwise
+reads as a gap, and the next person will either add a pointless permission or
+worry about the wrong thing.
+
 ## Kernel
 
 Pure functions. No clock, no IO, no store — time is an injected parameter, which

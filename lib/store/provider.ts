@@ -72,6 +72,8 @@ export class InMemoryRepository implements EconomicRepository {
   private readonly settlementsMap = new Map<string, Settlement>();
   /** F94 — deliverables written this session, alongside the seeded fixtures. */
   private readonly writtenDeliverables = new Map<string, Deliverable>();
+  /** F99 — mandates written this session, alongside the seeded fixtures. */
+  private readonly writtenMandates = new Map<string, Mandate>();
   /** Per run, oldest first. Appends are synchronous, so the chain cannot fork. */
   private readonly receiptsByRun = new Map<string, Receipt[]>();
   private readonly intentsMap = new Map<string, Intent>();
@@ -117,7 +119,13 @@ export class InMemoryRepository implements EconomicRepository {
 
   /** Served from the seed array: the ledger has no mandate store of its own. */
   async getMandate(mandateId: string): Promise<Mandate | null> {
-    return mandates.find((m) => m.mandateId === mandateId) ?? null;
+    // Written mandates take precedence over the seed. Without this, `saveMandate` wrote to a
+    // map nothing read and `getMandate` reported the seeded fixture instead — a write that
+    // was accepted and then invisible, which is worse than having no writer at all because
+    // it looks like it worked.
+    return this.writtenMandates.get(mandateId)
+      ?? mandates.find((m) => m.mandateId === mandateId)
+      ?? null;
   }
 
   /** Enumerated from the ledger, which is the only owner of vault state. */
@@ -410,7 +418,12 @@ export class InMemoryRepository implements EconomicRepository {
   }
 
   async listMandates(): Promise<Mandate[]> {
-    return mandates.map((m) => ({ ...m }));
+    return [...mandates.map((m) => ({ ...m })), ...this.writtenMandates.values()].map((m) => ({ ...m }));
+  }
+
+  /** F99: the writer `listMandates` was missing, so a Mandate could only be a fixture. */
+  async saveMandate(mandate: Mandate): Promise<void> {
+    this.writtenMandates.set(mandate.mandateId, { ...mandate });
   }
 
   private readonly epochsMap = new Map<string, ClearingEpoch>(seedEpochs.map((e) => [e.epochId, { ...e }]));

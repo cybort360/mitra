@@ -24,10 +24,10 @@ async function ensureEscrowSpace(): Promise<void> {
   const { repo } = await getStore();
   await repo.createSpace?.({
     spaceId: ESCROW_SPACE_ID, owner: "agent_buyer_07",
-    governance: { mode: "QUORUM", admins: [], governors: ["agent_buyer_07", "erc8183:provider-3", "agent_eval_02"], threshold: 2 },
+    governance: { mode: "QUORUM", admins: [], governors: ["agent_buyer_07", "agent_data_03", "agent_eval_02"], threshold: 2 },
     rules: { source: "external", ruleSetRef: "erc8183:job-lifecycle:v1", digest: "sha256:rules-8183-v1" },
     status: "ACTIVE",
-    participants: ["agent_buyer_07", "erc8183:provider-3", "agent_eval_02"],
+    participants: ["agent_buyer_07", "agent_data_03", "agent_eval_02"],
     // Both chains, so the escrow/payTo coherence guard is reachable rather than
     // pre-empted by SETTLEMENT_CHAIN_NOT_ALLOWED_IN_SPACE.
     allowedCapabilities: ["payment", "research"], settlementChains: ["base", "solana"],
@@ -288,7 +288,7 @@ describe("LP-6 — the agreement route drives real escrow, chain before database
           // A unique runId per agreement: `listEvents` filters by runId, so a shared
           // one would make the event assertions match another test's event.
           agreementId, runId: `run_lp6_${agreementId}`, intentId: "intent_1",
-          client: "agent_buyer_07", provider: "erc8183:provider-3", evaluator: "agent_eval_02",
+          client: "agent_buyer_07", provider: "agent_data_03", evaluator: "agent_eval_02",
           price: { asset: "USDC", amount: 15 },
           deadline: "2027-01-01T00:00:00Z",
           acceptanceCriteria: ["d"], failurePolicy: "refund on expiry",
@@ -366,7 +366,7 @@ describe("LP-6 — the agreement route drives real escrow, chain before database
         op: "open", spaceId: ESCROW_SPACE_ID,
         draft: {
           agreementId: id, runId: `run_lp6_${id}`, intentId: "intent_1",
-          client: "agent_buyer_07", provider: "erc8183:provider-3", evaluator: "agent_eval_02",
+          client: "agent_buyer_07", provider: "agent_data_03", evaluator: "agent_eval_02",
           price: { asset: "USDC", amount: 15 }, deadline: "2027-01-01T00:00:00Z",
           acceptanceCriteria: ["d"], failurePolicy: "refund on expiry", externalJobRefs: [],
           // No payTo: `agreement.provider` is a Mitra agent id, not an address.
@@ -486,5 +486,91 @@ describe("LP-6 — the agreement route drives real escrow, chain before database
     const escrowed = logged.find((e: { metadata?: Record<string, unknown> }) => e.metadata?.escrowAction);
     expect(escrowed?.metadata?.escrowSkipped).toBe(true);
     expect(escrowed?.metadata, "no placeholder hash on a skipped run").not.toHaveProperty("escrowTxHash");
+  });
+});
+
+/**
+ * The response surface is an API contract, and `sagasToPersist` is not part of it.
+ *
+ * `CoupledResult` carries the internal write-set the caller already applied. It was
+ * published by a `...opResult.value` spread, which meant any field added to the kernel later
+ * would be published too — a persistence detail becoming API surface by default.
+ */
+describe("the response omits the kernel's internal write-set", () => {
+  beforeEach(async () => {
+    __setEscrowRailResolverForTests(null);
+    await ensureEscrowSpace();
+    process.env.MITRA_ESCROW_TOKEN_ADDRESS = ESCROW_TOKEN;
+  });
+
+  it("never publishes sagasToPersist, on any op", async () => {
+    await ensureEscrowSpace();
+    const open = await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify({
+        op: "open", spaceId: ESCROW_SPACE_ID,
+        draft: {
+          agreementId: "ag_leak", runId: "run_leak", intentId: "intent_leak",
+          client: "agent_buyer_07", provider: "agent_data_03", evaluator: "agent_eval_02",
+          price: { asset: "USDC", amount: 5 }, deadline: "2027-01-01T00:00:00Z",
+          acceptanceCriteria: ["d"], failurePolicy: "refund on expiry", externalJobRefs: [],
+          payTo: { chain: "base", address: PROVIDER_ADDRESS },
+        },
+        proposal: { capability: "payment", amount: { asset: "USDC", amount: 5 } },
+      }),
+    }));
+    expect(open.status).toBe(201);
+
+    // `fund` is the op that actually arms a saga, so it is the one that would leak.
+    const fund = await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify(await signedTransition("agent_buyer_07", "OPEN", {
+        op: "fund", agreementId: "ag_leak",
+      })),
+    }));
+    expect(fund.status).toBe(200);
+    const body = await fund.json();
+
+    expect(body.data.saga, "the saga is reported, so a client can see the recovery machine").toBeTruthy();
+    expect(body.data, "but not the write-set used to persist it").not.toHaveProperty("sagasToPersist");
+    // Nothing internal leaks by key either, if it is absent from the payload at all.
+    expect(JSON.stringify(body)).not.toContain("sagasToPersist");
+  });
+
+  it("publishes the deliverable, which IS client-facing (F94)", async () => {
+    const ids = "ag_leak_dlv";
+    await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify({
+        op: "open", spaceId: ESCROW_SPACE_ID,
+        draft: {
+          agreementId: ids, runId: `run_${ids}`, intentId: "intent_dlv",
+          client: "agent_buyer_07", provider: "agent_data_03", evaluator: "agent_eval_02",
+          price: { asset: "USDC", amount: 5 }, deadline: "2027-01-01T00:00:00Z",
+          acceptanceCriteria: ["d"], failurePolicy: "refund on expiry", externalJobRefs: [],
+          payTo: { chain: "base", address: PROVIDER_ADDRESS },
+        },
+        proposal: { capability: "payment", amount: { asset: "USDC", amount: 5 } },
+      }),
+    }));
+    await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify(await signedTransition("agent_buyer_07", "OPEN", { op: "fund", agreementId: ids })),
+    }));
+    await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify(await signedTransition("agent_data_03", "FUNDED", { op: "startExecution", agreementId: ids })),
+    }));
+    const submit = await POST(new Request("http://localhost/api/v1/agreements", {
+      method: "POST",
+      body: JSON.stringify(await signedTransition("agent_data_03", "EXECUTING", {
+        op: "submitDeliverable", agreementId: ids,
+        artifactRefs: ["ipfs://leak_test"], contentHash: "sha256:leak",
+      })),
+    }));
+    expect(submit.status).toBe(200);
+    const body = await submit.json();
+    expect(body.data.deliverable).toMatchObject({ agreementId: ids, contentHash: "sha256:leak" });
+    expect(body.data).not.toHaveProperty("sagasToPersist");
   });
 });

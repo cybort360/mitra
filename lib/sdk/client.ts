@@ -26,7 +26,7 @@ import { mitraRequestTypedData, registrationRequest, requestBodyHash, type Mitra
 import type { NettingResult } from "@/lib/kernel/clearing";
 import type { Inbox, InboxKind } from "@/lib/inbox";
 import type {
-  Agent, Agreement, AgreementStatus, Authorization, Chain, ClearingEpoch, Intent, Money, Saga, Space,
+  Agent, Agreement, AgreementStatus, Authorization, Chain, ClearingEpoch, Deliverable, Intent, Money, Saga, Space,
 } from "@/lib/domain/types";
 
 /** Anything that can sign EIP-712 typed data for one address: a viem `LocalAccount`, or a wallet adapter. */
@@ -63,7 +63,18 @@ export class MitraApiError extends Error {
 }
 
 export type AgreementOp = "fund" | "startExecution" | "submitDeliverable" | "acceptDeliverable" | "rejectDeliverable" | "refund";
-export type AgreementView = Agreement & { availableOps: AgreementOp[] };
+/**
+ * An agreement as the API returns it.
+ *
+ * `deliverables` is what the provider signed and the evaluator judges (F94) — it is carried
+ * on the agreement rather than fetched separately so an evaluator cannot judge a submission
+ * that Mitra has not recorded.
+ */
+export type AgreementView = Agreement & {
+  availableOps: AgreementOp[];
+  /** Absent on stores written before F94, and on responses from an older API. */
+  deliverables?: Deliverable[];
+};
 export interface TransitionResult { agreement: AgreementView; space: Space; saga?: Saga }
 
 export interface AgreementDraft {

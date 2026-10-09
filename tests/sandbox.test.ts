@@ -6,6 +6,7 @@
  * decisions and the keeper. The canaries at the end pin defects the sandbox exposed.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { getStore } from "@/lib/store/provider";
 import { anvilAvailable, SANDBOX_BANNER, startSandbox, type Sandbox } from "@/lib/sandbox";
 import { jobEscrowAddress } from "@/lib/adapters/erc8183-transport";
 import { escrowRailFor } from "@/lib/commerce/escrow-rail";
@@ -178,4 +179,50 @@ describe.skipIf(!anvilAvailable() || !!process.env.DATABASE_URL)("the sandbox on
     await sb.keeper.refundTimedOut("sb_f97");
     expect((await sb.client.mitra.commerce.getAgreement("sb_f97")).status).toBe("REFUNDED");
   }, 60_000);
+  /**
+   * F99 — the sandbox seeds the ROOT of the authority tree (Mandate).
+   *
+   * It seeded 100,000 USDC and zero Mandates, so every sandbox flow skipped
+   * Mandate → Authorization → Intent → Agreement and went straight to the agreement. Nothing
+   * in the sandbox ever had to prove that a spend was AUTHORISED; the root was assumed.
+   *
+   * Read back through the STORE rather than an HTTP call: there is no `mandates` route or
+   * SDK namespace, so "query it as a client" is not reachable today. Saying so is better
+   * than adding a public surface to a polish packet, and better than asserting against a
+   * client that cannot.
+   */
+  it("seeds an ACTIVE mandate for the client, readable back from the store", async () => {
+    expect(sb.mandates.length).toBeGreaterThan(0);
+    const mandate = sb.mandates[0];
+    expect(mandate.status).toBe("ACTIVE");
+    expect(mandate.agentId).toBe(sb.client.agentId);
+    expect(mandate.asset).toBe("USDC");
+
+    const { repo } = await getStore();
+    const stored = await repo.getMandate(mandate.mandateId);
+    expect(stored, "persisted, not merely returned").toMatchObject({ mandateId: mandate.mandateId });
+  });
+
+  it("carries the fields the spend guards read, not just an id", async () => {
+    // A mandate with no ceiling would make every guard pass VACUOUSLY, which is the failure
+    // mode this seeding exists to catch.
+    const m = sb.mandates[0];
+    expect(m.maxTransaction).toBeGreaterThan(0);
+    expect(m.budget).toBeGreaterThan(0);
+    expect(m.approvedChains.length).toBeGreaterThan(0);
+    expect(m.allowedCapabilities.length).toBeGreaterThan(0);
+    expect(Date.parse(m.expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it("its ceiling exceeds the sandbox's largest agreement, so guards pass rather than block", async () => {
+    // A too-small mandate would make every sandbox agreement fail at the ceiling, which
+    // would read as a product bug rather than as a fixture sized wrong.
+    expect(sb.mandates[0].maxTransaction).toBeGreaterThan(100);
+  });
+
+  it("is listed by the repository alongside the seeded fixtures", async () => {
+    const { repo } = await getStore();
+    const listed = await repo.listMandates();
+    expect(listed.map((m) => m.mandateId)).toContain(sb.mandates[0].mandateId);
+  });
 });
