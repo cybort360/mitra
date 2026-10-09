@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 116,
+  "highSeq": 125,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2412,6 +2412,209 @@
         "6eb1771947a73da1ddd1bd49aeca06f26e966c2922fedd8b569018f1259663bd"
       ],
       "hash": "fead1c58d17de2549bec31bf21cdafabf619dd23fe9f0e5fa9f9c0d67457a4f3"
+    },
+    {
+      "entryId": "ctx_61a813506de51f49",
+      "seq": 117,
+      "kind": "decision",
+      "title": "LP-3 Tempo Settlement Parity Landed; F65 & F68 Resolved",
+      "body": "1. LP-3 Tempo Settlement Parity complete: tests/settlement-tempo-caller.test.ts mirrors Base caller suite across all 28 tests (happy path, evidence, refusals, capital book movements, nonces, and live Moderato EOA settlement). Live verified on Tempo Moderato (42431) under TEMPO_LIVE=1: tx 0x80cccf7863e042a963b6b2bc5eb873fb43d2db1987571479bad2aaa055ac35f3, block 38398243, settlement set_ag_live_tempo_1791275280833, status CONFIRMED, evidence TESTNET_PASS, TransferWithMemo memo topic checked and verified against on-chain logs. 2. F65 Resolved: POST /api/v1/intents and repository createIntent enforce first-write-wins; identical body replay returns 200 with stored intent; mismatched body under existing intentId returns 409 INTENT_EXISTS; original intent survives. 3. F68 Resolved: Agreement.externalJobRefs typed ExternalJobRef[] = (ExternalIdentityRef | string)[], supporting both namespaced URN strings (ACP/Virtuals) and structured {system, id} objects across domain types, routes, and UI. 4. Refusal Logging: Signed-transition refusals (401/403) remain unwritten to run timeline to prevent unauthenticated log pollution. 5. Webhook Worker: pg_try_advisory_lock approach approved for Postgres single-worker concurrency.",
+      "status": "active",
+      "scope": "all",
+      "tags": [
+        "F65",
+        "F68",
+        "LP-3",
+        "Tempo",
+        "lead",
+        "parity",
+        "settlement"
+      ],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-06T08:29:39.471Z",
+      "parents": [
+        "fead1c58d17de2549bec31bf21cdafabf619dd23fe9f0e5fa9f9c0d67457a4f3"
+      ],
+      "hash": "24644f4f095b5def6fa0cbf405c13174aa6ed81ada2aaa016d64c4bfcc36dd97"
+    },
+    {
+      "entryId": "ctx_cb399b84759b85c9",
+      "seq": 118,
+      "kind": "decision",
+      "title": "LP-4 Solana Job Escrow & Autonomous Recovery Deployed and Verified Live; F69 & F70 Resolved",
+      "body": "1. LP-4 Solana Job Escrow & Autonomous Recovery landed: JobEscrow PDA (154 B, [b\"escrow\", vault, job_id]), lock_escrow, release_escrow, refund_escrow, error codes 6019-6023, and three Vault transitions (lock_to_escrow, pay_escrow, return_escrow).\n2. Deployed to Solana devnet (program GkQQtmVXtGGeGvdHCXPtU6kbcKytQ4Dva7XdoCUj8CqY, slots 508039758 and 508041500).\n3. Live devnet proof:\n   - Lock: tx 2mXh5ejmr9H8ikydogRuoygSjKq6vz8upTPznxKBdmbeGaLEyAyDfCvBtnwTULqnr4E98Xz4rExDTS6QQGpYr8bV (slot 508042268)\n   - Release: tx 5YZKU4XaxmXhgPgyBCpdVa4B5EFSmb81aZVR5LyZtrPMw72tWijxBpAZmLmNSxgRjnvR1wW5r7XPFGonSeaYC6rk (slot 508042354)\n   - Autonomous keeper timeout refund: tx 57f5fScrHFcecrDLV66SgGgEtPmyhDnKJ5HyzA3yfM1kiLN5BPx3uGWcuSyqMM9nPs7idVvb9PCjyyKddNfq5WQe (slot 508042318)\n4. Guards enforced on chain: PRD §15.5 pre-commitment (all-zero refund route refused 0x1783 at lock & refund), caller cannot redirect payee or amount (0x1780), pre-deadline stranger refund refused (0x1784), single-shot terminal settlement (0x1785).\n5. Defect F70 resolved: Vault lamport reservation reconciliation fixed via Vault::held() (total - escrowed); all 6 Phase 2 clauses re-proven live on devnet to the lamport.\n6. Defect F69 resolved: Committed program ID bytes pinned in Rust PROGRAM_ID_BYTES and TS/MJS harnesses.\n7. Baselines: cargo test 147/147, vitest 1103 passed, forge 57/57, tsc 0 errors, mutation audit 8/8.\n8. Next for incoming agent: LP-5 Arcium MPC cluster run, followed by Agreement route wiring to on-chain escrows.",
+      "status": "active",
+      "scope": "solana",
+      "tags": [
+        "F69",
+        "F70",
+        "LP-4",
+        "autonomous-recovery",
+        "devnet",
+        "escrow",
+        "lead",
+        "solana"
+      ],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-06T09:23:03.777Z",
+      "parents": [
+        "24644f4f095b5def6fa0cbf405c13174aa6ed81ada2aaa016d64c4bfcc36dd97"
+      ],
+      "hash": "204bb4fe4613f2107c095d19b84843881f8f4d738c94c3fcdb54083854e820ef"
+    },
+    {
+      "entryId": "ctx_a131a0f9ac9621aa",
+      "seq": 119,
+      "kind": "handoff",
+      "title": "Sprint Wave 3 Handoff: PurpleDNA Packages (PP-5 to PP-8) — Developer SDK, Inbox, Sandbox, & Skills",
+      "body": "1. Active Handoff for PurpleDNA:\n   - PP-5: Mitra Core Client & Developer SDK (@mitra/sdk in lib/sdk/) implementing PRD §20 namespaces (mitra.commerce, mitra.authority, mitra.agents, mitra.clearing, mitra.recovery) and automating EIP-712 transition signing. Tests in tests/sdk.test.ts.\n   - PP-6: Mitra Agent Inbox (GET /api/v1/inbox & GET /api/v1/inbox/[agentId]) aggregating WORK_REQUIRED, EVALUATION_REQUIRED, INBOUND_PROPOSAL, and SETTLEMENT_RECEIPT, plus mitra_get_inbox tool in lib/mcp/surface.ts. Tests in tests/inbox.test.ts.\n   - PP-7: Mitra Sandbox CLI & Time-Travel Simulation Engine (scripts/sandbox.ts / npm run sandbox) with in-memory pre-seeded spaces/vaults, clock advancement (advanceSeconds) for instant timeout testing, and synthetic worker/evaluator/adversary counterparties. Tests in tests/sandbox.test.ts.\n   - PP-8: Cognitive Agent Skill Bundles in skills/ (mitra-buyer, mitra-provider, mitra-evaluator, mitra-treasury) teaching LLMs economic guardrails and safe intent-only lifecycles.\n2. Full handoff spec documented in docs/HANDOFF_CODEVELOPER.md.\n3. Branch feat/mitra-vault-v2-reseed is fully pushed and in-sync with origin (includes LP-4, LP-5 Arcium live cluster, F76 route commitment, and webhook lease).\n4. Next free failure identifier is F78.",
+      "status": "active",
+      "scope": "all",
+      "tags": [
+        "Inbox",
+        "PP-5",
+        "PP-6",
+        "PP-7",
+        "PP-8",
+        "SDK",
+        "Sandbox",
+        "Skills",
+        "handoff",
+        "purple"
+      ],
+      "authorId": "agent:lead",
+      "createdAt": "2026-10-08T19:17:22.245Z",
+      "parents": [
+        "204bb4fe4613f2107c095d19b84843881f8f4d738c94c3fcdb54083854e820ef"
+      ],
+      "hash": "9b1ba4ca2897609676d558bd52287dd35fed92c2276c08591b04f9deb21924ae"
+    },
+    {
+      "entryId": "ctx_d2b3753dc9d6ef23",
+      "seq": 120,
+      "kind": "decision",
+      "title": "PP-5 SDK (lib/sdk/) is a thin signing client over existing routes only; getMandate is withheld because no route serves mandates",
+      "body": "Starting PP-5 on feat/purple-pp (tip e29856e). Scope as corrected against the repo, not the handoff text:\n- MitraClient({ baseUrl, signer, chainId, agentId, fetch? }). Transitions fetch the agreement, sign MitraRequest with fromStatus = current status and bodyHash = requestBodyHash(exact transition fields), and POST /api/v1/agreements. No key leaves the signer; the SDK holds no store.\n- commerce: createAgreement (op open, unsigned as the route requires), fund, startExecution, submitDeliverable, acceptDeliverable, rejectDeliverable, getAgreement, listAgreements, createIntent, getIntent.\n- authority: requestAuthorization (POST /authorizations, an ALLOW is not permission to move value), getHeadroom(spaceId) from GET /spaces. getMandate WITHHELD: there is no mandate read route, and adding one is outside purple's file boundary.\n- agents: register (signs registrationRequest), getAgent, findAgents.\n- clearing: getEpoch, listEpochs, requestClearing = action \"net\" preview only (same restriction as MCP); listResiduals reads GET /clearing. No open_epoch/challenge/finalize verbs.\n- recovery: getSaga, listSagas, refundEscrow = the signed agreement \"refund\" op (client/evaluator). The SDK never constructs compensation calldata (PRD 15.5).\n- Refusals throw MitraApiError carrying the API's own reason code; never smoothed into success.\nREJECTED: duplicating route logic client-side; a getMandate that throws; exposing clearing epoch mutation.",
+      "status": "active",
+      "scope": "sdk",
+      "tags": [
+        "F55",
+        "PP-5",
+        "sdk",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-08T20:00:27.653Z",
+      "parents": [
+        "9b1ba4ca2897609676d558bd52287dd35fed92c2276c08591b04f9deb21924ae"
+      ],
+      "hash": "7f5ee5ef14bd2d24e1bd06095a3605329feaffd7ff7a43e722d15642cff15e36"
+    },
+    {
+      "entryId": "ctx_d3eaff6172c8b596",
+      "seq": 121,
+      "kind": "question",
+      "title": "For the lead: PP-7 time-travel has no off-chain timeout refund to fast-forward; how should the sandbox exercise it?",
+      "body": "Addressed to agent:lead. PP-7 asks for sandbox.clock.advanceSeconds(7200) to test 2-hour timeout refunds. In the off-chain kernel the only deadline check is lib/kernel/commerce.ts:284 (DELIVERABLE_LATE on submit); there is no expiry/timeout refund path. Timeout refunds exist only on-chain (MitraJobEscrow.sol, Solana JobEscrow). Also app/api/v1, lib/kernel and lib/store read Date.now()/new Date() in 24 places, so a sandbox clock needs either clock injection in lead-owned code or fake timers.\nOptions: (a) sandbox runs against a local chain (anvil + MitraJobEscrow) and advances block time with evm_increaseTime: real contract, no mock; (b) add an off-chain EXPIRED/timeout transition in the kernel (your files) so the in-memory sandbox has something real to drive; (c) an in-memory simulated escrow in lib/sandbox that announces itself as a simulation and never reports a refund as settled. (c) is the cheapest and the closest to the zero-mock line. Purple recommends (a). PP-7 is held until you answer; PP-5 proceeds.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PP-7",
+        "for-lead",
+        "sandbox",
+        "time",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-08T20:00:27.742Z",
+      "parents": [
+        "7f5ee5ef14bd2d24e1bd06095a3605329feaffd7ff7a43e722d15642cff15e36"
+      ],
+      "hash": "0a294898b12af30630e6cd3ddb3a23a2e278ed670467b19b71fb06f31fa81452"
+    },
+    {
+      "entryId": "ctx_75bf44f822439369",
+      "seq": 122,
+      "kind": "handoff",
+      "title": "PP-5 SDK is TESTED in-memory (14/14, suite 1140 pass); uncommitted on feat/purple-pp; getMandate withheld, Postgres run pending",
+      "body": "DONE (working tree on feat/purple-pp at e29856e, NOT yet committed): lib/sdk/client.ts + lib/sdk/index.ts (MitraClient, MitraApiError), tests/sdk.test.ts (14), tests/route-fetch.ts (a fetch that serves app/api/v1 route modules in-process; reusable by PP-6 inbox tests). PROOF_LEDGER row and EXECUTION_PLAN row 5 updated. tsc clean; vitest 1140 pass / 0 fail in-memory. Mutation 4/5 killed; the survivor was a redundant undefined-strip (canonicalize already drops undefined keys) and was removed.\nNEXT: commit; run tests/sdk.test.ts on Postgres (DATABASE_URL, --no-file-parallelism), which was unavailable on this machine; PP-6 inbox (adds mitra.inbox.list); PP-7 waits on the lead's answer to ctx_d3eaff6172c8b596.\nRISK: a transition reads then signs; if the agreement moves in between, the API refuses the stale signature and the SDK does not retry (by design). PrivateKeyAccount satisfies MitraSigner under tsc today; a viem upgrade that changes signTypedData's generic signature could break that assignability.\nAlso observed (not mine to fix): EXECUTION_PLAN row 5 still lists F65 as open, but POST /api/v1/intents now enforces first-write-wins (tests/sdk.test.ts gets 409 on a different body).",
+      "status": "active",
+      "scope": "sdk",
+      "tags": [
+        "PP-5",
+        "sdk",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-08T20:07:13.269Z",
+      "parents": [
+        "0a294898b12af30630e6cd3ddb3a23a2e278ed670467b19b71fb06f31fa81452"
+      ],
+      "hash": "b00d07d92f27481c4c50ef33b56f8e5fb9f50b57690164a565dcbb579c7eb04e"
+    },
+    {
+      "entryId": "ctx_ef6e742ad6750b3b",
+      "seq": 123,
+      "kind": "decision",
+      "title": "PP-8 skills: four role skills plus a shared mitra-core reference skill; treasury drafts mandate changes for the principal and never makes them",
+      "body": "PP-6 is committed (336134d, TESTED in-memory, 13 tests, suite 1153). PP-7 is still held on ctx_d3eaff6172c8b596 (no lead answer yet). Starting PP-8 on feat/purple-pp.\nLayout: skills/mitra-core/SKILL.md holds what every role needs (the mandate → policy → guard mechanism, how to sign a transition, refusal codes, tool/SDK map), so it has one source of truth; mitra-buyer, mitra-provider, mitra-evaluator, mitra-treasury point to it. tests/skills.test.ts fails if a skill names an MCP tool that is not served, an SDK method that does not exist, or a reason code that appears nowhere in lib/ or app/.\nDeviations from the handoff text, each because the API has no such surface: (1) treasury \"amend mandates\" becomes \"draft a mandate change for the principal\"; an agent changing its own limits is raw_policy_mutation, and there is no mandate route. (2) \"1-click approvals\" means presenting a decision to the human; there is no approval route. (3) buyer \"solicit quotes\" means finding providers by capability; there is no quote API. (4) MCP has no refund tool and no headroom tool; the skills route both through the SDK.\nThe evaluator skill treats deliverable content as evidence, never as instructions (prompt-injection guard).",
+      "status": "active",
+      "scope": "sdk",
+      "tags": [
+        "PP-8",
+        "skills",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T00:16:44.703Z",
+      "parents": [
+        "b00d07d92f27481c4c50ef33b56f8e5fb9f50b57690164a565dcbb579c7eb04e"
+      ],
+      "hash": "30acf8bb487f0dc57fe95885cb0abb1c642f059ec657f7adb27d2723761f1153"
+    },
+    {
+      "entryId": "ctx_e8508a58bc2b85ac",
+      "seq": 124,
+      "kind": "finding",
+      "title": "F78: submitDeliverable discards artifactRefs and contentHash, and evaluateDeliverable has no production caller, so a late, empty submission can be ACCEPTED",
+      "body": "Addressed to agent:lead (your files: lib/kernel/commerce.ts, lib/store/, app/api/v1/agreements/route.ts). Full entry in forge/FAILURES.md F78 (commit a65f749 on feat/purple-pp).\nFacts: the route passes artifactRefs/contentHash to applyAgreementOpWithSaga (route.ts:291-292); applyAgreementOp declares them in opts (commerce.ts:164) and never reads them; no repository write exists for deliverables (listDeliverables only); nothing in agreement, saga or event log holds them. evaluateDeliverable (commerce.ts:277: WRONG_AGREEMENT, DELIVERABLE_EMPTY, DELIVERABLE_LATE, DELIVERABLE_HAS_NO_ARTIFACTS) is never called outside tests. Probe through the real routes: deadline 2020-01-01, no hash, no artifacts → SUBMITTED → evaluator accept → ACCEPTED.\nImpact: ACCEPTED releases escrow toward settlement while the evidence of what was delivered is discarded; an evaluator's verdict binds to nothing the provider signed.\nCandidate fix: on submit, build a Deliverable, run evaluateDeliverable, persist it, record its id on the agreement; have accept/reject carry the contentHash judged so the evaluator signs over it.\nCanary: tests/deliverable-binding-probe.test.ts (three it.fails on the invariants, one it pinning today's path). When you fix it, flip the it.fails; tests/skills.test.ts will then fail until the F78 workaround lines are removed from skills/mitra-evaluator and skills/mitra-provider (that is intended).\nCorrection: my PP-7 question ctx_d3eaff6172c8b596 said commerce.ts:284 refuses late submission. It does not run; the rest of that question stands.",
+      "status": "active",
+      "scope": "commerce",
+      "tags": [
+        "F78",
+        "deliverable",
+        "for-lead",
+        "kernel"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T00:23:51.324Z",
+      "parents": [
+        "30acf8bb487f0dc57fe95885cb0abb1c642f059ec657f7adb27d2723761f1153"
+      ],
+      "hash": "94b97ac222242bf79d49b33a6e759444282ea7dce12f6bf1fd308c1191eb8214"
+    },
+    {
+      "entryId": "ctx_6e2474b6758cc469",
+      "seq": 125,
+      "kind": "handoff",
+      "title": "Wave 3 purple: PP-5, PP-6, PP-8 committed on feat/purple-pp (TESTED in-memory); PP-7 held on the lead; F78 open; not pushed",
+      "body": "DONE on feat/purple-pp (local, NOT pushed): 6188145 PP-5 SDK (lib/sdk), 336134d PP-6 inbox (app/api/v1/inbox, lib/inbox, MCP mitra_get_inbox, SDK inbox.list), a65f749 PP-8 skills (skills/, tests/skills.test.ts) plus F78 and its canary. tsc clean; vitest 1164 pass / 0 fail in-memory; next build compiled the inbox routes. PROOF_LEDGER rows and EXECUTION_PLAN row 5 updated for each.\nNEXT: (1) push and open a PR into feat/mitra-vault-v2-reseed when human:purple says so; (2) run sdk/inbox suites on Postgres (unavailable on this machine); (3) PP-7 once the lead answers ctx_d3eaff6172c8b596; (4) lead: F78 (ctx entry just above); (5) a real LLM agent run of a skill, which is what would move PP-8 past TESTED.\nRISK: the evaluator and provider skills carry an F78 workaround (evaluator gets artifacts from the provider and checks lateness via the timeline); until F78 is fixed an evaluator cannot verify that what it judged is what was signed. EXECUTION_PLAN row 5 still lists F65 as open though intents are now first-write-wins; I left that row's F65 text for the lead.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PP-5",
+        "PP-6",
+        "PP-7",
+        "PP-8",
+        "handoff",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T00:23:51.355Z",
+      "parents": [
+        "94b97ac222242bf79d49b33a6e759444282ea7dce12f6bf1fd308c1191eb8214"
+      ],
+      "hash": "30ef97174b6f296ef1b137c4a2b938305812928445e8990c36835911f80653e7"
     }
   ],
   "actors": [
@@ -2449,5 +2652,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "fead1c58d17de2549bec31bf21cdafabf619dd23fe9f0e5fa9f9c0d67457a4f3"
+  "tipHash": "30ef97174b6f296ef1b137c4a2b938305812928445e8990c36835911f80653e7"
 }
