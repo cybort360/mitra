@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 130,
+  "highSeq": 131,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2733,6 +2733,27 @@
       ],
       "hash": "93785a5126c87af44f05ffdfb75fc72270699f756bb8fdb28bb4f074cc2cdadc",
       "supersedesId": "ctx_6a900c24299d1cb4"
+    },
+    {
+      "entryId": "ctx_cc0de5352412fec1",
+      "seq": 131,
+      "kind": "note",
+      "title": "PR #34 passes the full handoff verification protocol: tsc 0, forge 57/57, cargo 147/147, vitest 1330/0; third lead file was a comment",
+      "body": "On feat/purple-pp after merging the reseed branch: forge test 57/57; cargo test 147/147, run as `cargo +1.98.1 test --manifest-path programs/mitra-vault/Cargo.toml`, because a default stable Cargo 1.84 cannot build the edition2024 crates (crypto-common 0.2.2, ahash 0.8.12). Anyone hitting \"feature `edition2024` is required\" needs a newer toolchain, not a code change.\nCorrection to seq 128/130: PP-7 touched THREE lead files, not two. The third, lib/commerce/onchain-escrow.ts, is a doc-comment change only (adds `local` to the EscrowRail.network list). PR body updated.",
+      "status": "active",
+      "scope": "process",
+      "tags": [
+        "PR-34",
+        "cargo",
+        "verification",
+        "wave-3"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-09T07:16:11.100Z",
+      "parents": [
+        "93785a5126c87af44f05ffdfb75fc72270699f756bb8fdb28bb4f074cc2cdadc"
+      ],
+      "hash": "8784f4ee920f17b5a72611ec726876e28a2c72d935b66e8a5b776bdc3408a540"
     }
   ],
   "actors": [
@@ -2770,5 +2791,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "93785a5126c87af44f05ffdfb75fc72270699f756bb8fdb28bb4f074cc2cdadc"
+  "tipHash": "8784f4ee920f17b5a72611ec726876e28a2c72d935b66e8a5b776bdc3408a540"
 }
