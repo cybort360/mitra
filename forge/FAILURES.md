@@ -4178,3 +4178,78 @@ persist, so a store that silently drops the write fails at the seed rather than 
 namespace, so "a client can query its mandate" is not reachable today. The tests read through
 the store and say so; adding a public surface to a polish packet would be scope creep, and the
 PP-5 row already records `getMandate` as withheld for want of a route.
+
+## F100 — anyone who can reach `POST /api/v1/mandates` can mint authority
+
+**Status:** PARTIALLY fixed (2026-10-09). Narrowed and recorded; the authentication gap is
+open and is the larger half.
+**Found:** 2026-10-09, while implementing the Mandates public API (Horizon 1 packet 2).
+
+The handoff prescribed an unauthenticated `POST /api/v1/mandates`. It is worth being precise
+about what that endpoint does, because it is not the same kind of write as the rest of the
+operator plane:
+
+- `POST /api/v1/authorizations` is unauthenticated too, and is **bounded** — an
+  Authorization only permits an action *inside a Mandate that already exists*, so the worst an
+  attacker gets is one authorised action inside limits somebody else set.
+- `POST /api/v1/intents` is unauthenticated, and an Intent is a statement (F65's residual).
+- **A Mandate is the ROOT.** `Mandate → Authorization → Intent → Agreement`. Creating one is
+  not granting something within a limit; it is **minting the limit**. So an unauthenticated
+  `POST` lets any caller grant any agent any budget over any vault, including vaults
+  belonging to other principals.
+
+That is qualitatively worse than the operator-plane posture the rest of the repository takes,
+and it is why this is recorded as a defect rather than shipped as an implementation detail.
+
+## What was done about it
+
+**Narrowed as far as possible without breaking the packet's showcase:**
+
+- `VAULT_NOT_FOUND` — authority cannot be minted over a vault that does not exist.
+- `AGENT_NOT_REGISTERED` — authority cannot be granted to an identity the repository has
+  never seen.
+- `VAULT_CHAIN_NOT_APPROVED` — a mandate that does not approve the chain of its own vault can
+  never authorise anything, the same reasoning as `MAX_TRANSACTION_EXCEEDS_BUDGET`.
+- **First-write-wins**, `409 MANDATE_EXISTS` — a ceiling cannot be silently raised. Pinned by
+  a test that raises the budget and asserts the ORIGINAL survives.
+- **`AUTHORITY` is a new pause scope.** Minting authority is pausable, unlike granting an
+  Authorization, for the same asymmetry. Pinned by a test that pauses and asserts both the
+  503 and that **nothing was written** — a pause that stopped the request after the write
+  would be worse than no pause.
+- **An `AUTHORITY` event on the run log**, so a ceiling has an audit trail recording who was
+  granted what, and over which vault.
+
+**And the deviation.** The handoff also asked for `client.mandates.create`. It is
+**deliberately absent** from the SDK. `MitraClient` is the surface an external agent holds,
+and `tests/sdk.test.ts` pins it as "carries intent verbs only" with no capital-issuing verb in
+any namespace. Putting `create` there would hand the act of minting the limit to the agent —
+F100 exactly — and would make the existing control wrong rather than the change right. The SDK
+gets `get` and `list`; granting authority stays on the HTTP operator plane. Recorded as a
+deviation rather than done quietly.
+
+**What remains.** A caller who knows a real `vaultId` and a real `agentId` can grant that
+agent a budget over that vault. Closing it needs a signature from the principal, exactly as
+F55 gave the agreement transitions one, and that is a larger change than this packet. Until
+then this route should not be exposed beyond the operator plane.
+
+## F101 — `saveMandate` wrote two things the `mandates` table does not have
+
+**Status:** fixed 2026-10-09.
+**Found:** 2026-10-09, by `npm run test:postgres` immediately after adding the writer.
+
+**F79, again, in a new repository method.** The first `saveMandate` copied `saveDeliverable`'s
+shape and wrote a `document` column. `mitra.mandates` has no such column — unlike
+`mitra.deliverables`, which does — so the statement failed outright. The in-memory backend
+accepted it happily, because it stores objects and cannot have a column error, and all 19
+`tests/mandates-api.test.ts` cases passed.
+
+Fixing it surfaced the same bug a second time in the same function: the capability and chain
+columns are Postgres `TEXT[]`, and I was passing `JSON.stringify(...)`, which supplies the
+*string* `"[]"` and fails with `malformed array literal`.
+
+**Two schema/encoder mismatches in one new method, and the entire in-memory suite green
+through both.** That is the strongest evidence yet for why the Postgres matrix is part of the
+verification protocol and not an optional extra: the cheap backend cannot have this class of
+defect, so a suite that runs only against it is not testing the thing that will run in
+production. Both were caught within a minute of running the matrix, and neither was caught by
+writing more in-memory tests.

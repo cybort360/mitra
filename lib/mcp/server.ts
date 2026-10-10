@@ -69,6 +69,8 @@ export const MCP_TOOL_STATUS: Record<McpToolName, ToolStatus> = {
   mitra_get_intent: { status: "served" },
   mitra_get_timeline: { status: "served" },
   mitra_get_inbox: { status: "served" },
+  mitra_get_mandate: { status: "served" },
+  mitra_list_mandates: { status: "served" },
 };
 
 interface ServedTool {
@@ -140,6 +142,23 @@ export const SERVED_TOOLS: Partial<Record<McpToolName, ServedTool>> = {
     description: "A run's timeline from Mitra's append-only event log: what happened, in order, including refusals.",
     inputSchema: { runId: z.string().min(1) },
     toRequest: (a) => ({ method: "GET", path: `/api/v1/events${qs({ runId: a.runId })}` }),
+  },
+  mitra_get_mandate: {
+    description:
+      "One Mandate by id: who may spend it, out of which vault, up to how much per transaction " +
+      "and in total, over which chains, until when. This is the ceiling every authorization " +
+      "for that agent is evaluated against, so an agent should read it before asking for " +
+      "anything.",
+    inputSchema: { mandateId: z.string().min(1) },
+    toRequest: (a) => ({ method: "GET", path: `/api/v1/mandates${qs({ mandateId: a.mandateId })}` }),
+  },
+  mitra_list_mandates: {
+    description:
+      "The Mandates an agent holds, or all of them when none is named. Read-only: this tool " +
+      "cannot create a Mandate, because granting authority is not something an agent should " +
+      "be able to do to itself.",
+    inputSchema: { agentId: z.string().min(1).optional(), principal: z.string().min(1).optional(), vaultId: z.string().min(1).optional() },
+    toRequest: (a) => ({ method: "GET", path: `/api/v1/mandates${qs({ agentId: a.agentId, principal: a.principal, vaultId: a.vaultId })}` }),
   },
   mitra_get_inbox: {
     description:

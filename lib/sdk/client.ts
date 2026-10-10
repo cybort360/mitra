@@ -26,8 +26,35 @@ import { mitraRequestTypedData, registrationRequest, requestBodyHash, type Mitra
 import type { NettingResult } from "@/lib/kernel/clearing";
 import type { Inbox, InboxKind } from "@/lib/inbox";
 import type {
-  Agent, Agreement, AgreementStatus, Authorization, Chain, ClearingEpoch, Deliverable, Intent, Money, Saga, Space,
+  Agent, Agreement, AgreementStatus, AssetSymbol, Authorization, Chain, ClearingEpoch, Deliverable, Intent, Mandate, Money, Saga, Space,
 } from "@/lib/domain/types";
+
+/**
+ * What `POST /api/v1/mandates` accepts.
+ *
+ * `budget` is the ceiling for the whole mandate and `maxTransaction` for one action, so
+ * `maxTransaction <= budget` is enforced by the route rather than left to the caller to
+ * satisfy — a per-action ceiling above the total is a contradictory mandate, not a tighter
+ * one.
+ */
+export interface CreateMandateParams {
+  mandateId?: string;
+  name: string;
+  principal: string;
+  agentId: string;
+  vaultId: string;
+  asset: AssetSymbol;
+  budget: number;
+  maxTransaction: number;
+  velocityLimit?: { amount: number; windowMinutes: number };
+  allowedCounterparties?: string[];
+  allowedCapabilities?: string[];
+  prohibitedCapabilities?: string[];
+  approvedChains?: Chain[];
+  policyVersion?: string;
+  expiresAt: string;
+  confidentialPolicy?: boolean;
+}
 
 /** Anything that can sign EIP-712 typed data for one address: a viem `LocalAccount`, or a wallet adapter. */
 export interface MitraSigner {
@@ -125,6 +152,11 @@ export type SagaView = Saga & { isRecovered: boolean; isTerminal: boolean };
 export class MitraClient {
   readonly commerce;
   readonly authority;
+  /** The authority tree's root: Mandate. */
+  readonly mandates: {
+    get(mandateId: string): Promise<Mandate>;
+    list(filter?: { agentId?: string; principal?: string; vaultId?: string }): Promise<Mandate[]>;
+  };
   readonly agents;
   readonly clearing;
   readonly recovery;
@@ -172,6 +204,27 @@ export class MitraClient {
       /** What the Space can still commit: its budget less what funded agreements hold. */
       getHeadroom: async (spaceId: string): Promise<Money> =>
         (await this.#call<{ availableHeadroom: Money }>("GET", `/spaces/${encodeURIComponent(spaceId)}`)).availableHeadroom,
+    };
+
+    // The Mandate is the ROOT of `Mandate → Authorization → Intent → Agreement`, so an agent
+    // that cannot read its own ceiling cannot tell whether a proposal is worth asking.
+    //
+    // **READ-ONLY, deliberately.** The handoff asked for `mandates.create` here. This is the
+    // agent-facing client — the one an external agent holds — and `tests/sdk.test.ts`
+    // pins it as "the SDK surface carries intent verbs only", with no capital-issuing verb in
+    // any namespace. Granting a Mandate is not an intent verb: it is the act of minting the
+    // limit that every later authorization is evaluated against. Putting `create` on the
+    // agent surface would hand that act to the agent, which is F100 exactly, and would
+    // make the existing SDK control wrong rather than the change right.
+    //
+    // So `create` lives on the OPERATOR plane (`POST /api/v1/mandates`) and is deliberately
+    // absent here. An operator who wants the SDK can call the route; an agent can read its
+    // own authority and nothing more. Recorded as a deviation from the handoff in
+    // FAILURES.md under F100 rather than done quietly.
+    this.mandates = {
+      get: (mandateId: string) => this.#call<Mandate>("GET", `/mandates?mandateId=${encodeURIComponent(mandateId)}`),
+      list: (filter: { agentId?: string; principal?: string; vaultId?: string } = {}) =>
+        this.#call<Mandate[]>("GET", `/mandates${query(filter)}`),
     };
 
     this.agents = {

@@ -60,6 +60,12 @@ export const mcpTools = [
   // PP-6: an agent's actionable work, addressed to its id, so it need not poll
   // the agreement and settlement tables and work out its own next move.
   "mitra_get_inbox",
+  // The Mandate is the ROOT of Mandate -> Authorization -> Intent -> Agreement. An agent
+  // that cannot read its own ceiling cannot tell whether a proposal is worth asking, so
+  // these are read tools and nothing more: an agent may INSPECT its authority over MCP, and
+  // granting it stays on the HTTP plane (F100).
+  "mitra_get_mandate",
+  "mitra_list_mandates",
 ] as const;
 
 export type McpToolName = (typeof mcpTools)[number];

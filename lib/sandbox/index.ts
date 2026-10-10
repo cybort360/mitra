@@ -81,8 +81,11 @@ export interface Sandbox {
   openAgreement(opts: OpenOptions): Promise<void>;
   /** Moves the price into the escrow contract and signs `fund` with the on-chain escrow. */
   fund(agreementId: string): Promise<void>;
-  /** Runs each scripted counterparty once over its inbox. Returns what each did. */
-  tick(): Promise<string[]>;
+  /**
+   * Runs each scripted counterparty once over its inbox. Returns what each did.
+   * Narrow with `parties` to observe the handoff between them.
+   */
+  tick(opts?: { parties?: Array<"provider" | "adversary" | "evaluator"> }): Promise<string[]>;
   keeper: {
     /** The contract's own timeout refund, called by an account with no role. Reverts before the timeout. */
     refundTimedOut(agreementId: string): Promise<Hex>;
@@ -291,12 +294,22 @@ export async function startSandbox(opts: { adversary?: ProviderBehaviour } = {})
       await client.mitra.commerce.fund(agreementId, { onChainEscrow: escrowRef(agreementId) });
     },
 
-    async tick() {
-      return [
-        ...(await providerTurn(provider, "deliver")),
-        ...(await providerTurn(adversary, adversary.behaviour)),
-        ...(await evaluatorTurn()),
-      ];
+    /**
+     * Runs each scripted counterparty once over its inbox.
+     *
+     * `parties` narrows it so a caller can observe the HANDOFF: with all three in one tick
+     * the evaluator consumes its `EVALUATION_REQUIRED` duty in the same call that produced
+     * it, so nothing can ever see the inbox entry that the evaluator actually read. The
+     * showcase exists to show that handoff, so the seam is here rather than in the showcase
+     * pretending the evaluator never used an inbox.
+     */
+    async tick(opts: { parties?: Array<"provider" | "adversary" | "evaluator"> } = {}) {
+      const want = new Set(opts.parties ?? ["provider", "adversary", "evaluator"]);
+      const log: string[] = [];
+      if (want.has("provider")) log.push(...await providerTurn(provider, "deliver"));
+      if (want.has("adversary")) log.push(...await providerTurn(adversary, adversary.behaviour));
+      if (want.has("evaluator")) log.push(...await evaluatorTurn());
+      return log;
     },
 
     keeper: {

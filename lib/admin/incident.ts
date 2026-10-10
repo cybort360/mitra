@@ -23,7 +23,16 @@
 import { NextResponse } from "next/server";
 import type { Pool } from "pg";
 
-export const PAUSE_SCOPES = ["agreements", "funding", "execution"] as const;
+/**
+ * What a pause stops.
+ *
+ * `authority` (F100) covers Mandate creation. A Mandate is the ROOT of the authority tree —
+ * every authorization below it is evaluated against that record — so granting one during an
+ * incident is how an agent acquires a ceiling nobody intended to give it. Minting authority
+ * is therefore pausable, unlike granting an Authorization, which is bounded by a Mandate
+ * that already exists.
+ */
+export const PAUSE_SCOPES = ["agreements", "funding", "execution", "authority"] as const;
 export type PauseScope = (typeof PAUSE_SCOPES)[number];
 
 export interface PauseState {
