@@ -3,6 +3,7 @@
 **Project:** Mitra  
 **Category:** AI Platforms / Agents  
 **Target Deadline:** October 12 at 11:59 PM PDT  
+**Canonical Sources:** [`docs/product/MITRA_PRD.md`](./product/MITRA_PRD.md), [`docs/product/MITRA_0_1_FULL_PRODUCT_SPEC.md`](./product/MITRA_0_1_FULL_PRODUCT_SPEC.md), [`forge/PRODUCT.md`](../forge/PRODUCT.md)
 
 ---
 
@@ -14,59 +15,63 @@
 ---
 
 ### Brief Description *(Public, Max 500 characters)*
-> **Character count:** 449 / 500
 
-Mitra is the financial clearinghouse and coordination operating system for autonomous AI agents. We solve the Hot-Key Trap by separating the cognitive authority to reason about spending from the cryptographic authority to move capital. Powered by programmable Solana PDA vaults, ERC-8183 escrows, Model Context Protocol (MCP) tooling, distributed failure recovery sagas, and multi-party cycle netting, Mitra enables agents to safely hire and settle.
+Choose the one that best matches your preferred tone:
+
+#### Option A: Canonical PRD Thesis *(Recommended — 466 / 500 chars)*
+> Payments let machines move money; Mitra gives autonomous agents the financial coordination layer to safely conduct commerce. Sitting between agent cognitive intent and on-chain settlement, Mitra is the clearinghouse for machine-to-machine economies. Through programmable Solana PDA vaults, decoupled escrows, distributed failure recovery sagas, and multi-party netting, Mitra ensures that an LLM’s spending proposal is never confused with permission to move capital.
+
+#### Option B: The Problem & Hot-Key Trap *(482 / 500 chars)*
+> Mitra is the financial coordination and clearing stack for autonomous agents. Today, giving an LLM a private key invites treasury drainage, while payment rails only move money blindly. Mitra solves this by separating spend reasoning from capital movement. With Solana PDA vaults, ERC-8183 escrows, Model Context Protocol (MCP) tooling, failure recovery sagas, and multi-party cycle netting, Mitra provides the economic operating system for agents to safely hire, escrow, and settle.
+
+#### Option C: The Clearinghouse & Economic Lifecycle *(447 / 500 chars)*
+> Mitra is the financial clearinghouse for agentic commerce. We coordinate the full economic lifecycle between agent intent and blockchain settlement: principal mandates, held escrows, proof-of-work evaluation, failure recovery sagas, multi-party cycle netting, and Solana PDA vault enforcement. Mitra ensures an ALLOW decision from an LLM is never permission to move value, allowing autonomous agents to safely hire each other across open networks.
 
 ---
 
 ### Project Website *(Public)*
-`https://mitra.exchange` *(or your repository / live demo: `https://github.com/cybort360/mitra`)*
+`https://mitra.exchange` *(or repository: `https://github.com/cybort360/mitra`)*
 
 ---
 
 ### What are you building, and who is it for? *(Max 1,000 characters)*
-> **Character count:** 975 / 1,000
+> **Character count:** 970 / 1,000
 
-Mitra is the financial clearinghouse for agentic commerce, bridging the gap between agent intent and final value movement. Instead of handing LLMs hot keys with direct wallet custody, Mitra enforces a load-bearing invariant: "An ALLOW decision is never permission to move value."
+Mitra is the financial coordination layer for autonomous commerce, bridging the gap between agent intent and blockchain settlement. 
 
-Mitra operates a three-layer capital pipeline:
-1. Mandates: Principals define deterministic spending limits (ceilings, token scopes, velocity limits).
-2. Policy Engine: Verifies compliance over agent proposals.
-3. Execution Guard: On-chain vault logic re-derives cryptographic bindings (recipient, nonce, hash, deadline) before any asset moves.
+Payment rails answer "can this wallet transfer $5?" Mitra answers the commercial questions: Was this spend authorized by the principal? Was it part of a binding agreement? Was delivery accepted? What happens if step 3 fails? What obligations can be netted before value moves?
 
-Mitra provides programmable non-custodial vaults, decoupled 3-party escrows (Client, Provider, Evaluator), TALOS distributed recovery sagas for workflow failure recovery, and multi-party cycle netting to eliminate redundant transactions.
+Mitra delivers four core financial primitives:
+1. Authority: Bounded spending mandates enforced via Solana PDA vaults and execution guards ("An ALLOW decision is never permission to move value").
+2. Commerce: Decoupled 3-party escrows (Client, Provider, Evaluator) with proof-of-work criteria.
+3. Sagas: Explicit failure, refund, and compensation state machines for multi-step agent pipelines.
+4. Clearing: Graph-based multi-party cycle netting to eliminate redundant transactions.
 
-Built for AI agent developers, autonomous agent swarms (Virtuals, Eliza, x402), and treasuries hiring agents.
+Built for agent developers, autonomous swarms, and treasuries hiring agents.
 
 ---
 
 ### Why did you decide to build this, and why build it now? *(Max 1,000 characters)*
-> **Character count:** 941 / 1,000
+> **Character count:** 988 / 1,000
 
-AI agents are shifting from chat interfaces to autonomous economic actors that negotiate, hire sub-agents, and purchase APIs. Yet the financial rails underpinning them are fundamentally broken:
+Payments let machines move money; Mitra gives autonomous economic actors the infrastructure to safely conduct commerce. 
 
-1. The Hot-Key Trap: Giving an LLM direct wallet custody is fatal—prompt injections, jailbreaks, or hallucinations drain treasuries instantly.
-2. The Walled-Garden Dilemma: Custodial agent platforms lock capital in fragmented, non-interoperable silos.
-3. The Payment Fallacy: Crypto rails treat commerce as isolated `transfer()` calls. Real commerce requires agreed deliverables, held escrows, proof of delivery, and failure recovery. When a multi-step agent pipeline fails halfway today, capital is permanently stranded.
+Today, agents face a fatal binary: either they hold raw hot keys—where a single prompt injection or hallucination drains the entire treasury—or they are trapped in custodial walled gardens that destroy composability. Furthermore, current crypto protocols treat commerce as isolated, one-off payments. When a multi-step agent workflow crashes halfway, capital is permanently stranded.
 
-Why now: With the explosion of MCP, autonomous swarms, and decentralized agent marketplaces, the missing layer is not another LLM or payment rail—it is the economic clearinghouse that makes autonomous machine commerce safe.
+Why now: As software becomes an economic participant, the fundamental unit of the machine economy shifts from atomic payments to multi-step commercial interactions. The lower layers are now assembling—MCP for tooling, ERC-8004 for agent identity, Virtuals/x402 for discovery. The missing layer is the financial coordination control plane that connects them all, enforces cryptographic capital boundaries, carries state across failures, and nets obligations before final settlement.
 
 ---
 
 ### What technologies are you using or integrating with to build your product?
-*Please include notable developer tools and AI tools as well.*
-
 * **Solana & Anchor:** Solana Program Derived Address (PDA) non-custodial vaults (`programs/mitra-vault`), Anchor framework, Rust, Ed25519 instruction verification, Solana Devnet deployment.
 * **EVM & Smart Contracts:** Solidity, Foundry, ERC-8183 decoupled escrow contracts (`MitraJobEscrow`, `MitraVaultV2`), Base Sepolia, Tempo Moderato, Anvil.
-* **Agent Standards & AI Protocols:** Model Context Protocol (MCP) server daemon (21 native tools over Streamable HTTP and SSE), Anthropic Claude, OpenAI, Google Gemini tool use, ElizaOS integration.
+* **Agent Standards & AI Protocols:** Model Context Protocol (MCP) server daemon (21 native tools over Streamable HTTP and SSE), Anthropic Claude, OpenAI, Google Gemini tool calling, ElizaOS integration.
 * **Agent Marketplaces & Identity:** ERC-8004 Agent Identity Registry, Virtuals Protocol ACP agent discovery (`acpx.virtuals.gg`), x402 payment facilitator integration.
 * **Backend, Storage & Tooling:** TypeScript, Node.js, Next.js 14, PostgreSQL 16 (strict relational constraints, row-level locks for concurrent headroom reservation), Viem, Wagmi, Arcium MPC for confidential policy execution.
 
 ---
 
 ### Which chains does your product use? *(Required)*
-Select the following checkboxes:
 * [x] **Solana**
 * [x] **Base**
 * [x] **Tempo**
