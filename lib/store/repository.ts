@@ -293,6 +293,16 @@ export interface EconomicRepository {
   listEventsSince(cursor: number, limit?: number): Promise<Array<{ seq: number; event: RunEvent }>>;
   /** Every mandate. Read-only here; mandates are written by the authority path. */
   listMandates(): Promise<Mandate[]>;
+  /**
+   * Persist a Mandate.
+   *
+   * Optional, and absent for the same reason `saveDeliverable` was: the authority tree
+   * Mandate → Authorization → Intent → Agreement is the one this repository's economy
+   * actually rests on, and until F99 there was no writer for its root. A mandate exists
+   * only as a seeded fixture, so no code path could create one and every flow had to assume
+   * one was already there.
+   */
+  saveMandate?(mandate: Mandate): Promise<void>;
 
   /**
    * Agents (backlog #5). Written only by `insertAgent`, behind a registration

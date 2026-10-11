@@ -389,13 +389,23 @@ export async function POST(req: Request) {
     },
   });
 
+  // Fields are destructured rather than spread. `CoupledResult` carries `sagasToPersist` —
+  // the internal write-set the caller had already applied — and `...opResult.value` published
+  // it as API surface. Harmless today, but it invites a client to couple to a write-set that
+  // is a persistence detail, and adding a field to the kernel would silently publish it.
+  //
+  // `deliverable` IS published: it is the work the provider signed and the evaluator judges
+  // (F94), so a client needs it.
+  const { space: spaceAfter, agreement: agreementAfter, saga, deliverable } = opResult.value;
   return NextResponse.json({
     data: {
-      ...opResult.value,
+      space: spaceAfter,
       agreement: {
-        ...opResult.value.agreement,
-        availableOps: availableAgreementOps(opResult.value.agreement.status),
+        ...agreementAfter,
+        availableOps: availableAgreementOps(agreementAfter.status),
       },
+      ...(saga ? { saga } : {}),
+      ...(deliverable ? { deliverable } : {}),
     },
     backend,
     evidenceLevel: "LOCAL_PASS",

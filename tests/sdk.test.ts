@@ -227,7 +227,11 @@ describe("the SDK surface carries intent verbs only", () => {
       "commerce.acceptDeliverable", "commerce.createAgreement", "commerce.createIntent", "commerce.fund",
       "commerce.getAgreement", "commerce.getIntent", "commerce.listAgreements", "commerce.rejectDeliverable",
       "commerce.startExecution", "commerce.submitDeliverable",
+      // Read-only authority. Deliberately NOT `mandates.create`: this client is the surface
+      // an external agent holds, and granting a Mandate is minting the limit every later
+      // authorization is checked against — not an intent verb. See F100.
       "inbox.list",
+      "mandates.get", "mandates.list",
       "recovery.getSaga", "recovery.listSagas", "recovery.refundEscrow",
     ]);
   });

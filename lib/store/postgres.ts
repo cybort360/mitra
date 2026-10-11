@@ -706,6 +706,53 @@ export class PostgresRepository implements EconomicRepository {
     const { rows } = await this.pool.query("SELECT * FROM mitra.mandates ORDER BY mandate_id");
     return rows.map(rowToMandate);
   }
+
+  /**
+   * F99: the writer `listMandates` was missing.
+   *
+   * Upsert on `mandate_id` with the version guarded, so re-registering a mandate cannot
+   * silently downgrade one that a newer version already wrote.
+   */
+  async saveMandate(mandate: Mandate): Promise<void> {
+    await this.pool.query(
+      // **Named columns only — `mitra.mandates` has no `document` column.** F79 again: the
+      // first version of this statement wrote one, copied from `listDeliverables`, and the
+      // in-memory backend accepted it happily because it stores objects. Only the Postgres
+      // suite caught it (`column "document" of relation "mandates" does not exist`), which is
+      // the strongest argument yet for running the matrix before calling a write verified.
+      `INSERT INTO mitra.mandates
+         (mandate_id, name, version, principal, agent_id, vault_id, asset, budget,
+          max_transaction, velocity_amount, velocity_window, allowed_counterparties,
+          allowed_capabilities, prohibited_capabilities, approved_chains, policy_version,
+          expires_at, nonce, status, confidential_policy)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+       ON CONFLICT (mandate_id) DO UPDATE SET
+         name = EXCLUDED.name, version = EXCLUDED.version,
+         budget = EXCLUDED.budget, max_transaction = EXCLUDED.max_transaction,
+         velocity_amount = EXCLUDED.velocity_amount,
+         velocity_window = EXCLUDED.velocity_window,
+         allowed_counterparties = EXCLUDED.allowed_counterparties,
+         allowed_capabilities = EXCLUDED.allowed_capabilities,
+         prohibited_capabilities = EXCLUDED.prohibited_capabilities,
+         approved_chains = EXCLUDED.approved_chains,
+         policy_version = EXCLUDED.policy_version,
+         expires_at = EXCLUDED.expires_at,
+         nonce = EXCLUDED.nonce,
+         status = EXCLUDED.status,
+         confidential_policy = EXCLUDED.confidential_policy`,
+      [
+        mandate.mandateId, mandate.name, mandate.version, mandate.principal, mandate.agentId,
+        mandate.vaultId, mandate.asset, mandate.budget, mandate.maxTransaction,
+        mandate.velocityLimit?.amount ?? null, mandate.velocityLimit?.windowMinutes ?? null,
+        // `TEXT[]`, not JSONB. Passing `JSON.stringify(...)` here yields the STRING `"[]"`,
+        // which Postgres rejects with `malformed array literal` — a second schema/encoder
+        // mismatch in the same function, and again only visible against a real database.
+        mandate.allowedCounterparties, mandate.allowedCapabilities,
+        mandate.prohibitedCapabilities, mandate.approvedChains,
+        mandate.policyVersion, mandate.expiresAt, mandate.nonce, mandate.status, mandate.confidentialPolicy,
+      ],
+    );
+  }
   // ── Sagas (F49) ─────────────────────────────────────────────────────────────
 
   /**

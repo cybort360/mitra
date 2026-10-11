@@ -33,8 +33,7 @@
  */
 
 import type { Agreement } from "@/lib/domain/types";
-import { escrowIdFor, type EscrowRail } from "@/lib/commerce/onchain-escrow";
-import { probeEscrowStatus, type EscrowTerms } from "@/lib/commerce/onchain-escrow";
+import { executeEscrowRefund, probeEscrowStatus, type EscrowTerms, type EscrowRail } from "@/lib/commerce/onchain-escrow";
 
 /** Statuses an agreement may still be pulled out of by a refund that already happened. */
 const REFUNDABLE_STATUSES = new Set<Agreement["status"]>(["FUNDED", "EXECUTING", "SUBMITTED", "OPEN"]);
@@ -99,4 +98,99 @@ export function intendedTermsFor(
   };
 }
 
-export { escrowIdFor };
+
+/**
+ * The KEEPER path: refund an escrow whose deadline has passed, then heal the agreement.
+ *
+ * ## Why this is separate from `reconcileEscrow`
+ *
+ * `reconcileEscrow` is a **read** that heals, and it is deliberately passive: it notices a
+ * refund that someone else performed. A keeper is the other case — it performs the refund
+ * itself. Conflating them would either make a read broadcast a transaction, or make the
+ * keeper's write depend on a call site that is supposed to be side-effect-free.
+ *
+ * ## What this adds over `executeEscrowRefund`
+ *
+ * The refund broadcast itself already exists and is unchanged. What the keeper adds is the
+ * two things around it that make a refund *safe to perform unattended*:
+ *
+ *  1. **The deadline check, before the call.** `executeEscrowRefund` will happily broadcast
+ *     into a contract that reverts. A keeper that runs every few seconds for the life of the
+ *     process needs the cheap check locally — but it is a *refusal*, never a substitute for
+ *     the contract's own `require(block.timestamp >= timeout)`. The chain remains the
+ *     authority; this just stops the keeper from trying.
+ *  2. **Verification after.** A confirmed transaction is not the same claim as "the capital
+ *     is back with the client" (F86). The keeper re-probes and, if the chain does not agree
+ *     that it is settled-and-refunded, returns a refusal that an operator can act on rather
+ *     than a success it believes.
+ *
+ * ## Why the keeper needs no authority
+ *
+ * `refundJob` / `refundEscrow` are permissionless after the deadline *by design* (PRD §15.5),
+ * so recovery does not depend on the client's cooperation. This therefore needs a funded EOA
+ * for gas and **no role in any agreement**: it can move capital out of an escrow, and only
+ * ever out. It never calls the release path.
+ */
+export interface KeeperReconcileInput {
+  agreement: Agreement;
+  rail: EscrowRail;
+  intended: EscrowTerms;
+  /** Unix seconds, from the chain where possible and from the clock otherwise. */
+  now: number;
+}
+
+export type KeeperOutcome =
+  | { action: "refunded"; txHash: string; agreement: Agreement }
+  | { action: "observed"; reason: string; agreement: Agreement }
+  /** Something is wrong and an operator should look. Never silent. */
+  | { action: "refused"; reason: string; detail?: string };
+
+export async function reconcileAgreementEscrow(input: KeeperReconcileInput): Promise<KeeperOutcome> {
+  const { agreement, rail, intended, now } = input;
+
+  let probe;
+  try {
+    probe = await probeEscrowStatus(agreement, rail, intended);
+  } catch (e) {
+    return { action: "refused", reason: "RPC_UNREACHABLE", detail: (e as Error).message };
+  }
+  if (probe.state === "MISMATCH") {
+    return { action: "refused", reason: probe.reason, detail: `an escrow exists for ${agreement.agreementId} with different terms` };
+  }
+  if (probe.state !== "FUNDED") {
+    // ABSENT, or already settled by someone else. Either way there is nothing for a keeper
+    // to do — and if it is already settled, `reconcileEscrow` will notice and heal.
+    return { action: "observed", reason: `escrow is ${probe.state}`, agreement };
+  }
+
+  // **Before the deadline, do nothing.** A keeper that refunds a live job destroys work in
+  // progress, and the only authority that matters here is the contract's — this is an early
+  // exit to avoid a pointless broadcast, not a substitute for `require(timestamp >= timeout)`.
+  if (BigInt(now) < intended.timeout) {
+    const remaining = Number(intended.timeout - BigInt(now));
+    return { action: "observed", reason: `not yet due (${remaining}s remaining)`, agreement };
+  }
+
+  const refund = await executeEscrowRefund(agreement, rail, intended);
+  if (!refund.ok) {
+    return { action: "refused", reason: refund.reason ?? "REFUND_FAILED", detail: refund.detail };
+  }
+  const txHash = refund.txHash ?? "unknown";
+
+  // Verify the effect, not just the signature — the F86 lesson, applied to the keeper.
+  const after = await probeEscrowStatus(agreement, rail, intended);
+  if (after.state !== "SETTLED" || after.outcome !== "refunded") {
+    return {
+      action: "refused",
+      reason: "REFUND_NOT_OBSERVED",
+      detail: `the chain reports ${after.state} after ${txHash}; the funds are not back and must be reconciled by hand`,
+    };
+  }
+
+  // Heal the agreement itself, so a reader is not told the capital is still escrowed.
+  return {
+    action: "refunded",
+    txHash,
+    agreement: { ...agreement, status: "REFUNDED", escrowReleased: true, version: agreement.version + 1 },
+  };
+}

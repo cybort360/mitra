@@ -14,6 +14,9 @@ import * as events from "@/app/api/v1/events/route";
 import * as inbox from "@/app/api/v1/inbox/route";
 import * as inboxByAgent from "@/app/api/v1/inbox/[agentId]/route";
 import * as intents from "@/app/api/v1/intents/route";
+// F100: the authority ROOT. The sandbox seeds a Mandate and reads it back through here, so
+// this route is load-bearing for the showcase rather than merely convenient.
+import * as mandates from "@/app/api/v1/mandates/route";
 import * as intentById from "@/app/api/v1/intents/[id]/route";
 import * as receipts from "@/app/api/v1/receipts/route";
 import * as sagas from "@/app/api/v1/sagas/route";
@@ -28,7 +31,7 @@ const ROUTES: Array<[string, RouteModule]> = [
   ["agents", agents], ["agreements", agreements], ["authorizations", authorizations],
   ["clearing", clearing], ["events", events], ["inbox", inbox], ["inbox/[agentId]", inboxByAgent],
   ["intents", intents], ["intents/[id]", intentById], ["receipts", receipts], ["sagas", sagas],
-  ["settlements", settlements], ["spaces", spaces], ["spaces/[id]", spaceById],
+  ["mandates", mandates], ["settlements", settlements], ["spaces", spaces], ["spaces/[id]", spaceById],
 ] as unknown as Array<[string, RouteModule]>;
 
 export const SANDBOX_BASE_URL = "http://mitra.sandbox";

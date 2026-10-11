@@ -75,7 +75,7 @@ describe("a full pause stops every value movement", () => {
     const r = (await json(await createReservation(req({ ...goodProposal, ttlMinutes: 60 })))).data;
 
     const state = await pause();
-    expect(state).toMatchObject({ paused: true, scopes: ["agreements", "execution", "funding"], version: 1 });
+    expect(state).toMatchObject({ paused: true, scopes: ["agreements", "authority", "execution", "funding"], version: 1 });
 
     await expectPaused(await postAgreement(req(draft("ag_cb_2"))), "agreements");
     await expectPaused(await postAgreement(req(await signedTransition("agent_buyer_07", "OPEN", { op: "fund", agreementId: "ag_cb" }))), "funding");
@@ -144,7 +144,8 @@ describe("what a pause leaves running", () => {
       text += new TextDecoder().decode(value);
     }
     ac.abort();
-    expect(text).toContain("Value movement paused (agreements, execution, funding)");
+    // `authority` (F100) is in the list because creating a Mandate now answers 503 under a pause.
+    expect(text).toContain("Value movement paused (agreements, authority, execution, funding)");
   });
 
   it("pause and resume are on the record, as system.warning and system.info for webhook subscribers", async () => {
@@ -195,7 +196,7 @@ describe("a scoped pause stops only its scope", () => {
  * shipping unpausable.
  */
 describe("no state-changing route is unclassified", () => {
-  const GUARDED = new Set(["agreements", "reservations", "reservations/execute", "settlements", "x402"]);
+  const GUARDED = new Set(["agreements", "mandates", "reservations", "reservations/execute", "settlements", "x402"]);
   const EXEMPT: Record<string, string> = {
     "agents": "registration moves no value",
     "authorizations": "an ALLOW is not permission to move value",
