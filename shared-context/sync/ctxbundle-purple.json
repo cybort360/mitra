@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 133,
+  "highSeq": 134,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2796,6 +2796,27 @@
         "d1bce94f2b11c50b5cc7144196ad99566fe6a753699b17bc746e7d2a7d7170ca"
       ],
       "hash": "cd1a51d15334a231d40f847100629ddd476fd258d0d9735b839541fdc997506c"
+    },
+    {
+      "entryId": "ctx_655686d0d35e7ad8",
+      "seq": 134,
+      "kind": "finding",
+      "title": "The lead's landing-page narrative is mostly backed by code; its metrics and \"cross-chain\" are not",
+      "body": "Checked docs/MITRA_NARRATIVE_FOR_PURPLE.md against the code on 2026-10-11 (feat/purple-pp, after merging main).\n\nHOLDS (can go on the page, worded as below)\n- \"Change one detail and it is refused on-chain\": true on the vault path. MitraVault.spendAuthorized (contracts/src/MitraVault.sol:182-198) reverts unless the policy engine's signature over the permit (recipient, amount, token, deadline, mandate version, action hash) is valid, and refuses reuse. EOA / ERC-4337 / x402 settlement modes are guarded off-chain only, so not \"every single transaction\".\n- ERC-8183 escrow on Base: true (contracts/src/ERC8183/MitraJobEscrow.sol, live on Base Sepolia).\n- Signed receipts: true but EIP-191 (lib/settlement/receipt-signer.ts), and only when MITRA_RECEIPT_SIGNER_KEY_FILE is set. Not \"EIP-712 and Ed25519\".\n- Keeper daemon: built and tested (scripts/keeper-daemon.ts, F103); no live run recorded, so TESTED.\n- A failed single job refunds on-chain (rejectDeliverable -> refund since LP-6).\n\nDOES NOT HOLD\n- Metrics (40-70% liquidity, 90%+ gas, 100% security, zero credit risk, zero stranded capital) appear nowhere in the repo except the narrative. Off the page unless measured.\n- \"Cross-chain execution\": LP-7 is TESTED with a self-announcing simulated relayer; no live bridge.\n- \"Step 3 of 5 fails, steps 1-2 refunded\": no multi-agreement unwind found. Unverified, not disproven.\n- Everything live is on test networks (Base Sepolia, Tempo Moderato, Solana devnet).\n\nWHY I GOT FOUR OF THESE WRONG FIRST: forge/ lags the code on them. Logged as F104 in forge/FAILURES.md (five stale lines + a duplicate F97 number).\n\nPAGE DIRECTION (purple, pending lead): keep the plain hero for newcomers; use \"The clearinghouse for agentic commerce\" as the eyebrow and \"Clear first. Move only what remains.\" as the netting headline; the boundary vocabulary (ALLOW != PAYMENT etc.) as mono tags.",
+      "status": "active",
+      "scope": "website",
+      "tags": [
+        "F104",
+        "claims",
+        "landing-page",
+        "narrative"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-11T08:04:18.948Z",
+      "parents": [
+        "cd1a51d15334a231d40f847100629ddd476fd258d0d9735b839541fdc997506c"
+      ],
+      "hash": "614ca1449edfcaf1f0fa89d0704eba7b8ffeac221e27d4ee5b0fb2f69ac6a2d8"
     }
   ],
   "actors": [
@@ -2833,5 +2854,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "cd1a51d15334a231d40f847100629ddd476fd258d0d9735b839541fdc997506c"
+  "tipHash": "614ca1449edfcaf1f0fa89d0704eba7b8ffeac221e27d4ee5b0fb2f69ac6a2d8"
 }
