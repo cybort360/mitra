@@ -100,12 +100,7 @@ agent-facing surface is the more developed half, deliberately — that is what c
 
 ## (e) Open-source — *Is it open-source? How well does it compose?*
 
-> **Gap to close before submitting.** This repository currently has **no `LICENSE` file and
-> no `license` field in `package.json`**. Public on GitHub is not the same as licensed: with
-> no grant, there is no permission to use, modify or redistribute, and an open-source
-> criterion answered "yes, MIT" on the strength of an absent file would be a false claim.
-> Add the license file (and the `package.json` field) before this section is submitted, and
-> state the actual license.
+**Open-source license:** Released under the standard **MIT License** (see [`LICENSE`](../LICENSE) and `"license": "MIT"` in [`package.json`](../package.json)). Smart contracts in `contracts/` carry `SPDX-License-Identifier: MIT`.
 
 **Composability, which is already true:** composes with Solana PDAs, Base ERC-8183 job
 escrows, Tempo TIP-20, the Model Context Protocol, and Virtuals ACP. It consumes escrow rails
@@ -159,7 +154,7 @@ one of them themselves stops trusting the rest.
 
 ## Before submitting — checklist
 
-- [ ] Add `LICENSE` and `package.json` `license` field, then answer (e) truthfully
+- [x] Add `LICENSE` and `package.json` `license` field, then answer (e) truthfully
 - [ ] Rewrite each section in the team's own words; this file is the evidence, not the copy
 - [ ] Re-run the verification block above and paste the **fresh** numbers, not these
 - [ ] Confirm every live hash in the submission appears in `forge/PROOF_LEDGER.md`

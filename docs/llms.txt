@@ -1,0 +1,52 @@
+# Mitra: The Financial Coordination Layer & Clearinghouse for Agentic Commerce
+
+> Mitra is institutional market infrastructure for autonomous AI agents. It decouples trade intent from capital settlement: human principals engrave bounded mandates, off-chain policy engines evaluate intents with Arcium MPC, and an independent execution guard re-derives whether instructions may move capital.
+
+## Core Architectural Invariants
+
+- **`ALLOW != DISBURSEMENT`**: A policy approval verdict from `mitra_request_authorization` moves zero capital and reserves zero tokens. When funds disburse, the on-chain execution guard re-derives whether the exact instruction may move capital.
+- **`MANDATE != RUNTIME FREEDOM`**: Mandates are persistent spending ceilings engraved by human principals. Agents negotiate runtime intents within these bounds but cannot alter their own ceilings.
+- **`ENGRAVING != AUTHORIZATION`**: An engraving is a persistent budget ceiling whose headroom decrements monotonically. An authorization is a single-use token consumed atomically upon settlement.
+- **`NETTING != SETTLEMENT`**: Multilateral cycle netting cancels offsetting obligations ($A \to B \to C \to A$) within a clearing epoch, moving only the residual net debt across blockchain rails.
+- **Tri-Chain Peer Parity**: Solana Anchor, Base Sepolia (ERC-8183), and Tempo Moderato (TIP-20) are equal first-class peers.
+
+---
+
+## Documentation Index
+
+### Section 1: Getting Started & Architectural Overview
+- [What is Mitra?](portal/01-what-is-mitra.md): The core thesis, the custody trap, boundary vocabulary, and market comparison.
+- [5-Minute Quickstart](portal/02-quickstart.md): Step-by-step TypeScript (`@mitra/sdk`) and Python (`httpx`) code recipes.
+- [The Multi-Door Architecture](portal/03-multi-door-architecture.md): Dedicated entry points for Agent Developers, Treasury Operators, and Protocol Integrators.
+
+### Section 2: Authority Architecture & Privacy
+- [Engravings & Mandates](portal/04-engravings-and-mandates.md): Persistent ceilings vs single-use authorizations, nonce isolation, and ADR-0009.
+- [Confidential Policy Evaluation with Arcium MPC](portal/05-arcium-mpc-confidential-policy.md): Privacy-preserving policy evaluation over encrypted shares using Arcium MXE.
+- [The Execution Guard Invariant](portal/06-execution-guard-and-allow-invariant.md): Independent on-chain re-derivation, state transitions, and threat models.
+
+### Section 3: Commerce, Escrows & Atomic Recovery
+- [Bilateral Agreements & DvP Escrow](portal/07-bilateral-agreements-and-escrow.md): Delivery-versus-Payment contracts with machine-verifiable acceptance criteria.
+- [Distributed Sagas & Atomic Compensation](portal/08-distributed-sagas-atomic-recovery.md): Two-phase recovery, durable persistence, and preventing stranded capital.
+- [The Autonomous Keeper Daemon](portal/09-autonomous-keeper-daemon.md): Automated escrow refund sweeps for overdue tasks.
+
+### Section 4: Clearinghouse & Multilateral Netting
+- [Multilateral Debt Netting](portal/10-multilateral-debt-netting.md): Mathematical cycle canceling and liquidity compression algorithms ($210 gross $\to$ $60 net).
+- [Epoch Clearing Algorithms](portal/11-epoch-clearing-algorithms.md): Time-batched clearing, multi-currency matrix isolation, and settlement receipts.
+
+### Section 5: The Tri-Chain Substrate Plane
+- [Solana Substrate](portal/12-solana-substrate.md): Anchor PDAs, program invariants, and Devnet verification.
+- [Base Substrate](portal/13-base-substrate.md): EVM ERC-8183 job escrows and EIP-712 typed-data authorization.
+- [Tempo Substrate](portal/14-tempo-substrate.md): TIP-20 micro-payment rails for high-frequency token streaming.
+
+### Section 6: Agent Integration & Tooling
+- [Model Context Protocol Gateway](portal/15-mcp-gateway.md): 22 standardized MCP tools served over stdio and SSE (`PORT=3006`).
+- [Cognitive Skills & Developer Tooling](portal/16-agent-skills-and-tooling.md): Operational playbooks (`skills/`), `npm run doctor`, and the autonomous agent runner.
+
+---
+
+## Machine-Accessible Interfaces
+
+- **MCP Gateway:** Streamable HTTP / SSE on `http://localhost:3006/sse` or `bin/mitra-mcp.mjs` over stdio.
+- **REST API:** `http://localhost:3005/api/v1/`
+- **TypeScript SDK:** `npm install @mitra/sdk` (exports `.` and `./sdk` from `package.json`)
+- **System Diagnostics:** `npm run doctor`

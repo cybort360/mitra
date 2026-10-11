@@ -30,6 +30,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertNoCapitalVerb, mcpTools, type McpToolName } from "./surface";
+import { registerPrompts } from "./prompts";
 
 export interface ApiRequest {
   method: "GET" | "POST";
@@ -337,6 +338,7 @@ export function createMitraMcpServer(api: MitraApi): McpServer {
       };
     });
   }
+  registerPrompts(server);
   return server;
 }
 

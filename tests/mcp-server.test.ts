@@ -91,6 +91,23 @@ describe("what the MCP server exposes", () => {
     for (const verb of prohibitedDirectTools) expect(names).not.toContain(verb);
   });
 
+  it("registers and lists the 5 cognitive role skills as MCP prompts", async () => {
+    const client = await connect();
+    const prompts = (await client.listPrompts()).prompts;
+    const names = prompts.map((p) => p.name).sort();
+    expect(names).toEqual([
+      "mitra-buyer",
+      "mitra-core",
+      "mitra-evaluator",
+      "mitra-provider",
+      "mitra-treasury",
+    ]);
+    const corePrompt = await client.getPrompt({ name: "mitra-core" });
+    expect(corePrompt.messages.length).toBeGreaterThan(0);
+    expect(corePrompt.messages[0].content.type).toBe("text");
+    expect((corePrompt.messages[0].content as { text: string }).text).toContain("Mitra core");
+  });
+
   it("every surface tool has a status, and every non-served one a reason the agent is told", async () => {
     for (const name of mcpTools) expect(MCP_TOOL_STATUS[name]).toBeDefined();
     const client = await connect();

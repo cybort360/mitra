@@ -14,3 +14,4 @@
 export { createMitraMcpServer, httpApi, servedToolNames, type MitraApi } from "./server";
 export { startMcpHttpServer, isLoopbackHost, type McpHttpOptions, type McpHttpServer } from "./http";
 export { mcpTools, prohibitedDirectTools, A2A_TRANSITIONS, type McpToolName } from "./surface";
+export { MCP_SKILLS, registerPrompts, type McpSkillPrompt, type McpPromptName } from "./prompts";
