@@ -52,22 +52,22 @@ Built for agent developers, autonomous swarms, and treasuries hiring agents.
 ---
 
 ### Why did you decide to build this, and why build it now? *(Max 1,000 characters)*
-> **Character count:** 988 / 1,000
+> **Character count:** 992 / 1,000
 
-Payments let machines move money; Mitra gives autonomous economic actors the infrastructure to safely conduct commerce. 
+We built Mitra to give autonomous agents the infrastructure required for real commerce. While payment rails transfer tokens, commerce requires coordinating agreements, surviving failures, and clearing obligations. When agent workflows crash, funds get stranded because payments have no recovery state; and without bounded authority, agents cannot safely commit capital.
 
-Today, agents face a fatal binary: either they hold raw hot keys—where a single prompt injection or hallucination drains the entire treasury—or they are trapped in custodial walled gardens that destroy composability. Furthermore, current crypto protocols treat commerce as isolated, one-off payments. When a multi-step agent workflow crashes halfway, capital is permanently stranded.
+Mitra provides this missing clearinghouse layer. Through Engravings—versioned mandates bounding spend—we cryptographically separate spend reasoning from spend authority. When multi-step pipelines fail, Sagas execute automated compensations so funds are never lost. And our engine nets reciprocal debts across counterparties, settling only net balances on-chain.
 
-Why now: As software becomes an economic participant, the fundamental unit of the machine economy shifts from atomic payments to multi-step commercial interactions. The lower layers are now assembling—MCP for tooling, ERC-8004 for agent identity, Virtuals/x402 for discovery. The missing layer is the financial coordination control plane that connects them all, enforces cryptographic capital boundaries, carries state across failures, and nets obligations before final settlement.
+We built this now because agent primitives have converged: MCP for tools, ERC-8004 for identity, Virtuals ACP for discovery, and x402 for micropayments. Mitra is the financial control plane coordinating them into safe commerce across Solana, Base, and Tempo.
 
 ---
 
-### What technologies are you using or integrating with to build your product?
-* **Solana & Anchor:** Solana Program Derived Address (PDA) non-custodial vaults (`programs/mitra-vault`), Anchor framework, Rust, Ed25519 instruction verification, Solana Devnet deployment.
-* **EVM & Smart Contracts:** Solidity, Foundry, ERC-8183 decoupled escrow contracts (`MitraJobEscrow`, `MitraVaultV2`), Base Sepolia, Tempo Moderato, Anvil.
-* **Agent Standards & AI Protocols:** Model Context Protocol (MCP) server daemon (21 native tools over Streamable HTTP and SSE), Anthropic Claude, OpenAI, Google Gemini tool calling, ElizaOS integration.
-* **Agent Marketplaces & Identity:** ERC-8004 Agent Identity Registry, Virtuals Protocol ACP agent discovery (`acpx.virtuals.gg`), x402 payment facilitator integration.
-* **Backend, Storage & Tooling:** TypeScript, Node.js, Next.js 14, PostgreSQL 16 (strict relational constraints, row-level locks for concurrent headroom reservation), Viem, Wagmi, Arcium MPC for confidential policy execution.
+### What technologies are you using or integrating with to build your product? *(Please include notable developer tools and AI tools as well)*
+> **Character count:** 450 / 450
+
+Chains & Vaults: Solana & Tempo dual high-velocity settlement (Anchor PDA vaults, Ed25519 guards, TIP-20 precompiles), Base (ERC-8183 escrows, ERC-4337).
+AI Tools & Protocols: Model Context Protocol (21 tools via HTTP/SSE), Virtuals ACP, x402 micropayments, ERC-8004 identity, ElizaOS, Claude, & Gemini.
+Developer & Testing Tools: Foundry, Vitest, PostgreSQL 16 row locks, Parallel CLI (deep intelligence), and Understand-Anything (knowledge graphs).
 
 ---
 
@@ -81,11 +81,11 @@ Why now: As software becomes an economic participant, the fundamental unit of th
 ---
 
 ### How does your product use these chains? *(Max 500 characters)*
-> **Character count:** 492 / 500
+> **Character count:** 495 / 500
 
-Solana serves as our primary high-performance custody and settlement layer. Our Anchor program (programs/mitra-vault) uses Program Derived Addresses (PDAs) to enforce non-custodial capital boundaries, velocity limits, and cryptographic execution guards with sub-second finality.
+Solana and Tempo operate as dual high-velocity custody and settlement rails: Solana executes sub-second Anchor PDA vaults (mitra-vault) with Ed25519 execution guards; Tempo provides payment-native settlement using TIP-20 precompiles and pathUSD fees.
 
-Base, Tempo, and EVM chains run our ERC-8183 decoupled escrow contracts (MitraJobEscrow) and cross-chain settlement rails, connecting external agent marketplaces (Virtuals ACP, x402) into a unified clearinghouse.
+Base and EVM chains run our ERC-8183 decoupled job escrows (MitraJobEscrow), MitraVault v2, and MitraClearing contracts with ERC-4337 account abstraction, bridging agent discovery (Virtuals ACP) and micropayments (x402) into our clearinghouse.
 
 ---
 
@@ -119,11 +119,11 @@ All architecture, smart contracts (Solana Anchor and EVM), SDK, MCP server daemo
 ---
 
 ### Is there anything else judges should know about your project that isn't captured above? *(Max 500 characters)*
-> **Character count:** 479 / 500
+> **Character count:** 445 / 500
 
-Mitra is built under strict BUILD_FOUNDRY engineering discipline with zero mock success paths:
-- 147 Rust Anchor unit & integration tests passing on Solana
-- 63 Foundry Solidity tests passing
+Mitra is built under strict BUILD_FOUNDRY discipline with zero mock success paths:
+- 147 Rust Anchor unit & integration tests on Solana
+- 63 Foundry Solidity tests on EVM
 - 1,398 TypeScript unit and integration tests passing on PostgreSQL 16
-- Live deployments on Solana Devnet & Base Sepolia
-- Complete standing daemon architecture: continuous escrow sweep keeper, streaming HTTP/SSE MCP gateway, and autonomous agent runners (Buyer ⇄ Provider ⇄ Evaluator).
+- Live deployments on Solana Devnet, Base Sepolia & Tempo Moderato
+- Complete standing daemons: continuous escrow sweep keeper, streaming HTTP/SSE MCP gateway, and autonomous agent runners (Buyer ⇄ Provider ⇄ Evaluator).
