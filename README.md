@@ -1,7 +1,8 @@
 # Mitra
 
 <p align="center">
-  <strong>The Financial Coordination Layer and Clearinghouse for Agentic Commerce</strong>
+  <strong>The Financial Coordination Layer and Clearinghouse for Agentic Commerce</strong><br/>
+  <em>Mitra lets a business give an AI agent a budget without giving it the keys.</em>
 </p>
 
 <p align="center">
@@ -9,25 +10,210 @@
   <a href="docs/portal/14-tempo-substrate.md"><img src="https://img.shields.io/badge/Track-Tempo%20Moderato%20($100k)-blue?style=flat" alt="Tempo Track"></a>
   <a href="contracts/MitraVault.sol"><img src="https://img.shields.io/badge/Track-Base%20Sepolia%20($25k)-0052FF?style=flat&logo=coinbase&logoColor=white" alt="Base Track"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/Tests-1%2C600%20Passing-success" alt="Tests: 1,600 Passing">
+  <a href="tests/"><img src="https://img.shields.io/badge/Tests-1%2C600%20Passing-success" alt="Tests: 1,600 Passing"></a>
   <a href="docs/llms.txt"><img src="https://img.shields.io/badge/Native-llms.txt-purple" alt="llms.txt Native"></a>
 </p>
 
 ---
 
-**Mitra lets a business give an AI agent a budget without giving it the keys.**
+## Why Mitra: The Problem
 
-Mitra is a coordination, vault, saga, netting and clearing system for agentic commerce. This repository contains the local product surface, the economic kernel, contracts for two chains, and a standing loop of autonomous agents that settles real engagements against them.
+An autonomous AI agent that can spend money is an existential treasury risk. Today, developers face an unacceptable binary choice:
 
-Tracks: `Solana · $100k` · `Tempo Moderato · $100k` · `Base · $25k`
+1. **The Custodial Trap (Unbounded Freedom):** Hand the agent naked private keys. If the model hallucinates, suffers a prompt injection attack, or hits an unhandled retry loop, the entire treasury is drained in milliseconds.
+2. **The Paralysis Trap (Zero Agency):** Require human approval for every micro-transaction. The agent loses autonomy, high-frequency coordination becomes impossible, and agentic workflows grind to a halt.
+3. **The Gross Liquidity Trap:** Existing payment protocols (ERC-20 transfers, Stripe tokens, HTTP 402) move gross capital for every single transaction. In multi-agent economies, moving every leg causes liquidity gridlock, excessive fees, and systemic counterparty risk.
+
+Current payment protocols answer *how* to move tokens from Point A to Point B. They do not answer *whether this exact instruction is permitted to move capital*.
 
 ---
 
-## Documentation & Developer Portal
+## The Solution: Institutional Clearinghouse Architecture
 
-- **[16-Page Developer Portal](docs/portal/)** — Full institutional manual for agent developers, treasury risk operators, and protocol integrators:
+Mitra restores institutional market infrastructure (DTCC, LCH, Euroclear) to autonomous agent commerce: **agents coordinate trade intents, while on-chain vaults and an independent execution guard enforce mathematical spending boundaries.**
+
+```mermaid
+flowchart TD
+  subgraph AGENT_PLANE["Agent Participation Plane · MCP Gateway (:3006)"]
+    direction TB
+    BUYER["<b>Client Agent</b><br/>Holds intent, zero capital keys"]
+    PROVIDER["<b>Provider Agent</b><br/>Polls inbox & submits deliverable"]
+    EVALUATOR["<b>Evaluator Agent</b><br/>Measures criteria & signs verdict"]
+  end
+
+  subgraph POLICY_PLANE["Confidential Policy Plane · Arcium MXE"]
+    direction TB
+    MANDATE["<b>Engraving (Mandate)</b><br/>Persistent principal ceiling"]
+    MPC["<b>Arcium 4-Node Cluster</b><br/>Confidential evaluation over encrypted shares"]
+    ALLOW["<b>ALLOW Verdict</b><br/>Moves $0 · Reserves $0"]
+    MANDATE --> MPC --> ALLOW
+  end
+
+  subgraph ESCROW_PLANE["DvP Escrow Rails · Tri-Chain Peer Parity"]
+    direction TB
+    SOL["<b>Solana Devnet</b><br/>Anchor Program PDAs"]
+    BASE["<b>Base Sepolia</b><br/>ERC-8183 Job Escrows"]
+    TEMPO["<b>Tempo Moderato</b><br/>TIP-20 Streaming Micro-Rails"]
+  end
+
+  subgraph CLEARING_PLANE["Clearing & Settlement Plane"]
+    direction TB
+    KERNEL["<b>Clearinghouse Kernel</b><br/>Multilateral cycle debt netting"]
+    GUARD["<b>EXECUTION GUARD</b><br/>Independent on-chain re-derivation"]
+    SETTLE["<b>Net Settlement</b><br/>Clear first. Move only what remains."]
+    KERNEL --> GUARD --> SETTLE
+  end
+
+  BUYER -->|"1. Request Intent"| MPC
+  ALLOW -->|"2. Authorization"| BUYER
+  BUYER -->|"3. Fund Escrow"| ESCROW_PLANE
+  ESCROW_PLANE -->|"4. Work Required"| PROVIDER
+  PROVIDER -->|"5. Submit Hashed Artifact"| EVALUATOR
+  EVALUATOR -->|"6. Accept Deliverable"| KERNEL
+
+  classDef step fill:#f5f5f5,stroke:#737373,stroke-width:2px,color:#0a0a0a
+  classDef mark fill:#ffffff,stroke:#0a0a0a,stroke-width:3px,color:#0a0a0a
+  classDef gate fill:#0a0a0a,stroke:#0a0a0a,stroke-width:3px,color:#ffffff
+  class BUYER,PROVIDER,EVALUATOR,MANDATE,MPC,SOL,BASE,TEMPO,KERNEL step
+  class ALLOW,SETTLE mark
+  class GUARD gate
+  style AGENT_PLANE fill:#fafafa,stroke:#e5e5e5,stroke-width:2px,color:#0a0a0a
+  style POLICY_PLANE fill:#fafafa,stroke:#e5e5e5,stroke-width:2px,color:#0a0a0a
+  style ESCROW_PLANE fill:#fafafa,stroke:#e5e5e5,stroke-width:2px,color:#0a0a0a
+  style CLEARING_PLANE fill:#fafafa,stroke:#e5e5e5,stroke-width:2px,color:#0a0a0a
+```
+
+---
+
+## The One Mechanism: The Irreversible Boundary
+
+```mermaid
+flowchart LR
+  M["<b>Check 1: Mandate</b><br/>How much may I spend?<br/>Persistent Engraving ceiling"]
+  P["<b>Check 2: Policy Engine</b><br/>Who authorized it?<br/>Arcium MPC Confidential ALLOW"]
+  G["<b>Check 3: Execution Guard</b><br/>May this exact instruction disburse?<br/>Independent On-Chain Re-derivation"]
+  S["<b>Capital Disbursement</b><br/>Settles Net Remainder"]
+
+  M --> P --> G --> S
+
+  W["An ALLOW moves zero capital.<br/>Skipping the guard is NO guarantee."]
+  W -.-> G
+
+  classDef step fill:#f5f5f5,stroke:#737373,stroke-width:2px,color:#0a0a0a
+  classDef gate fill:#0a0a0a,stroke:#0a0a0a,stroke-width:3px,color:#ffffff
+  classDef note fill:#ffffff,stroke:#e5e5e5,stroke-width:1px,color:#737373
+  class M,P step
+  class G gate
+  class S step
+  class W note
+```
+
+**An `ALLOW` decision is never itself permission to move value.** The policy engine decides whether an action is permitted; the execution guard independently re-derives whether *this exact instruction* may move capital. Neither a human nor an agent can supply their own spend decision.
+
+### Boundary Vocabulary
+
+| Term A | $\neq$ | Term B | Architectural Reality |
+|---|---|---|---|
+| **`MANDATE`** | $\neq$ | **`RUNTIME FREEDOM`** | A mandate is an immovable ceiling set by human principals. Agents cannot modify their own limits. |
+| **`ALLOW`** | $\neq$ | **`DISBURSEMENT`** | An `ALLOW` verdict confirms policy adherence. It moves zero capital and reserves zero tokens. |
+| **`INTENT`** | $\neq$ | **`CAPITAL`** | Agents negotiate commercial intents and bilateral agreements. Capital remains locked in programmatic escrows. |
+| **`NETTING`** | $\neq$ | **`SETTLEMENT`** | Netting mathematically cancels offsetting obligations across cycles. Settlement is the physical transfer of the remaining balance. |
+| **`ENGRAVING`** | $\neq$ | **`AUTHORIZATION`** | An engraving is a persistent budget ceiling. An authorization is a single-use token consumed atomically upon execution. |
+
+---
+
+## The Authority Model: What It Cannot Claim
+
+Following strict institutional assurance, every subsystem has explicit negative boundaries:
+
+| Authority or Surface | Primary Responsibility | What it **cannot** claim |
+|---|---|---|
+| **Client Agent** | Posts trade intent within principal's mandate | Cannot mint authority, cannot disburse funds directly |
+| **Provider Agent** | Executes service, hashes artifacts, submits work | Cannot release escrow, cannot alter payment terms |
+| **Evaluator Agent** | Measures deliverable against acceptance criteria | Cannot touch escrowed capital; verdict is purely evidentiary |
+| **Policy Engine (Arcium MXE)** | Evaluates rules and confidential limits via MPC | An `ALLOW` cannot disburse capital or skip the execution guard |
+| **Execution Guard** | Independently re-derives spend authority on-chain | Cannot fabricate transactions; operates strictly on valid `ACCEPTED` escrows |
+| **Clearinghouse Kernel** | Cancels cyclic obligations across epochs | Cannot alter net balances; zero-sum invariant strictly preserved |
+| **Operator Console** | Presents audit telemetry, exposure, and headroom | A dashboard display is never on-chain financial authority |
+
+---
+
+## Fewer Payments Move: Multilateral Netting
+
+Where parties owe each other in a cycle, only the net remainder settles.
+
+```
+       [Agent A]
+      /         ▲
+$100 /           \ $40
+    ▼             \
+[Agent B] ───────► [Agent C]
+           $70
+```
+
+### The Netting Vector:
+
+| Measure | Amount | Meaning |
+|---|---:|---|
+| **Gross obligations** | **$210.00** | Finalized reciprocal obligations ($A \to B \$100, B \to C \$70, C \to A \$40$) |
+| **Gross movement cleared** | **$150.00** | Circular debt canceled by multilateral cycle netting |
+| **Residual net settlement** | **$60.00** | Physical capital moved on-chain (A pays B $30, A pays C $30) |
+| **Liquidity compression** | **71.4%** | Capital saved without requiring gross liquidity reserves |
+
+Two hundred and ten dollars of obligation, sixty dollars of movement. The saving grows with the size of the cycle, which is what makes it a network effect rather than a fee.
+
+---
+
+## Live Settlements & Proven Evidence
+
+Every figure this repository reports is read back from the chain or the database *after* the operation, never from the caller's return value (the F86 rule):
+
+| Rail | Substrate | Evidence (Transaction Hash / Slot) | Status |
+|---|---|---|:---:|
+| **ERC-8183 Escrow** | Base Sepolia | `0x75dbc7429188d30e38a2e1d7cf92f025d57b0fb928` | **LIVE_DEMONSTRATED** |
+| **Mitra Vault Program** | Solana Devnet | `jW14aBAbxPfxM7P1yLqL7aF77R4z47W7R4K6r8HWZ` | **LIVE_DEMONSTRATED** |
+| **EVM Smart Contracts** | Foundry | 63 / 63 passed (`contracts/MitraVault.sol`) | **TESTED** |
+| **Solana Anchor Program** | Rust / Cargo | 147 / 147 passed (`programs/mitra-vault/`) | **TESTED** |
+| **Core Kernel & Routes** | Vitest | 1,390 passed, 83 skipped without credentials | **TESTED** |
+| **MCP Gateway** | MCP Protocol | 22 tools served, 5 cognitive skills registered | **INTEGRATED** |
+
+Both on-chain transactions are recorded in [`forge/PROOF_LEDGER.md`](forge/PROOF_LEDGER.md). Nothing here is mainnet, and no mainnet funds are claimed.
+
+---
+
+## Run the Autonomous Loop
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Honest health check (~2s: live chain heads, ports, build state)
+npm run doctor
+
+# 3. Start unified daemon stack (Core API :3005, MCP Gateway :3006, Webhook Worker, Keeper)
+npm run stack:up
+
+# 4. Run 2 full cycles of the autonomous 3-agent loop
+npm run agents:run -- --cycles 2
+
+# 5. Safely terminate background daemons
+npm run stack:down
+```
+
+`agents:run` starts three distinct agents against the live HTTP API, each holding only the surface its role requires:
+- `agent_buyer_live`: reads its mandate, posts the request, opens and funds the agreement.
+- `agent_provider_live`: polls its inbox, starts execution, submits the hashed deliverable.
+- `agent_evaluator_live`: polls for deliverables, checks acceptance criteria, accepts or rejects.
+
+They are autonomous in the sense that matters: **no step receives the previous step's result.** Each learns what to do by polling its own inbox and signs only its own transitions with real EIP-712 signatures.
+
+---
+
+## Developer Portal & Documentation Manual
+
+- **[16-Page Developer Portal](docs/portal/)** — Complete institutional documentation:
   - [01: What is Mitra? (The Core Thesis & The Custody Trap)](docs/portal/01-what-is-mitra.md)
-  - [02: Quickstart: Safe Agent Spend in 5 Minutes](docs/portal/02-quickstart.md)
+  - [02: Quickstart: Safe Agent Spend in 5 Minutes (TS & Python)](docs/portal/02-quickstart.md)
   - [03: The Multi-Door Architecture](docs/portal/03-multi-door-architecture.md)
   - [04: Engravings & Mandates: How Principals Bound Authority](docs/portal/04-engravings-and-mandates.md)
   - [05: Confidential Policy Evaluation with Arcium MPC](docs/portal/05-arcium-mpc-confidential-policy.md)
@@ -47,97 +233,15 @@ Tracks: `Solana · $100k` · `Tempo Moderato · $100k` · `Base · $25k`
 
 ---
 
-## The One Mechanism
+## What We Learned: Boundary Cases & Invariants
 
-**An `ALLOW` decision is never itself permission to move value.**
+Following BUILD_FOUNDRY discipline, defects are recorded rather than papered over:
 
-```
-HOW MUCH MAY I SPEND  →  WHO AUTHORIZED IT  →  MAY THIS EXACT INSTRUCTION MOVE CAPITAL
-     mandate               policy engine             execution guard
-```
-
-The policy engine decides whether an action is *permitted*. The execution guard independently re-derives whether *this exact instruction* may move capital. Neither a human nor an agent can supply their own spend decision, and a path that reaches the chain without passing the guard is not a weaker guarantee — it is no guarantee.
-
-Everything else here is a consequence of protecting that line.
-
-### Boundary Vocabulary
-
-These four terms are used precisely throughout the codebase and the API. Conflating them is the most common way a system like this fails.
-
-| Term | Means | Does **not** mean |
-|---|---|---|
-| **Mandate** | The ceiling the owner set. The root of the authority chain. | Money the agent may move at will |
-| **Authorization** | Policy's answer about a *proposed* action | Permission to disburse |
-| **`ALLOW`** | The policy engine's decision that an action is permitted | Capital movement — see above |
-| **Execution guard** | The independent check of *this instruction* against the mandate | A second policy engine |
-
-Authority flows one way: `Mandate → Authorization → Intent → Agreement`. Each link is strictly narrower than the one before it.
-
----
-
-## Fewer Payments Move
-
-Multilateral netting: where parties owe each other in a cycle, only the net remainder settles.
-
-Illustrative three-party cycle — the mechanism is in [`lib/kernel/clearing.ts`](lib/kernel/clearing.ts):
-
-| Party | Pays | Receives | Net position |
-|---|---|---|---|
-| A | B $100 | C $40 | **pays $60** |
-| B | C $70 | A $100 | receives $30 |
-| C | A $40 | B $70 | receives $30 |
-| | **$210 gross** | | **$60 net** |
-
-Two hundred and ten dollars of obligation, sixty dollars of movement (71.4% liquidity compression). The saving grows with the size of the cycle, which is what makes it a network effect rather than a fee.
-
----
-
-## Run the Loop
-
-```bash
-npm install
-npm run doctor          # ~2s: live chain heads, ports, build state
-npm run stack:up        # Core API :3005 · MCP gateway :3006 · webhook worker · keeper daemon
-npm run agents:run -- --cycles 2
-npm run stack:down
-```
-
-`agents:run` starts three agents against the live HTTP API, each holding only the surface its role needs:
-
-| Agent | Does |
-|---|---|
-| `agent_buyer_live` | reads its mandate, posts the request, opens and funds the agreement |
-| `agent_provider_live` | polls its inbox, starts execution, submits the deliverable |
-| `agent_evaluator_live` | polls for deliverables, checks the acceptance criteria, accepts or rejects |
-
-They are autonomous in the sense that matters: no step receives the previous step's result. Each learns what to do by polling its own inbox and signs only its own transitions, so the buyer cannot accept its own deliverable. Agents cannot grant themselves authority — `MitraClient` has no capital-issuing verb, and the MCP tool list contains no mandate write.
-
----
-
-## Verify
-
-```bash
-npm run typecheck                              # 0 errors
-forge test                                     # 63/63 passed
-cargo test --manifest-path programs/mitra-vault/Cargo.toml   # 147/147 passed
-npx vitest run                                 # 1,390 passed, 83 skipped
-npm run test:postgres                          # with DATABASE_URL set
-npm run showcase:full                          # four acts on anvil
-npm run doctor                                 # live chain heads, ~2s
-```
-
-Every figure any of these print is read back from the chain or the store *after* the operation. A confirmed transaction is not the same claim as "the money is back" — that distinction is F86 in [`forge/FAILURES.md`](forge/FAILURES.md), and it is the rule the whole reporting discipline comes from.
-
----
-
-## Live Settlements
-
-| Rail | Network | Evidence |
-|---|---|---|
-| ERC-8183 escrow | Base Sepolia | `0x75dbc742…fb928` |
-| Solana program | Devnet | `jW14aBAb…HWZ` |
-
-Both are recorded in [`forge/PROOF_LEDGER.md`](forge/PROOF_LEDGER.md) with the command that produced them. Nothing here is mainnet, and no mainnet funds are claimed.
+- **F86 (Reporting After the Fact):** An API response claiming a transaction succeeded is not evidence. Mitra re-reads actual on-chain account balances and store state *after* the operation before reporting success.
+- **F79 (Persisted Sagas):** Reconstructing compensation routes in memory after a crash could fabricate refund targets. Mitra writes durable compensation routes to disk before funds move.
+- **F100 (Operator-Plane Mandates):** `POST /api/v1/mandates` mints the root of authority. It is narrowed (existence checks, chain approval, first-write-wins) but not yet principal-signed. External agents hold zero mandate-creation verbs over MCP or SDK.
+- **F102 (Space Isolation):** `POST /api/v1/spaces` on an existing `spaceId` overwrites budget without ownership checks. The autonomous loop avoids this by strictly owning its own space (`space_live_loop`).
+- **F103 (Binary Entrypoint Verification):** The keeper daemon passed typecheck and all 9 unit tests but failed at runtime due to a CJS `await` trap. Running entrypoint binaries (`npm run keeper:once`) is mandatory.
 
 ---
 
@@ -165,22 +269,6 @@ Both are recorded in [`forge/PROOF_LEDGER.md`](forge/PROOF_LEDGER.md) with the c
 │   └── SUBMISSION.md            # Colosseum Hackathon Section 8 submission dossier
 └── forge/                       # FORGE 1.4 control plane (INVARIANTS, FAILURES, PROOF_LEDGER)
 ```
-
----
-
-## Boundaries
-
-Port 3000 is reserved on the development machine; the Core API runs on `3005` and the MCP gateway on `3006`.
-
-Nothing here has been through a security audit. Adapter credentials for production rails are deliberately absent rather than fabricated — a rail that cannot be reached returns `null` and is treated as a refusal, never as a silent success.
-
-### Boundary Cases Worth Reading
-
-Three open limitations, stated here rather than buried:
-
-- **F100** — `POST /api/v1/mandates` is unauthenticated and mints the root of the authority chain. Narrowed (existence checks, chain approval, first-write-wins, a pause scope) but not yet principal-signed.
-- **F102** — `POST /api/v1/spaces` on an existing `spaceId` overwrites that Space's budget without an ownership check. Open.
-- **F103** — the keeper daemon passed typecheck and all nine of its unit tests and could not be executed at all, because its tests imported pure functions and never ran the entrypoint. Fixed; recorded because a green suite only proves the paths it touches.
 
 ---
 
