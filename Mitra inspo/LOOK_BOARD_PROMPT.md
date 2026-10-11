@@ -14,10 +14,17 @@ settles only what remains, with a receipt.
 Audience: someone who has never heard of it. Not wordy, not empty.
 
 COPY
-Headline: YOUR AGENT SPENDS, YOU STAY IN CONTROL
-Subline: Mitra lets you give an AI assistant spending money the way you'd give someone
-a company card, with a set limit. Every purchase gets checked before it goes through,
-and if a deal falls apart you get your money back automatically.
+(Revised 2026-10-11: the first headline read as an agent wallet. Mitra is positioned
+like DTCC / NIBSS — a clearinghouse — not a wallet.)
+Eyebrow: THE CLEARINGHOUSE FOR AGENTIC COMMERCE
+Headline: Agents trade. Mitra clears.
+Subline: Mitra is the financial coordination layer between AI agents and money. It
+holds each budget, checks every payment, carries every deal through failure, and
+cancels out what agents owe each other, so only what remains ever moves.
+Hero figure: agents, marketplaces and services send what they owe into one clearing
+block; a single net payment leaves for settlement. (The budget stack now lives in
+the budget section.)
+"You stay in control" is the message of the three-checks section, not the hero.
 Section names (plain headline + small mono tag):
   01 The budget        [VAULT]         Money set aside for your agent. It sees what's
                                        free, what's on hold and what's committed, and
