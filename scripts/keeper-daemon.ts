@@ -199,29 +199,50 @@ async function main(): Promise<number> {
   return result.refused > 0 ? 3 : 0;
 }
 
-if (process.argv[1]?.endsWith("keeper-daemon.ts")) {
-  if (ONCE) {
-    process.exit(await main());
-  } else {
-    const pollMs = Number(process.env.KEEPER_POLL_MS ?? 5000);
-    process.stdout.write(`[keeper] standing loop, every ${pollMs}ms. Set --once for a single pass.\n`);
-    let running = true;
-    for (const signal of ["SIGINT", "SIGTERM"] as const) {
-      process.on(signal, () => { running = false; });
-    }
-    let lastCode = 0;
-    while (running) {
-      try {
-        lastCode = await main();
-      } catch (e) {
-        // A standing daemon that dies on one bad pass is worse than useless: it looks alive in
-        // the process table while refunding nothing.
-        lastCode = 3;
-        process.stderr.write(`[keeper] pass failed: ${(e as Error).message}\n`);
-      }
-      if (!running) break;
-      await new Promise(r => setTimeout(r, pollMs));
-    }
-    process.exit(lastCode);
+/**
+ * The standing loop.
+ *
+ * A daemon that dies on one bad pass is worse than useless: it looks alive in the process
+ * table while refunding nothing. So a thrown pass is caught, reported, and the loop continues.
+ */
+async function runStandingLoop(): Promise<number> {
+  const pollMs = Number(process.env.KEEPER_POLL_MS ?? 5000);
+  process.stdout.write(`[keeper] standing loop, every ${pollMs}ms. Set --once for a single pass.\n`);
+  let running = true;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => { running = false; });
   }
+  let lastCode = 0;
+  while (running) {
+    try {
+      lastCode = await main();
+    } catch (e) {
+      lastCode = 3;
+      process.stderr.write(`[keeper] pass failed: ${(e as Error).message}\n`);
+    }
+    if (!running) break;
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+  return lastCode;
 }
+
+/**
+ * The process entrypoint.
+ *
+ * **Wrapped rather than using top-level `await`.** This repository compiles as CJS, so a
+ * top-level `await` typechecks (tsc is configured to allow it) and then fails at runtime with
+ * `Transform failed ... Top-level await is currently not supported with the "cjs" output
+ * format`. That is a nasty one, because `npm run typecheck` passes and the unit tests pass —
+ * they import the pure functions and never execute this block. Only actually running
+ * `tsx scripts/keeper-daemon.ts --once` finds it, which is exactly why that step is in the
+ * verification protocol rather than left to the test suite.
+ */
+async function cli(): Promise<void> {
+  if (!process.argv[1]?.endsWith("keeper-daemon.ts")) return;
+  process.exitCode = ONCE ? await main() : await runStandingLoop();
+}
+
+cli().catch((e: unknown) => {
+  process.stderr.write(`[keeper] ${(e as Error).message}\n`);
+  process.exitCode = 1;
+});

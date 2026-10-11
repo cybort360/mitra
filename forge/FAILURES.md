@@ -4253,3 +4253,60 @@ verification protocol and not an optional extra: the cheap backend cannot have t
 defect, so a suite that runs only against it is not testing the thing that will run in
 production. Both were caught within a minute of running the matrix, and neither was caught by
 writing more in-memory tests.
+
+## F102 — `POST /api/v1/spaces` silently overwrites an existing Space's budget
+
+**Status:** OPEN (recorded 2026-10-11). Not fixed here; found while building the agent runner.
+**Found:** 2026-10-11, by `scripts/run-autonomous-agents.ts` pointing itself at a seeded Space.
+
+The route takes a `spaceId` in the body and does not refuse when one already exists. Posting
+against the seeded `space_research_1` with `budget: 1000` returned **201 Created** and raised
+that Space's budget from **50 to 1000**, while leaving its participants untouched.
+
+So the route is a partial upsert that is neither an insert nor a replace: it writes the
+budget of a Space whose ownership, participants and governance it never checked. Combined
+with the fact that `POST /api/v1/spaces` is unauthenticated, that is an **unauthenticated
+budget inflation** — the same shape as F100 one level up, because a Space budget is what
+bounds every agreement opened inside it.
+
+It was found by accident, which is the part worth recording. The runner was pointed at the
+seeded Space because its agents were the right parties; one `POST` later the reference data
+was quietly different from `lib/store/seed.ts`. Restored by re-posting the original budget
+(50), and the runner now creates and owns `space_live_loop` instead of ever touching a
+fixture. **The seed and the running system now disagree about nothing, but they did for the
+duration of that run.**
+
+Closing it needs an existence check (409) or an explicit `overwrite` intent with its own
+authorization — not a silent third behaviour.
+
+## F103 — the keeper daemon passed typecheck and its tests, and could not be executed
+
+**Status:** fixed 2026-10-11.
+**Found:** 2026-10-11, by running `npx tsx scripts/keeper-daemon.ts --once` — step 2 of the
+loop-deployment packet's own verification sequence.
+
+`scripts/keeper-daemon.ts` used top-level `await` in its entrypoint. This repository compiles
+as CJS, so `tsx` fails at runtime:
+
+```
+Transform failed with 1 error:
+scripts/keeper-daemon.ts:204:17: ERROR: Top-level await is currently not supported
+with the "cjs" output format
+```
+
+**And nothing caught it.** `npm run typecheck` passed — `tsc` is configured to allow top-level
+await — and all 9 cases in `tests/keeper-daemon.test.ts` passed, because they import the pure
+functions (`runKeeperPass`, `selectDueTargets`) and never execute the entrypoint block.
+
+So the daemon had a verified-looking green suite and a CLI that was guaranteed to fail the
+first time a human or a supervisor ran it. The supervisor found it within seconds: it spawned
+the keeper, the process died, and `stack:status` correctly reported `keeper-daemon … dead`.
+
+**Why it is recorded rather than just fixed:** this is the third time in this repository that
+"green" has meant something narrower than it appears — F79 (writes that only fail on the real
+backend), F86 (a confirmed transaction that is not a claim about money), and now a test suite
+that never executes the code the operator will actually run. The common defect is not any one
+of them. It is **treating a passing suite as proof that a path works**, when the suite only
+proves the paths it happens to touch. The standing lesson is the one the packet already had
+it right about: the verification sequence includes *running the binaries*, and that step is
+not redundant with the unit tests — it is the only step that would have found this.

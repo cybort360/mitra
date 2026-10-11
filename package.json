@@ -19,6 +19,12 @@
     "showcase:saga": "node scripts/showcase-live-saga.mjs",
     "mitra-mcp": "tsx scripts/mitra-mcp.ts",
     "sandbox": "tsx scripts/sandbox.ts",
+    "agents:run": "tsx scripts/run-autonomous-agents.ts",
+    "stack:up": "tsx scripts/stack.ts up",
+    "stack:status": "tsx scripts/stack.ts status",
+    "stack:down": "tsx scripts/stack.ts down",
+    "mcp:daemon": "tsx scripts/mcp-server-daemon.ts",
+    "keeper:once": "tsx scripts/keeper-daemon.ts --once",
     "showcase:full": "tsx scripts/showcase-agents.ts",
     "showcase:agents": "tsx scripts/showcase-agents.ts"
   },
