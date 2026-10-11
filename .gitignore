@@ -61,5 +61,6 @@ cache/
 # Rendered by hand from docs/product/MITRA_0_1_FULL_PRODUCT_SPEC.md.
 brand/
 
-# Analysis tools
+# Analysis tools & daemons
 .ua/
+.stack/
