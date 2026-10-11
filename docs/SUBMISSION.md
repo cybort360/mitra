@@ -44,26 +44,24 @@ is back" — see F86 in `forge/FAILURES.md`, which is the incident that motivate
 
 ## (b) Potential Impact — *How big is the addressable market? Impact on the broader ecosystem?*
 
-**The problem, stated plainly:** an autonomous agent that can spend money is a treasury
-risk, and that risk is the main thing stopping businesses from giving agents budget. Every
-existing answer either gives the agent the keys (custodial, so the owner has no ceiling) or
-gives it nothing (so it cannot act).
+**The problem, stated plainly:** AI agents are evolving from conversational interfaces into autonomous economic actors—procuring compute, hiring sub-agents, licensing datasets, and settling services at machine speed. But autonomous commerce cannot operate on human payment rails or raw crypto wallets without hitting three structural roadblocks:
+1. **The Custodial & Agency Trap:** Giving an agent raw private keys risks catastrophic treasury drain from hallucinations or prompt injections. Requiring human sign-off destroys machine autonomy.
+2. **The Gross Liquidity Trap:** Settling every bilateral micro-transaction gross creates liquidity gridlock, massive gas friction, and systemic settlement risk across dense multi-agent trade graphs.
+3. **The Information Leakage Trap:** Public ledgers expose an agent's treasury depth and maximum willingness to pay in cleartext, enabling counterparties to front-run bids and price-gouge.
 
-**What is actually built:** a mandate is a *ceiling*, not a key. The agent can decide what to
-buy; a separate execution guard independently re-derives whether that exact instruction may
-move capital.
+**What is actually built:** Mitra is the **institutional financial coordination layer and clearinghouse (DTCC / LCH / Euroclear) for the agentic economy**:
+- **Multilateral Cycle Clearing:** Algorithmic cycle-canceling netting (`lib/kernel/clearing.ts`) resolves complex multi-agent supply chains ($A \to B \to C \to A$), settling only net residuals (71.4% liquidity compression) and transforming gross payment volume into a network-density clearing moat.
+- **Delivery-versus-Payment (DvP) Escrows:** Programmatic commerce contracts locked to deterministic machine criteria with durable sagas and autonomous timeout sweeper daemons.
+- **Confidential Policy Computation (Arcium MPC):** A 4-node MPC cluster evaluating policy decisions over encrypted shares (amount, headroom, caps) without exposing treasury depth or commercial strategy.
+- **The Execution Guard (`ALLOW != DISBURSEMENT`):** Decoupling intent from disbursement. The mandate is a persistent ceiling, not a key; the policy engine issues an `ALLOW` verdict that moves zero capital; and an on-chain execution guard independently re-derives whether *this exact instruction* may move capital.
 
 ```
 HOW MUCH MAY I SPEND → WHO AUTHORIZED IT → MAY THIS EXACT INSTRUCTION MOVE CAPITAL
      mandate              policy engine           execution guard
+ (Vault Headroom)      (Arcium MPC Verdict)    (Independent Re-derivation)
 ```
 
-The second and third are separate on purpose. An `ALLOW` from the policy engine is **not**
-permission to move value — it is one input to a decision made by a different component. That
-separation is the product.
-
-**Point at:** `forge/INVARIANTS.md` for the property and its status; `AGENTS.md` for the
-mechanism in one paragraph.
+**Point at:** `forge/INVARIANTS.md` for the property and its status; `lib/kernel/clearing.ts` for netting math; `programs/arcium-policy-circuit` for MPC confidentiality; and `AGENTS.md` for the core mechanism.
 
 ---
 

@@ -1,8 +1,8 @@
 # Mitra
 
 <p align="center">
-  <strong>The Financial Coordination Layer and Clearinghouse for Agentic Commerce</strong><br/>
-  <em>Mitra lets a business give an AI agent a budget without giving it the keys.</em>
+  <strong>The Financial Coordination Layer and Institutional Clearinghouse for Agentic Commerce</strong><br/>
+  <em>Autonomous agents coordinate commercial intent. Mitra enforces bounded execution, clears multi-party cycles, and settles on-chain across Solana, Base, and Tempo.</em>
 </p>
 
 <p align="center">
@@ -18,19 +18,27 @@
 
 ## Why Mitra: The Problem
 
-An autonomous AI agent that can spend money is an existential treasury risk. Today, developers face an unacceptable binary choice:
+AI agents are transitioning from conversational assistants into autonomous economic actors—negotiating agreements, purchasing GPU compute, acquiring datasets, and subcontracting specialized tasks at machine speed.
 
-1. **The Custodial Trap (Unbounded Freedom):** Hand the agent naked private keys. If the model hallucinates, suffers a prompt injection attack, or hits an unhandled retry loop, the entire treasury is drained in milliseconds.
-2. **The Paralysis Trap (Zero Agency):** Require human approval for every micro-transaction. The agent loses autonomy, high-frequency coordination becomes impossible, and agentic workflows grind to a halt.
-3. **The Gross Liquidity Trap:** Existing payment protocols (ERC-20 transfers, Stripe tokens, HTTP 402) move gross capital for every single transaction. In multi-agent economies, moving every leg causes liquidity gridlock, excessive fees, and systemic counterparty risk.
+However, machine commerce cannot run on human payment rails or raw crypto wallets without hitting three structural failure domains:
 
-Current payment protocols answer *how* to move tokens from Point A to Point B. They do not answer *whether this exact instruction is permitted to move capital*.
+1. **The Custodial & Agency Trap:** Handing an agent naked private keys creates catastrophic treasury risk from prompt injection or hallucinated loops. Requiring human approvals destroys machine-speed autonomy.
+2. **The Gross Liquidity Trap:** Existing payment protocols (ERC-20 transfers, Stripe tokens, HTTP 402) settle every transaction gross. In dense multi-agent supply chains, moving capital on every bilateral leg causes liquidity gridlock, massive gas friction, and systemic settlement risk.
+3. **The Information Leakage Trap:** Public blockchains expose an agent's treasury depth and willingness to pay in cleartext, allowing counterparties to front-run bids, extract surplus, and reverse-engineer commercial strategy.
+
+Current payment protocols answer *how to transfer tokens*. They do not solve **how autonomous economies coordinate, clear reciprocal obligations, and safely settle machine commerce**.
 
 ---
 
 ## The Solution: Institutional Clearinghouse Architecture
 
-Mitra restores institutional market infrastructure (DTCC, LCH, Euroclear) to autonomous agent commerce: **agents coordinate trade intents, while on-chain vaults and an independent execution guard enforce mathematical spending boundaries.**
+Mitra is the institutional market infrastructure (DTCC, LCH, Euroclear) for the agentic economy. It decouples commercial trade intent from physical capital settlement across five core pillars:
+
+1. **Multilateral Cycle Clearing:** Algorithmic cycle-canceling netting that resolves complex multi-agent trade graphs ($A \to B \to C \to A$), settling only net residuals (71.4% liquidity compression) and transforming gross payment volume into a network-density clearing advantage.
+2. **Delivery-versus-Payment (DvP) Escrows:** Programmatic commerce contracts locked to deterministic, machine-verifiable acceptance criteria with durable distributed sagas and autonomous timeout sweeper daemons.
+3. **Confidential Policy Computation (Arcium MPC):** A 4-node MPC cluster computing policy decisions directly over encrypted secret shares (amount, headroom, transaction caps) without exposing treasury depth or commercial strategy to counterparties or validators.
+4. **The Execution Guard Boundary (`ALLOW != DISBURSEMENT`):** Decoupling intent from disbursement. An authorization from the policy engine moves zero capital; an on-chain execution guard independently re-derives whether this exact instruction satisfies vault invariants when funds disburse.
+5. **Tri-Chain Native Settlement:** First-class peer parity across Solana Anchor PDAs, Base Sepolia (ERC-8183 Agentic Commerce Escrows), and Tempo Moderato (TIP-20 streaming micro-rails).
 
 ```mermaid
 flowchart TD
