@@ -61,6 +61,17 @@ VISUAL DIRECTION
   line figures morphing into each other, text revealed line by line on scroll).
 
 ARTBOARDS
+(As built, 2026-10-11 — the board has diverged from the list below:
+ - Hero: "Agents trade. Mitra clears." with a CLEARING figure (six counterparties feed one
+   clearing block; one net payment leaves for settlement). The vault stack below moved
+   to the budget section.
+ - 01b THE PROBLEM was added: "An agent with a wallet is a blank cheque." + four failures.
+ - 4. EXPLODED PAYMENT was removed.
+ - 6 became "Clear first. Move only what remains." told as WITHOUT MITRA (a dot pays all
+   four debts; one box counts 4 payments, $250) then WITH MITRA (black arrows fade, one
+   blue $30 payment; the same box lands on 1 payment, $30, "$220 never had to move"),
+   all pieces on one shared clock. The "same layout" placeholder strip was removed.
+ The live board is the source of truth; the list below is the original brief.)
 1. HERO — desktop 1440×900. Split layout: giant headline left (words drop into place
    one by one, staggered, slight overshoot; then ⌜IN CONTROL⌟ brackets draw in),
    subline + two buttons right ("Get early access", "See how it works").
