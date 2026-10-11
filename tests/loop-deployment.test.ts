@@ -6,7 +6,7 @@
  * rather than left to a code review that will not happen again.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { mcpTools } from "@/lib/mcp/surface";
 
 const runner = readFileSync("scripts/run-autonomous-agents.ts", "utf8");
@@ -87,5 +87,39 @@ describe("the runner keeps the parties genuinely separate", () => {
   it("reads its outcome back from the API instead of reporting intent", () => {
     expect(runner).toMatch(/listAgreements/);
     expect(runner).toMatch(/no agreement completed/);
+  });
+});
+describe("the package's public entry points", () => {
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+
+  it("every declared export resolves to a file that exists", () => {
+    // An `exports` entry pointing at a missing module installs cleanly and fails on first
+    // import — a worse shape than a build error. `./mcp` was declared before `lib/mcp/index.ts`
+    // existed, and only this check catches it.
+    for (const [name, target] of Object.entries(pkg.exports as Record<string, string>)) {
+      expect(existsSync(target), `${name} -> ${target}`).toBe(true);
+    }
+  });
+
+  it("the bin target is executable, has a shebang, and is not TypeScript", () => {
+    // `./scripts/mitra-mcp.ts` cannot be a bin: `node` neither strips types nor resolves the
+    // `@/` path alias, so it would install and then fail on first run. The shim exists for that.
+    for (const [name, target] of Object.entries(pkg.bin as Record<string, string>)) {
+      expect(target.endsWith(".ts"), `${name} must not point at TypeScript`).toBe(false);
+      const source = readFileSync(target, "utf8");
+      expect(source.startsWith("#!"), `${name} needs a shebang to be executable`).toBe(true);
+    }
+  });
+
+  it("keeps the root package private", () => {
+    // Publishing is a post-hackathon decision under a scoped name. `exports` here is for git
+    // dependency and monorepo resolution, and must not accidentally imply a registry publish.
+    expect(pkg.private).toBe(true);
+  });
+
+  it("exposes no capital-issuing verb through any entry point", () => {
+    // The new `./mcp` barrel widens what an outside caller can reach, so F100 is re-checked
+    // here: an importable surface must not become a way to mint authority.
+    expect(mcpTools.filter(n => /mandate/.test(n))).toEqual(["mitra_get_mandate", "mitra_list_mandates"]);
   });
 });

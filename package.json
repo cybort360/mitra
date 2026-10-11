@@ -55,5 +55,13 @@
     "typescript": "^5.9.2",
     "viem": "^2.57.2",
     "vitest": "^3.2.4"
+  },
+  "exports": {
+    ".": "./lib/sdk/index.ts",
+    "./sdk": "./lib/sdk/index.ts",
+    "./mcp": "./lib/mcp/index.ts"
+  },
+  "bin": {
+    "mitra-mcp": "./bin/mitra-mcp.mjs"
   }
 }
