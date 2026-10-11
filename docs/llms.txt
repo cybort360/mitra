@@ -42,6 +42,10 @@
 - [Model Context Protocol Gateway](portal/15-mcp-gateway.md): 22 standardized MCP tools served over stdio and SSE (`PORT=3006`).
 - [Cognitive Skills & Developer Tooling](portal/16-agent-skills-and-tooling.md): Operational playbooks (`skills/`), `npm run doctor`, and the autonomous agent runner.
 
+### Section 7: Marketplaces & Ecosystem Frameworks
+- [Marketplace Interoperability](portal/17-marketplace-interoperability.md): Adapters for Virtuals ACP, Olas Mech, Agentverse, x402, preserving `externalJobRef`, and cross-marketplace clearing.
+- [Ecosystem Frameworks & Protocols](portal/18-ecosystem-frameworks-and-protocols.md): A2A protocol mapping, x402 V2, MPP, ElizaOS, LangGraph, CrewAI, and account abstraction.
+
 ---
 
 ## Machine-Accessible Interfaces

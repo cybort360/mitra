@@ -2,7 +2,7 @@
 
 **Status:** Normative Documentation Blueprint  
 **Date:** October 2026  
-**Target Delivery:** 16 Institutional Documentation Pages + `/llms.txt` Machine-Readable Index  
+**Target Delivery:** 18 Institutional Documentation Pages + `/llms.txt` Machine-Readable Index  
 **Governing Specs:** [`MITRA_0_1_FULL_PRODUCT_SPEC.md`](./product/MITRA_0_1_FULL_PRODUCT_SPEC.md) · [`MITRA_PRD.md`](./product/MITRA_PRD.md) · [`INVARIANTS.md`](../forge/INVARIANTS.md) · [ADR-0009](./adr/0009-mandate-semantics-reuse-engraving.md)
 
 ---
@@ -55,7 +55,7 @@ The documentation portal must reflect institutional market infrastructure (DTCC,
 
 ---
 
-## 3. The 16-Page Information Architecture
+## 3. The 18-Page Information Architecture
 
 ```
 SECTION 1: GETTING STARTED & OVERVIEW
@@ -85,6 +85,10 @@ SECTION 5: THE TRI-CHAIN SUBSTRATE PLANE (EQUAL PEERS)
 SECTION 6: AGENT & OPERATOR INTEGRATION
   Page 15: Model Context Protocol (MCP) Gateway (22 Tools, SSE on Port 3006)
   Page 16: Cognitive Agent Skills & Developer Tooling (CLI, Doctor & Sandbox)
+
+SECTION 7: MARKETPLACES & ECOSYSTEM FRAMEWORKS
+  Page 17: Marketplace Interoperability: Virtuals ACP, Olas Mech, Agentverse & x402 (Spec §3.3 & §8)
+  Page 18: Ecosystem Integrations: A2A, x402, MPP, ElizaOS & Agent Frameworks (Spec §9–§12)
 ```
 
 ---

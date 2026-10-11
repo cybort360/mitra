@@ -219,7 +219,7 @@ They are autonomous in the sense that matters: **no step receives the previous s
 
 ## Developer Portal & Documentation Manual
 
-- **[16-Page Developer Portal](docs/portal/)** — Complete institutional documentation:
+- **[18-Page Developer Portal](docs/portal/)** — Complete institutional documentation:
   - [01: What is Mitra? (The Core Thesis & The Custody Trap)](docs/portal/01-what-is-mitra.md)
   - [02: Quickstart: Safe Agent Spend in 5 Minutes (TS & Python)](docs/portal/02-quickstart.md)
   - [03: The Multi-Door Architecture](docs/portal/03-multi-door-architecture.md)
@@ -236,6 +236,8 @@ They are autonomous in the sense that matters: **no step receives the previous s
   - [14: Tempo Substrate: TIP-20 Streaming Micro-Payments](docs/portal/14-tempo-substrate.md)
   - [15: Model Context Protocol (MCP) Gateway (22 Tools on :3006)](docs/portal/15-mcp-gateway.md)
   - [16: Cognitive Agent Skills & Developer Tooling](docs/portal/16-agent-skills-and-tooling.md)
+  - [17: Marketplace Interoperability: Virtuals ACP, Olas Mech, Agentverse & x402](docs/portal/17-marketplace-interoperability.md)
+  - [18: Ecosystem Integrations: A2A, x402, MPP, ElizaOS & Agent Frameworks](docs/portal/18-ecosystem-frameworks-and-protocols.md)
 - **[`/llms.txt`](docs/llms.txt)** — Machine-readable documentation index built natively for LLMs and autonomous agents.
 - **[Colosseum Hackathon Submission Dossier](docs/SUBMISSION.md)** — Comprehensive Section 8 rubric mapping with executed evidence.
 
