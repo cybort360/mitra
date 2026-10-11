@@ -192,7 +192,7 @@ async function main(): Promise<void> {
     // because that is a property of the endpoint rather than of this repository.
     evmProbe("Base Sepolia", "BASE_SEPOLIA_RPC", "https://sepolia.base.org"),
     evmProbe("Base (mainnet)", "BASE_RPC_URL", "https://mainnet.base.org"),
-    evmProbe("Tempo Moderato", "MODERATO_RPC_URL"),
+    evmProbe("Tempo Moderato", "MODERATO_RPC_URL", "https://rpc.moderato.tempo.xyz"),
     solanaProbe(),
     portProbe("Mitra Core API", API_PORT, "start it with `npm run stack:up`"),
     // The gateway does not serve the API's routes, so probing it for `/api/v1/health`
