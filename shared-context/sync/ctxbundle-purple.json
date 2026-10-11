@@ -1,6 +1,6 @@
 {
   "fromNodeId": "purple",
-  "highSeq": 134,
+  "highSeq": 135,
   "entries": [
     {
       "entryId": "ctx_9114ecb85dd5d8ca",
@@ -2817,6 +2817,25 @@
         "cd1a51d15334a231d40f847100629ddd476fd258d0d9735b839541fdc997506c"
       ],
       "hash": "614ca1449edfcaf1f0fa89d0704eba7b8ffeac221e27d4ee5b0fb2f69ac6a2d8"
+    },
+    {
+      "entryId": "ctx_4834f3fc5f24edfd",
+      "seq": 135,
+      "kind": "decision",
+      "title": "The Mitra landing page is its own site, not a route in the Next.js app",
+      "body": "Decided by purple on 2026-10-11, answering the open question in the look-board handoff (ctx_4204a61adfbfd2d2). The marketing site is a separate project; the existing app/ (console, API) is untouched by it.\n\nThe look board (https://claude.ai/artifact/HPVbksCjwbkKtmQ5vctFp2, v13) now carries the agreed parts of the lead's narrative: hero eyebrow \"The clearinghouse for agentic commerce\"; netting headline \"Clear first. Move only what remains.\"; mono tags ALLOW != PAYMENT, WALLET != PRINCIPAL, NETTING != SETTLEMENT, INTENT != CAPITAL; a new \"why\" artboard (01b · The problem: \"An agent with a wallet is a blank cheque.\", four failure modes); deal line \"Nobody gets paid until the work is accepted.\"; final-check note \"Change one detail and the vault refuses it on-chain\"; final payment \"paid on Base, Solana or Tempo, with a signed receipt\", with a real Tempo Moderato testnet tx as the receipt example. No metrics from the narrative were used (see ctx_655686d0d35e7ad8).",
+      "status": "active",
+      "scope": "website",
+      "tags": [
+        "decision",
+        "landing-page"
+      ],
+      "authorId": "agent:claude-purple",
+      "createdAt": "2026-10-11T08:17:45.569Z",
+      "parents": [
+        "614ca1449edfcaf1f0fa89d0704eba7b8ffeac221e27d4ee5b0fb2f69ac6a2d8"
+      ],
+      "hash": "a9be521db5c73694af1a88e329fbe2eb5f32893612bbc900648d05e0b6498f64"
     }
   ],
   "actors": [
@@ -2854,5 +2873,5 @@
       "createdAt": "2026-10-01T23:57:21.498Z"
     }
   ],
-  "tipHash": "614ca1449edfcaf1f0fa89d0704eba7b8ffeac221e27d4ee5b0fb2f69ac6a2d8"
+  "tipHash": "a9be521db5c73694af1a88e329fbe2eb5f32893612bbc900648d05e0b6498f64"
 }
