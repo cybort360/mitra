@@ -4310,3 +4310,35 @@ of them. It is **treating a passing suite as proof that a path works**, when the
 proves the paths it happens to touch. The standing lesson is the one the packet already had
 it right about: the verification sequence includes *running the binaries*, and that step is
 not redundant with the unit tests — it is the only step that would have found this.
+
+## F104 — the control-plane documents lag the code on five claims, and the lag reads as a failure that is not there
+
+**Status:** open (found 2026-10-11). Documents not yet corrected. Owner: whoever next edits `forge/`.
+**Found:** 2026-10-11, while checking the lead's landing-page narrative
+(`docs/MITRA_NARRATIVE_FOR_PURPLE.md`) against the repository. Four of its claims were first
+judged unrealised on the strength of `forge/` alone; read against the code, they hold.
+
+| Document says | Code says |
+|---|---|
+| `EXECUTION_PLAN.md` Phase 4: "ERC-8183 is a local projection, not an on-chain job" | `contracts/src/ERC8183/MitraJobEscrow.sol` is the ERC-8183 job escrow, live on Base Sepolia and Tempo Moderato (LP-2). The sentence predates LP-2 and was never removed. |
+| `EXECUTION_PLAN.md` Phase 8: "settlement receipts are hash-chained but unsigned (F53)"; F53: "One part open: receipts are unsigned" | `lib/settlement/receipt-signer.ts` (`b02c0e4`, 2026-10-04) signs each receipt hash with EIP-191 when `MITRA_RECEIPT_SIGNER_KEY_FILE` is set; `PROOF_LEDGER.md` already records it as `TESTED`. Only the plan and F53 were not updated. |
+| `forge/` records no keeper beyond `scripts/escrow-devnet.mjs sweep` | `scripts/keeper-daemon.ts` (`ba0ceff`) is a standing keeper with 9 tests (and F103). No live run of it is in `PROOF_LEDGER.md`, so its honest level is `TESTED`. |
+| `PRODUCT.md` "Current truth": "There is **no** live chain settlement" | `EXECUTION_PLAN.md` and `PROOF_LEDGER.md` record `LIVE_DEMONSTRATED` settlement on Base Sepolia, Tempo Moderato and Solana devnet. |
+| `EXECUTION_PLAN.md` "Reading this table": Phases 3–10 are `TESTED`, "nothing in Phases 3–10 has been deployed" | The rows directly above it claim `LIVE_DEMONSTRATED` for Phases 3, 4, 6, 7, 8 and 9. |
+
+Also: **two entries are numbered F97** (line ~3953, "open", and line ~4076, "fixed 2026-10-07").
+F78 was renumbered once already for the same reason.
+
+**Why it is recorded:** AGENTS.md makes `forge/` the map an agent reads before the code. When
+the map is behind, the error is not neutral — a reader concludes that working behaviour is
+missing (this run did, four times), and would have told a product page to remove true claims.
+It is the inverse of the usual overclaim, and just as wrong.
+
+**Not established here:** whether Phase 6's "a Saga step failure does not yet trigger a
+refund" is also stale. `rejectDeliverable` drives an on-chain refund since LP-6, but no code
+was found that unwinds several agreements of one pipeline together; that sentence needs a
+code-level check before it is changed.
+
+Closing it: correct the five lines and the duplicate number, and add a rule to the
+working agreement that a change which closes a `PARTIAL` also edits every `forge/` line that
+named it.
