@@ -175,4 +175,94 @@ Building complex distributed systems in Nigeria meant battling daily power outag
 #### Compact Alternative *(483 / 500 characters)*
 > I am a Computer Science graduate specialized in distributed systems, cryptography, and autonomous agents. As Founder and Lead Protocol Engineer, I architected and built Mitra end-to-end: the core economic kernel separating LLM spend proposals from disbursement authority, Solana PDA vaults, ERC-8183 job escrows, distributed recovery sagas, and the multi-party cycle netting engine. I drove protocol design, smart contracts, and full-stack integration across Solana, Base, and Tempo.
 
+---
+
+## 5. Accelerator Application (Colosseum Accelerator Reviewers)
+
+### 1. How do you know people actually need, or will need this product? *(Max 1,000 characters)*
+> **Character count:** 942 / 1,000
+
+We know this is needed because every team deploying autonomous agents hits the same wall: giving an LLM a private key turns prompt injections and software hallucinations into instant treasury loss. As a result, agents are financially paralyzed to toy demos or pre-funded debit wallets.
+
+Simultaneously, raw token transfers cannot conduct commerce. When an agent hires another agent, payments move blindly: there is no conditional escrow, no deliverable verification, and zero failure recovery. If an autonomous pipeline crashes halfway through, capital is stranded permanently.
+
+Furthermore, high-frequency agent commerce causes liquidity gridlock. Agents paying per task exhaust wallet balances on gas and gross liquidity. Just as financial markets required the DTCC and LCH to settle trades, the agentic economy requires an institutional clearinghouse to net reciprocal debts, enforce bounded mandates, and guarantee automated refund sagas.
+
+---
+
+### 2. How far along are you? Do you have users? Please be as specific as possible. *(Max 1,000 characters)*
+> **Character count:** 944 / 1,000
+
+We have built and verified the complete protocol foundation under strict zero-mock discipline:
+1. Deployed Infrastructure: Live testnet contracts on Solana Devnet (Anchor PDA vaults, Ed25519 guards), Base Sepolia (ERC-8183 job escrows, ERC-4337 settlement), and Tempo Moderato (TIP-20 precompiles).
+2. Protocol Engine: Core economic kernel, multilateral graph netting, distributed recovery sagas, and EIP-191 hash-chained receipts.
+3. Live Daemons: Standing escrow sweep keeper, HTTP/SSE MCP daemon serving 21 agent tools, and autonomous agent loops running Buyer ⇄ Provider ⇄ Evaluator cycles.
+4. Test Verification: 1,398 TypeScript tests on PostgreSQL 16, 147 Solana Anchor Rust tests, and 63 Foundry Solidity tests.
+
+Users: Currently in private testnet developer preview with autonomous agent builders stress-testing multi-agent workflows. We are using Colosseum as our launchpad to onboard our first 10 pilot agent swarms to Solana mainnet.
+
+---
+
+### 3. Who else is building in this space, and what do you think they're getting wrong? *(Max 1,000 characters)*
+> **Character count:** 963 / 1,000
+
+Others approach agent finance from two limited angles:
+1. Agent Wallets (e.g. Coinbase AgentKit, embedded signers): They give agents private keys, treating LLMs like humans with addresses.
+2. Micropayment Rails (e.g. x402): They move tokens point-to-point per API call.
+
+What they get wrong:
+1. The Hot-Key Trap: Giving an LLM a private key turns prompt injections into treasury loss. An LLM’s spend proposal must NEVER equate to capital disbursement authority. Spend must be bounded by cryptographic mandates and execution guards.
+2. Payments ≠ Commerce: Discrete transfers move money blindly. Real commerce requires conditional 3-party escrow, deliverable verification, and automated failure-recovery sagas so capital is never stranded when tasks fail.
+3. Liquidity Gridlock: Settling every micro-task on-chain causes liquidity lockup and fee exhaustion. High-velocity agent commerce requires multilateral netting to compress reciprocal debts before settlement.
+
+---
+
+### 4. How do you make money, or how do you plan to? *(Max 500 characters)*
+> **Character count:** 487 / 500
+
+Mitra monetizes as the clearinghouse for agentic commerce:
+1. Netting & Clearing Fees: 5–15 bps on gross volume compressed through our multilateral netting engine (which slashes counterparty capital lockup and gas by 70%+).
+2. Settlement Fees: A micro-fee on successfully finalized conditional escrows and signed receipts.
+3. Enterprise Treasury SaaS: Monthly subscriptions for institutional teams needing custom policy engines, dedicated keeper networks, and automated audit compliance.
+
+---
+
+### 5. How long have you each been working on this? Have you been working on it full time? *(Max 500 characters)*
+> **Character count:** 491 / 500
+
+I have been working on Mitra full-time as Founder & Lead Protocol Engineer for the past 6 months, building the core protocol, Solana Anchor PDA vaults, and clearing engine.
+
+Prior to this, I spent two years researching, prototyping, and stress-testing multi-agent pipelines and smart contract payment rails. That work exposed the need for bounded spend authority and led directly to Mitra. I am 100% full-time, fully committed to making Mitra the financial clearing standard for AI commerce.
+
+---
+
+### 6. Where is each member of the team currently based, and do you work in-person together? *(Max 500 characters)*
+*Would this change after receiving funding? If so, please provide details.*
+> **Character count:** 462 / 500
+
+I am based in Abuja, Nigeria, coordinating with remote technical collaborators via disciplined Git workflows.
+
+Yes, this will change immediately upon funding. With Colosseum backing, I will relocate to work in-person at the accelerator cohort hub. Post-accelerator, we will establish an in-person engineering hub in a tier-one crypto center (e.g. San Francisco or London) to co-locate core protocol engineering, business development, and enterprise integrations.
+
+---
+
+### 7. Have you formed a legal entity yet?
+* Select: **No** *(Estimated equity 40% if not yet incorporated)*
+
+---
+
+### 8. Have you taken any investment yet?
+* Select: **No** *(Bootstrapped & founder-funded to date)*
+
+---
+
+### 9. Are you currently fundraising?
+* Select: **Yes** *(Seeking pre-seed & Colosseum Accelerator funding)*
+
+---
+
+### 10. Do you have a live token?
+* Select: **No** *(Testnet protocol infrastructure; no token has been launched)*
+
+
 
