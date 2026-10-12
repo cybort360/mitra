@@ -15,6 +15,7 @@
 ## Documentation Index
 
 ### Section 1: Getting Started & Architectural Overview
+- [Web3 Protocol Docs & App Specification](WEB3_DOCUMENTATION_AND_APP_SPEC.md): Normative 4-tier Web3 developer portal architecture and in-app terminal console UX specification.
 - [What is Mitra?](portal/01-what-is-mitra.md): The core thesis, the custody trap, boundary vocabulary, and market comparison.
 - [5-Minute Quickstart](portal/02-quickstart.md): Step-by-step TypeScript (`@mitra/sdk`) and Python (`httpx`) code recipes.
 - [The Multi-Door Architecture](portal/03-multi-door-architecture.md): Dedicated entry points for Agent Developers, Treasury Operators, and Protocol Integrators.
