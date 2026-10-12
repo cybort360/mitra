@@ -127,3 +127,39 @@ Mitra is built under strict BUILD_FOUNDRY discipline with zero mock success path
 - 1,398 TypeScript unit and integration tests passing on PostgreSQL 16
 - Live deployments on Solana Devnet, Base Sepolia & Tempo Moderato
 - Complete standing daemons: continuous escrow sweep keeper, streaming HTTP/SSE MCP gateway, and autonomous agent runners (Buyer ⇄ Provider ⇄ Evaluator).
+
+---
+
+## 4. Founder Profile & Accelerator Questions (Jason Jude)
+
+### Are you working on this full-time?
+* Select: **Yes**
+
+### What's the most impressive thing you've built or accomplished outside of this project? *(Max 500 characters)*
+> **Character count:** 478 / 500
+
+Outside Mitra, I engineered a high-throughput multi-agent execution pipeline orchestrating autonomous data swarms across decentralized web nodes. Working under intense connectivity constraints in Nigeria, I optimized asynchronous queueing, local vector embeddings, and tamper-resistant state reconciliation—handling 100,000+ daily autonomous tasks with sub-second failover. It proved agents could do real work, but exposed the fatal absence of programmatic financial boundaries.
+
+---
+
+### You could be working on anything right now — why choose this? *(Max 1,000 characters)*
+> **Character count:** 990 / 1,000
+
+Autonomous AI agents are the next economic participants, but right now they are financially paralyzed. You cannot give an LLM a private key without risking total treasury drainage from a single prompt injection. Furthermore, raw per-transaction transfers cause massive liquidity lockup, fee exhaustion, and stranded funds when workflows crash.
+
+Every financial revolution required dedicated clearing infrastructure—equities needed the DTCC, derivatives needed LCH, commerce needed Visa. Yet the agentic economy has only payment rails that move money blindly.
+
+I chose to build Mitra because solving this is existential for the entire AI economy. I am obsessed with building the coordination layer: programmatic Solana PDA vaults where spend proposals never equate to disbursement authority, automated recovery sagas where capital is never stranded, and multilateral netting that slashes transaction volume by 70%+. This is the load-bearing infrastructure for trillion-dollar agent commerce.
+
+---
+
+### Tell us about a time you went to extreme lengths to accomplish something *(Max 500 characters)*
+> **Character count:** 494 / 500
+
+Building complex distributed systems in Nigeria meant battling daily power outages and unstable grids. To compile and stress-test an intensive multi-node consensus project before a hard deadline, I commuted miles to a generator-powered hub, worked through 36-hour overnight marathons on mobile tethering, and salvaged hardware to keep the cluster live. That taught me to ship resilient systems against all odds—a discipline baked directly into Mitra’s fault-tolerant, zero-leakage architecture.
+
+---
+
+### Are you a technical founder?
+* Select: **Yes**
+
