@@ -163,3 +163,19 @@ Building complex distributed systems in Nigeria meant battling daily power outag
 ### Are you a technical founder?
 * Select: **Yes**
 
+---
+
+### Technical Background *(Briefly describe your technical background and your specific role in building this product)*
+
+#### Option 1: Compact *(483 / 500 characters)*
+> I am a Computer Science graduate specialized in distributed systems, cryptography, and autonomous agents. As Founder and Lead Protocol Engineer, I architected and built Mitra end-to-end: the core economic kernel separating LLM spend proposals from disbursement authority, Solana PDA vaults, ERC-8183 job escrows, distributed recovery sagas, and the multi-party cycle netting engine. I drove protocol design, smart contracts, and full-stack integration across Solana, Base, and Tempo.
+
+#### Option 2: Detailed *(922 / 1,000 characters)*
+> I hold a B.Sc. in Computer Science with a focus on distributed systems, cryptographic protocol design, and autonomous agent orchestration. Over the past several years, I have engineered multi-agent execution pipelines, smart contract architectures, and decentralized state reconciliation engines.
+>
+> As Founder and Lead Protocol Engineer, I conceived, architected, and built Mitra from the ground up:
+> 1. Core Protocol: Designed the load-bearing invariant where spend proposals never equate to disbursement authority, enforcing the Mandate → Policy Engine → Execution Guard chain.
+> 2. Smart Contracts: Engineered non-custodial Solana PDA vaults (Anchor/Rust), ERC-8183 escrow state machines on Base Sepolia, and streaming adapters on Tempo Moderato.
+> 3. Clearing & Sagas: Implemented the multi-party cycle netting engine and distributed recovery sagas guaranteeing zero stranded capital across 1,300+ rigorous, zero-mock tests.
+
+
