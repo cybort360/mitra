@@ -143,13 +143,13 @@ Outside Mitra, I engineered a high-throughput multi-agent execution pipeline orc
 ---
 
 ### You could be working on anything right now — why choose this? *(Max 1,000 characters)*
-> **Character count:** 990 / 1,000
+> **Character count:** 965 / 1,000
 
-Autonomous AI agents are the next economic participants, but right now they are financially paralyzed. You cannot give an LLM a private key without risking total treasury drainage from a single prompt injection. Furthermore, raw per-transaction transfers cause massive liquidity lockup, fee exhaustion, and stranded funds when workflows crash.
+Autonomous AI agents are the next economic participants, but right now they are financially paralyzed. Giving an LLM a private key risks total treasury loss from a prompt injection. Furthermore, raw per-transaction transfers cause severe liquidity lockup, fee exhaustion, and stranded funds when workflows crash.
 
-Every financial revolution required dedicated clearing infrastructure—equities needed the DTCC, derivatives needed LCH, commerce needed Visa. Yet the agentic economy has only payment rails that move money blindly.
+Every financial revolution required dedicated clearing infrastructure—equities needed DTCC, derivatives needed LCH, commerce needed Visa. Yet the agentic economy has only rails moving money blindly.
 
-I chose to build Mitra because solving this is existential for the entire AI economy. I am obsessed with building the coordination layer: programmatic Solana PDA vaults where spend proposals never equate to disbursement authority, automated recovery sagas where capital is never stranded, and multilateral netting that slashes transaction volume by 70%+. This is the load-bearing infrastructure for trillion-dollar agent commerce.
+I chose to build Mitra because solving this is existential for AI commerce. I am building the coordination layer: programmatic vaults across Solana (PDAs), Base (ERC-8183 escrows), and Tempo where spend proposals never equate to disbursement authority, automated recovery sagas where capital is never stranded, and multilateral netting that slashes transaction volume by 70%+. This is the load-bearing clearinghouse for trillion-dollar agent commerce.
 
 ---
 
