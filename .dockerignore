@@ -1,0 +1,20 @@
+# Never in the image: keys, local env, build output, local state.
+.dev-keys
+.env
+.env.*
+!.env.example
+.git
+node_modules
+.next
+out
+cache
+.stack
+coverage
+target
+programs/*/target
+contracts/lib
+contracts/out
+contracts/cache
+shared-context/sync
+preview-static
+Mitra inspo

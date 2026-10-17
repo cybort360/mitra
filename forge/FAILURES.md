@@ -4310,3 +4310,35 @@ of them. It is **treating a passing suite as proof that a path works**, when the
 proves the paths it happens to touch. The standing lesson is the one the packet already had
 it right about: the verification sequence includes *running the binaries*, and that step is
 not redundant with the unit tests — it is the only step that would have found this.
+
+## F106 — `contracts/MitraVault.sol` claims to be the deployed source at addresses it does not produce
+
+**Found:** 2026-10-12, by agent:claude-purple, reading the chain for the customer app (`mitra-fe`).
+
+**What was wrong.** The header of the canonical `contracts/MitraVault.sol` says "THIS
+SOURCE PRODUCES THE DEPLOYED BYTECODE" at Base Sepolia `0x6a731a65…` and Tempo
+`0x19b3c58d…`, with typehash `0xec3317dd…`. `contracts/README.md` quoted Base `0x6a731a65…`
+and Tempo `0xaa46c23a…` with typehash `0xcae3f4fb…`. The chain says:
+
+| Address | Bytes | `PERMIT_TYPEHASH()` |
+|---|---|---|
+| Base `0x92dcee6a…e489` (`deployments.json`, F61) | 8,816 | `0xcae3f4fb…` = this source |
+| Tempo `0x85409dfc…b568` (`deployments.json`, F61) | 8,816 | `0xcae3f4fb…` = this source |
+| Base `0x6a731a65…eea9c` | 8,593 | `0xec3317dd…` (earlier scheme) |
+| Tempo `0x19b3c58d…cb0` | 8,593 | `0xec3317dd…` |
+| Tempo `0xaa46c23a…ee6` | 8,701 | `0xcae3f4fb…` (pre-F61 keying) |
+
+So neither document named the contract the engine actually settles through.
+
+**Why the header is not edited.** `forge build` of this file, unchanged, reproduces the
+runtime code at `0x92dcee6a…` exactly once EIP-712 immutables are masked, CBOR metadata
+included. Editing only the header comment changed 61 hex characters of that metadata.
+The stale comment is part of what was deployed; correcting it would break the source's
+claim to reproduce the deployment.
+
+**Fixed:** `contracts/README.md` now quotes `deployments.json` and the chain reads above,
+lists the earlier addresses as history, and explains the header. **Open:** correct the
+header at the next redeploy of the canonical vault. Command used:
+`forge build --contracts contracts/MitraVault.sol`, then compare `deployedBytecode` with
+`eth_getCode` at `0x92dcee6a…` with `immutableReferences` masked.
+

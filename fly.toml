@@ -1,0 +1,50 @@
+# The Mitra engine on Fly. See docs/DEPLOY_FLY.md for the dashboard steps and secrets.
+# Testnets only: Base Sepolia, Tempo Moderato, Solana devnet.
+#
+# Change `app` to the name you create in the Fly dashboard if it differs.
+app = "mitra-engine"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3005"
+  MCP_GATEWAY_PORT = "3006"
+  BASE_RPC_URL = "https://sepolia.base.org"
+  TEMPO_RPC_URL = "https://rpc.moderato.tempo.xyz"
+  # Small pools: the Supabase free tier allows few connections, shared by three processes.
+  DATABASE_POOL_MAX = "3"
+
+# The Core API: https://<app>.fly.dev
+[http_service]
+  internal_port = 3005
+  force_https = true
+  # Always on: the keeper and webhook worker run in this machine and must not be stopped
+  # for being idle.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "60s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/v1/health"
+    timeout = "10s"
+
+# The MCP gateway for agents: https://<app>.fly.dev:8443/mcp. It only binds publicly when
+# the MCP_TOKEN secret is set (scripts/serve-all.mjs), and then requires that token.
+[[services]]
+  internal_port = 3006
+  protocol = "tcp"
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 8443
+    handlers = ["tls", "http"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
