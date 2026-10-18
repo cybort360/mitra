@@ -15,6 +15,11 @@ primary_region = "lhr"
   TEMPO_RPC_URL = "https://rpc.moderato.tempo.xyz"
   # Small pools: the Supabase free tier allows few connections, shared by three processes.
   DATABASE_POOL_MAX = "3"
+  # Pay THROUGH the vault contract on both chains: from a customer's position, bound per
+  # settlement to the card's owner and holder (lib/settlement/rails.ts, forVault). These
+  # only take effect with the MITRA_EVM_SETTLEMENT_KEY secret set.
+  MITRA_BASE_SETTLEMENT_ACCOUNT = "vault"
+  MITRA_TEMPO_SETTLEMENT_ACCOUNT = "vault"
 
 # The Core API: https://<app>.fly.dev
 [http_service]

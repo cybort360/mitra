@@ -702,6 +702,37 @@ export class PostgresRepository implements EconomicRepository {
     return rowCount === 1;
   }
 
+  /**
+   * Card sync (see the repository contract). One statement: insert, or refresh the
+   * positions only WHERE the stored books are idle, so a concurrent reservation cannot
+   * be overwritten between a read and a write. When the WHERE fails, a second statement
+   * copies the emergency freeze alone.
+   */
+  async upsertChainVault(vault: Vault): Promise<"created" | "refreshed" | "kept"> {
+    const { rows } = await this.pool.query(
+      `INSERT INTO mitra.vaults
+         (vault_id, name, principal, controller_ref, chain, asset, address, total, available,
+          reserved, escrowed, encumbered, settling, frozen, emergency_freeze, custody_mode, version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,1)
+       ON CONFLICT (vault_id) DO UPDATE SET
+         total = EXCLUDED.total, available = EXCLUDED.available, reserved = EXCLUDED.reserved,
+         escrowed = EXCLUDED.escrowed, encumbered = EXCLUDED.encumbered, settling = EXCLUDED.settling,
+         frozen = EXCLUDED.frozen, emergency_freeze = EXCLUDED.emergency_freeze,
+         version = mitra.vaults.version + 1
+       WHERE mitra.vaults.reserved = 0 AND mitra.vaults.escrowed = 0
+         AND mitra.vaults.encumbered = 0 AND mitra.vaults.settling = 0
+       RETURNING (xmax = 0) AS inserted`,
+      [
+        vault.vaultId, vault.name, vault.principal, vault.controllerRef, vault.chain, vault.asset, vault.address,
+        vault.total, vault.available, vault.reserved, vault.escrowed, vault.encumbered, vault.settling, vault.frozen,
+        vault.emergencyFreeze, vault.custodyMode,
+      ],
+    );
+    if (rows[0]) return rows[0].inserted ? "created" : "refreshed";
+    await this.pool.query("UPDATE mitra.vaults SET emergency_freeze = $2 WHERE vault_id = $1", [vault.vaultId, vault.emergencyFreeze]);
+    return "kept";
+  }
+
   async listMandates(): Promise<Mandate[]> {
     const { rows } = await this.pool.query("SELECT * FROM mitra.mandates ORDER BY mandate_id");
     return rows.map(rowToMandate);

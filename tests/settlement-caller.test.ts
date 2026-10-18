@@ -54,7 +54,13 @@ const PRICE = { asset: "USDC" as const, amount: 15 };
 
 class TestRepo extends InMemoryRepository {
   readonly extraMandates = new Map<string, Mandate>();
+  /** When set, agents are served without any wallet (to test a holder that is not registered). */
+  hideWallets = false;
   async getMandate(id: string) { return this.extraMandates.get(id) ?? super.getMandate(id); }
+  async getAgent(id: string) {
+    const a = await super.getAgent(id);
+    return a && this.hideWallets ? { ...a, wallets: [] } : a;
+  }
 }
 
 const mandate = (over: Partial<Mandate> = {}): Mandate => ({
@@ -386,6 +392,67 @@ describe("settlement caller — refusals send nothing", () => {
     const res = await settle("ag_vb", r.data.reservationId);
     expect((await res.json()).error).toBe("VAULT_NOT_BOUND_TO_RAIL");
     expect(rec.sends).toHaveLength(0);
+  });
+
+  // ── Paying from a customer's vault (vault-owner-pays) ─────────────────────
+  // The rail's own payer is the engine; the vault belongs to someone else. A vault rail
+  // binds to the vault's address (its principal) and the mandate agent's wallet (holder).
+  const ENGINE_PAYER = "0x2222222222222222222222222222222222222222";
+  function vaultRail(transport: BaseTransport) {
+    const bindings: Array<{ principal: string; holder: string }> = [];
+    // The UNBOUND rail has its own transport that can confirm nothing, so a path that
+    // forgot to bind (pay or confirm) is caught rather than passing on a shared stub.
+    const rails = baseRail(recorder({ confirm: false }).transport, ENGINE_PAYER);
+    rails.base = { ...rails.base!, forVault: (b) => { bindings.push(b); return baseRail(transport, b.principal).base!; } };
+    return { rails, bindings };
+  }
+
+  it("a vault rail pays a customer's vault from its owner, for the mandate agent's wallet", async () => {
+    const rec = recorder();
+    const { rails, bindings } = vaultRail(rec.transport);
+    __setRailsForTests(rails);
+    await repo.saveAgreement(accepted("ag_vo"));
+    const { body: r } = await reserveFor("ag_vo");
+    const res = await settle("ag_vo", r.data.reservationId);
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    const clientWallet = (await repo.getAgent(CLIENT))!.wallets.find((w) => w.chain === "base")!.address;
+    expect(bindings).toEqual([{ principal: VAULT_ADDRESS, holder: clientWallet }]);
+    expect(body.data.settlement.from).toBe(VAULT_ADDRESS);
+    expect(rec.sends).toHaveLength(1);
+    expect(rec.sends[0].data, "the commitment names the vault owner as payer").toBe(settlementCommitment({
+      settlementId: settlementIdFor("ag_vo"), from: VAULT_ADDRESS, to: PAYEE, amount: PRICE.amount, asset: "USDC", chainId: 84532,
+    }));
+  });
+
+  it("a vault rail refuses to bind when the mandate's agent has no wallet on that chain, and sends nothing", async () => {
+    const rec = recorder();
+    const { rails, bindings } = vaultRail(rec.transport);
+    __setRailsForTests(rails);
+    await repo.saveAgreement(accepted("ag_nh"));
+    const { body: r } = await reserveFor("ag_nh");
+    repo.hideWallets = true;
+    const res = await settle("ag_nh", r.data.reservationId);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_HOLDER_NOT_REGISTERED");
+    expect(bindings).toHaveLength(0);
+    expect(rec.sends).toHaveLength(0);
+  });
+
+  it("confirming later verifies with the rail bound to the same vault", async () => {
+    const rec = recorder({ confirm: false });
+    const { rails, bindings } = vaultRail(rec.transport);
+    __setRailsForTests(rails);
+    await repo.saveAgreement(accepted("ag_vc"));
+    const { body: r } = await reserveFor("ag_vc");
+    const first = await (await settle("ag_vc", r.data.reservationId)).json();
+    expect(first.data.settlement.status).toBe("SUBMITTED");
+    rec.setConfirm(true);
+    const res = await post(settlementsPOST, { op: "confirm", settlementId: settlementIdFor("ag_vc"), now: NOW });
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data.settlement.status).toBe("CONFIRMED");
+    expect(bindings.map((b) => b.principal)).toEqual([VAULT_ADDRESS, VAULT_ADDRESS]);
   });
 
   it("the reserve route refuses a reservation whose terms differ from the agreement", async () => {

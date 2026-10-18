@@ -305,6 +305,15 @@ export interface EconomicRepository {
   saveMandate?(mandate: Mandate): Promise<void>;
 
   /**
+   * A vault backed by the vault CONTRACT, written from a chain read (card sync,
+   * `lib/kernel/card-sync.ts`). Created if absent; otherwise its positions are refreshed
+   * from the chain ONLY while this engine's books for it are idle (nothing reserved,
+   * escrowed, encumbered or settling) — "kept" means they were not, and only the
+   * emergency freeze was copied. Optional: a store without it cannot sync cards.
+   */
+  upsertChainVault?(vault: Vault): Promise<"created" | "refreshed" | "kept">;
+
+  /**
    * Agents (backlog #5). Written only by `insertAgent`, behind a registration
    * every listed wallet signed (F55).
    */

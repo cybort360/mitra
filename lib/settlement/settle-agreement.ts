@@ -62,6 +62,36 @@ const refuse = (httpStatus: number, reason: string, settlement?: Settlement): Se
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * The rail that pays from `vault`.
+ *
+ * A rail pays as itself when the vault IS its payer. Otherwise only a vault rail can pay,
+ * bound to the vault's principal and to the wallet the mandate's agent registered on this
+ * chain (the mandate holder). The binding widens nothing: the engine signs only under the
+ * mandate the chain holds for exactly that (principal, holder, token) naming this engine,
+ * and the contract re-checks it. Every other mismatch is VAULT_NOT_BOUND_TO_RAIL, as before.
+ */
+async function railFor(
+  repo: EconomicRepository,
+  rails: Rails,
+  chain: Settlement["chain"],
+  vault: Vault,
+  mandateId: string,
+): Promise<{ rail: SettlementRail } | { refusal: SettleOutcome }> {
+  const rail = rails[chain];
+  if (!rail) return { refusal: refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED") };
+  if (vault.address.toLowerCase() === rail.payer.toLowerCase()) return { rail };
+  if (!rail.forVault || !EVM_ADDRESS.test(vault.address)) return { refusal: refuse(409, "VAULT_NOT_BOUND_TO_RAIL") };
+  const mandate = await repo.getMandate(mandateId);
+  if (!mandate) return { refusal: refuse(404, "MANDATE_NOT_FOUND") };
+  const agent = await repo.getAgent(mandate.agentId);
+  const wallet = agent?.wallets.find((w) => w.chain === chain && EVM_ADDRESS.test(w.address));
+  if (!wallet) return { refusal: refuse(409, "VAULT_HOLDER_NOT_REGISTERED") };
+  return { rail: rail.forVault({ principal: vault.address as `0x${string}`, holder: wallet.address as `0x${string}` }) };
+}
+
 type SettlementStore = EconomicRepository &
   Required<Pick<EconomicRepository, "getAgreement" | "updateAgreement">>;
 
@@ -190,7 +220,12 @@ export async function settleResidual(
   if (onChain && onChain.status !== "Finalized" && onChain.status !== "Settling") {
     return refuse(409, "RESIDUAL_NOT_FINALIZED_ON_CHAIN");
   }
-  const rail = rails[plan.value.chain];
+  let rail: SettlementRail | undefined;
+  if (rails[plan.value.chain]) {
+    const bound = await railFor(repo, rails, plan.value.chain, vault, reservation.mandateId);
+    if ("refusal" in bound) return bound.refusal;
+    rail = bound.rail;
+  }
   const matches = !!onChain && !!rail
     && onChain.from.toLowerCase() === rail.payer.toLowerCase()
     && onChain.to.toLowerCase() === plan.value.to.toLowerCase()
@@ -226,9 +261,9 @@ async function execute(
   const { settlementId, chain, amount, to } = input.plan;
   const { reservation, vault, subject } = input;
 
-  const rail = rails[chain];
-  if (!rail) return refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED");
-  if (vault.address !== rail.payer) return refuse(409, "VAULT_NOT_BOUND_TO_RAIL");
+  const bound = await railFor(repo, rails, chain, vault, reservation.mandateId);
+  if ("refusal" in bound) return bound.refusal;
+  const rail = bound.rail;
 
   let commitment: string;
   try {
@@ -327,7 +362,15 @@ export async function confirmSettlement(
   if (settlement.status !== "SUBMITTED" || !settlement.txHash) return refuse(409, `SETTLEMENT_${settlement.status}`, settlement);
   const rail = rails[settlement.chain];
   if (!rail) return refuse(503, "SETTLEMENT_RAIL_NOT_CONFIGURED");
-  return finish(repo, rail, subject, settlement, input.now, input.receiptSigner);
+  // Verify with the rail that paid. For a customer's vault that is the rail bound to its
+  // principal and holder, found through the reservation; with no reservation on record the
+  // rail verifies as itself, exactly as before.
+  const reservation = settlement.reservationId ? await repo.getReservation(settlement.reservationId) : null;
+  const vault = reservation ? await repo.getVault(reservation.vaultId) : null;
+  if (!reservation || !vault) return finish(repo, rail, subject, settlement, input.now, input.receiptSigner);
+  const bound = await railFor(repo, rails, settlement.chain, vault, reservation.mandateId);
+  if ("refusal" in bound) return bound.refusal;
+  return finish(repo, bound.rail, subject, settlement, input.now, input.receiptSigner);
 }
 
 async function finish(
