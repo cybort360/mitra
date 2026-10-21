@@ -43,7 +43,7 @@ import type { SettlementAdapter } from "@/lib/adapters/types";
 import { BASE_ASSETS, BaseSettlementAdapter, settlementCommitment, type BaseTransport } from "@/lib/adapters/base";
 import { BaseRpcTransport } from "@/lib/adapters/base-transport";
 import { Erc4337Transport } from "@/lib/adapters/base-4337-transport";
-import { TEMPO_CHAIN_IDS, TEMPO_TOKENS, TempoSettlementAdapter, tempoCommitment } from "@/lib/adapters/tempo";
+import { TEMPO_CHAIN_IDS, TEMPO_TOKENS, TempoSettlementAdapter, tempoCommitment, type TempoTransport } from "@/lib/adapters/tempo";
 import { MitraVaultTransport } from "@/lib/adapters/evm-vault-transport";
 import { networkName } from "@/lib/evm/evidence";
 import { ModeratoTransport, createTempoRpc } from "@/lib/adapters/tempo-transport";
@@ -72,6 +72,20 @@ export interface SettlementRail {
   readonly confirmedEvidence: EvidenceLevel;
   /** The network, from the chain id (`networkName`): what receipts and evidence bundles name. */
   readonly network: string;
+  /**
+   * Vault rails only: this rail paying from ANOTHER principal's position in the vault
+   * contract, for the given holder. The payer of the returned rail is that principal.
+   * The engine still signs only under a mandate the chain holds naming this engine for
+   * exactly (principal, holder, token), so a binding cannot make it pay what the
+   * principal did not authorise on chain. Absent on rails that pay from a key or a
+   * smart account: those can only ever pay as themselves.
+   */
+  forVault?(binding: VaultBinding): SettlementRail;
+}
+
+export interface VaultBinding {
+  principal: `0x${string}`;
+  holder: `0x${string}`;
 }
 
 export type Rails = Partial<Record<Chain, SettlementRail>>;
@@ -82,6 +96,15 @@ function readEvmKey(path: string) {
   return privateKeyToAccount(`0x${readFileSync(path, "utf8").trim().replace(/^0x/, "")}`);
 }
 
+/**
+ * The address of this engine's EVM key: the policy engine a customer's card must name for
+ * this engine to sign under it. Null when no key is configured — an engine that can
+ * approve nothing, which callers must say rather than paper over.
+ */
+export function engineAddressFromEnv(env: Record<string, string | undefined> = process.env): `0x${string}` | null {
+  return env.MITRA_EVM_SETTLEMENT_KEY_FILE ? readEvmKey(env.MITRA_EVM_SETTLEMENT_KEY_FILE).address : null;
+}
+
 /** Builds whichever rails the environment fully configures. A partial config builds nothing. */
 export async function railsFromEnv(env: Record<string, string | undefined> = process.env): Promise<Rails> {
   const rails: Rails = {};
@@ -90,21 +113,7 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
     const account = readEvmKey(env.MITRA_EVM_SETTLEMENT_KEY_FILE);
     const mode = env.MITRA_BASE_SETTLEMENT_ACCOUNT ?? "eoa";
     if (mode !== "eoa" && mode !== "erc4337" && mode !== "vault") throw new Error(`MITRA_BASE_SETTLEMENT_ACCOUNT must be eoa, erc4337 or vault, not ${mode}`);
-    let transport: BaseTransport;
-    let payer: string;
-    if (mode === "vault") {
-      const v = vaultTransport(env, account, baseSepolia, http(env.BASE_RPC_URL), Object.values(BASE_ASSETS[BASE_SEPOLIA]).map((a) => a.address), 1n);
-      transport = v.asBaseTransport(BASE_SEPOLIA);
-      payer = account.address;
-    } else if (mode === "erc4337") {
-      const t = new Erc4337Transport({ owner: account, relayer: account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) });
-      transport = t;
-      payer = (await t.account()).address;
-    } else {
-      transport = new BaseRpcTransport({ account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) });
-      payer = account.address;
-    }
-    rails.base = {
+    const baseRail = (transport: BaseTransport, payer: string, forVault?: SettlementRail["forVault"]): SettlementRail => ({
       chain: "base",
       adapter: new BaseSettlementAdapter({ chainId: BASE_SEPOLIA, transport }),
       payer,
@@ -114,25 +123,45 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
       }),
       confirmedEvidence: "TESTNET_PASS",
       network: networkName("base", BASE_SEPOLIA),
-    };
+      ...(forVault ? { forVault } : {}),
+    });
+    if (mode === "vault") {
+      const v = vaultTransport(env, account, baseSepolia, http(env.BASE_RPC_URL), Object.values(BASE_ASSETS[BASE_SEPOLIA]).map((a) => a.address), 1n);
+      rails.base = baseRail(v.asBaseTransport(BASE_SEPOLIA), v.principal, (b) => {
+        const bound = v.bind(b);
+        return baseRail(bound.asBaseTransport(BASE_SEPOLIA), bound.principal);
+      });
+    } else if (mode === "erc4337") {
+      const t = new Erc4337Transport({ owner: account, relayer: account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) });
+      rails.base = baseRail(t, (await t.account()).address);
+    } else {
+      rails.base = baseRail(new BaseRpcTransport({ account, chainId: BASE_SEPOLIA, transport: http(env.BASE_RPC_URL) }), account.address);
+    }
   }
 
   if (env.MITRA_EVM_SETTLEMENT_KEY_FILE && env.TEMPO_RPC_URL) {
     const account = readEvmKey(env.MITRA_EVM_SETTLEMENT_KEY_FILE);
     const mode = env.MITRA_TEMPO_SETTLEMENT_ACCOUNT ?? "eoa";
     if (mode !== "eoa" && mode !== "vault") throw new Error(`MITRA_TEMPO_SETTLEMENT_ACCOUNT must be eoa or vault, not ${mode}`);
-    const transport = mode === "vault"
-      // Tempo's eth_gasPrice lags the effective price; 2x as scripts/tempo-pay.mjs does.
-      ? vaultTransport(env, account, tempoModerato(env.TEMPO_RPC_URL), http(env.TEMPO_RPC_URL), Object.values(TEMPO_TOKENS).map((t) => t.mint), 2n).asTempoTransport()
-      : new ModeratoTransport({ rpc: createTempoRpc({ url: env.TEMPO_RPC_URL }), account });
-    rails.tempo = {
+    const tempoRail = (transport: TempoTransport, payer: string, forVault?: SettlementRail["forVault"]): SettlementRail => ({
       chain: "tempo",
       adapter: new TempoSettlementAdapter({ network: "moderato", transport }, tempoCommitment),
-      payer: account.address,
+      payer,
       commitment: (i) => tempoCommitment({ ...i, network: "moderato" }),
       confirmedEvidence: "TESTNET_PASS",
       network: networkName("tempo", TEMPO_CHAIN_IDS.moderato),
-    };
+      ...(forVault ? { forVault } : {}),
+    });
+    if (mode === "vault") {
+      // Tempo's eth_gasPrice lags the effective price; 2x as scripts/tempo-pay.mjs does.
+      const v = vaultTransport(env, account, tempoModerato(env.TEMPO_RPC_URL), http(env.TEMPO_RPC_URL), Object.values(TEMPO_TOKENS).map((t) => t.mint), 2n);
+      rails.tempo = tempoRail(v.asTempoTransport(), v.principal, (b) => {
+        const bound = v.bind(b);
+        return tempoRail(bound.asTempoTransport(), bound.principal);
+      });
+    } else {
+      rails.tempo = tempoRail(new ModeratoTransport({ rpc: createTempoRpc({ url: env.TEMPO_RPC_URL }), account }), account.address);
+    }
   }
 
   if (env.SOLANA_RPC_URL && env.MITRA_SOLANA_ENGINE_KEY_FILE && env.MITRA_SOLANA_PRINCIPAL && env.MITRA_SOLANA_HOLDER && env.MITRA_SOLANA_VAULT) {
@@ -165,7 +194,7 @@ export async function railsFromEnv(env: Record<string, string | undefined> = pro
  * key carries a `__` suffix (e.g. `__callerVariant`) are other deployments kept for the
  * record and are never chosen, because their ABI is not the one this transport speaks.
  */
-function deployedVault(chainId: number): `0x${string}` {
+export function deployedVault(chainId: number): `0x${string}` {
   const file = "lib/evm/deployments.json";
   const all = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, { chainId?: number; address?: string }>) : {};
   const hit = Object.entries(all).find(([key, v]) => !key.includes("__") && v.chainId === chainId && v.address);
@@ -177,9 +206,13 @@ function vaultTransport(
   env: Record<string, string | undefined>, account: ReturnType<typeof readEvmKey>, chain: ViemChain,
   transport: ReturnType<typeof http>, tokens: string[], gasPriceMultiplier: bigint,
 ): MitraVaultTransport {
-  if (!env.MITRA_EVM_VAULT_HOLDER) throw new Error("MITRA_EVM_VAULT_HOLDER is required for a vault rail");
+  // The unbound rail pays from the engine's own position for MITRA_EVM_VAULT_HOLDER (the
+  // original single-principal rail). Customers' vaults are paid through `forVault`, which
+  // binds principal and holder per settlement. With no holder configured the unbound rail
+  // names the engine itself, which no mandate holds, so it can pay nothing on its own.
   return new MitraVaultTransport({
-    chain, vault: deployedVault(chain.id), principal: account.address, holder: env.MITRA_EVM_VAULT_HOLDER as `0x${string}`,
+    chain, vault: deployedVault(chain.id), principal: account.address,
+    holder: (env.MITRA_EVM_VAULT_HOLDER ?? account.address) as `0x${string}`,
     engine: account, relayer: account, tokens: new Set(tokens.map((t) => t.toLowerCase())), transport, gasPriceMultiplier,
   });
 }

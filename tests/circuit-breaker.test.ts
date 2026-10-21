@@ -196,7 +196,7 @@ describe("a scoped pause stops only its scope", () => {
  * shipping unpausable.
  */
 describe("no state-changing route is unclassified", () => {
-  const GUARDED = new Set(["agreements", "mandates", "reservations", "reservations/execute", "settlements", "x402"]);
+  const GUARDED = new Set(["agreements", "mandates", "reservations", "reservations/execute", "settlements", "vaults/sync", "x402"]);
   const EXEMPT: Record<string, string> = {
     "agents": "registration moves no value",
     "authorizations": "an ALLOW is not permission to move value",

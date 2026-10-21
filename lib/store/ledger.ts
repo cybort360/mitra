@@ -93,6 +93,27 @@ export class CapitalLedger {
     return [...this.vaults.entries()].map(([id, v]) => this.derive(id, v));
   }
 
+  /**
+   * A vault whose capital lives in the vault CONTRACT (a customer's card, synced from the
+   * chain). Created from the chain's positions; refreshed from them only while the
+   * engine's own books for it are idle, so a sync can never overwrite capital this
+   * engine has reserved, escrowed, encumbered or put into settlement.
+   */
+  upsertChainVault(vault: Vault): "created" | "refreshed" | "kept" {
+    const current = this.vaults.get(vault.vaultId);
+    if (!current) {
+      this.vaults.set(vault.vaultId, { ...vault });
+      return "created";
+    }
+    const busy = current.reserved + current.escrowed + current.encumbered + current.settling > 0;
+    if (busy) {
+      this.vaults.set(vault.vaultId, { ...current, emergencyFreeze: vault.emergencyFreeze });
+      return "kept";
+    }
+    this.vaults.set(vault.vaultId, { ...current, ...vault, version: current.version + 1 });
+    return "refreshed";
+  }
+
   /** Capital that is actually spendable, with a reservation applied if required. */
   /**
    * Settlement capital (backlog #2), each one synchronous so it cannot interleave:

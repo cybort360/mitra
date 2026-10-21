@@ -25,7 +25,7 @@ Set these in the Fly dashboard: your app, then **Secrets**. A secret is never in
 | `DATABASE_URL` | yes | `postgresql://postgres.tjlnxnirtltczjruymnl:<PASSWORD>@aws-0-eu-west-2.pooler.supabase.com:5432/postgres?sslmode=verify-full&sslrootcert=/app/certs/supabase-prod-ca-2021.crt` |
 | `MITRA_OPERATOR_TOKEN` | yes | 40+ random characters. Guards `/api/v1/admin/*`, webhooks and mandate creation |
 | `MCP_TOKEN` | to serve agents | 40+ random characters. Without it the MCP gateway stays private to the machine |
-| `MITRA_EVM_SETTLEMENT_KEY` | to settle and run the keeper | the engine's testnet key (hex). Its address must be the policy engine the cards name (`0x7823d6be…8116` today) |
+| `MITRA_EVM_SETTLEMENT_KEY` | **yes, to approve or pay anything** | the engine's testnet key (hex). Its address must be the policy engine the cards name (`0x7823d6be…8116` today). Without it the engine starts, but syncs a card as `ENGINE_KEY_NOT_CONFIGURED`, pays nothing, and the keeper does not run |
 | `MITRA_RECEIPT_SIGNER_KEY` | optional | a separate key that signs receipts |
 
 `<PASSWORD>` is the Supabase database password. The project was created from a tool, so
@@ -36,10 +36,10 @@ The connection goes through Supabase's session pooler (the direct host is IPv6-o
 **verifies** Supabase's certificate against the bundled root CA; checked 2026-10-12 against
 this project (the TLS check passed; a wrong password was then refused).
 
-Not set on purpose: `MITRA_BASE_SETTLEMENT_ACCOUNT=vault`, `MITRA_TEMPO_SETTLEMENT_ACCOUNT=vault`
-and `MITRA_EVM_VAULT_HOLDER`. Those configure the single-principal vault rail, which pays
-from the engine's own position; paying from each customer's vault is the next change
-(see shared context, "The engine will pay from the vault owner's position").
+`fly.toml` sets `MITRA_BASE_SETTLEMENT_ACCOUNT=vault` and `MITRA_TEMPO_SETTLEMENT_ACCOUNT=vault`:
+the engine pays through the vault contract, from the position of whichever customer's card
+a settlement is for (`forVault` in `lib/settlement/rails.ts`). `MITRA_EVM_VAULT_HOLDER` is no
+longer needed.
 
 ## Steps
 

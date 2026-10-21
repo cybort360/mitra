@@ -101,6 +101,22 @@ export class MitraVaultTransport {
     this.walletClient = createWalletClient({ chain: opts.chain, transport, account: opts.relayer });
   }
 
+  /**
+   * The same rail, paying from another principal's position for another holder. The
+   * engine key, relayer, vault, chain and tokens are unchanged, so nothing the caller
+   * supplies can widen what this engine may sign: every check in `pay` reads the mandate
+   * the chain holds for (principal, holder, token) and refuses unless it names THIS
+   * engine, and the contract re-checks all of it.
+   */
+  bind(binding: { principal: `0x${string}`; holder: `0x${string}` }): MitraVaultTransport {
+    return new MitraVaultTransport({ ...this.opts, principal: binding.principal, holder: binding.holder });
+  }
+
+  /** Whose position this rail pays from. */
+  get principal(): `0x${string}` {
+    return this.opts.principal;
+  }
+
   /** The payment: an engine-signed permit, submitted to the vault by the relayer. */
   async pay(input: { to: string; token: string; amountAtomic: string; commitment: string }): Promise<{ txHash: `0x${string}` }> {
     // Every refusal needing no network comes first.

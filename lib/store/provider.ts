@@ -421,6 +421,10 @@ export class InMemoryRepository implements EconomicRepository {
     return [...mandates.map((m) => ({ ...m })), ...this.writtenMandates.values()].map((m) => ({ ...m }));
   }
 
+  async upsertChainVault(vault: Vault): Promise<"created" | "refreshed" | "kept"> {
+    return this.ledger.upsertChainVault(vault);
+  }
+
   /** F99: the writer `listMandates` was missing, so a Mandate could only be a fixture. */
   async saveMandate(mandate: Mandate): Promise<void> {
     this.writtenMandates.set(mandate.mandateId, { ...mandate });
